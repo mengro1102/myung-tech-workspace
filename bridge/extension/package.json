@@ -1,0 +1,47 @@
+{
+  "name": "myung-tech-bridge-view",
+  "displayName": "Myung-Tech Bridge View",
+  "description": "명테크 오케스트레이션 브릿지 실시간 시각화 익스텐션",
+  "version": "0.1.0",
+  "publisher": "myung-tech",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Visualization"
+  ],
+  "activationEvents": [
+    "onView:myungTechBridgeView"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "myung-tech-panel",
+          "title": "Myung-Tech",
+          "icon": "$(circuit-board)"
+        }
+      ]
+    },
+    "views": {
+      "myung-tech-panel": [
+        {
+          "type": "webview",
+          "id": "myungTechBridgeView",
+          "name": "Bridge Dashboard"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./"
+  },
+  "devDependencies": {
+    "@types/node": "^25.9.1",
+    "@types/vscode": "^1.85.0",
+    "@vscode/vsce": "^3.9.2",
+    "typescript": "^5.3.0"
+  }
+}

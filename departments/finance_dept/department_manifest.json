@@ -1,0 +1,6 @@
+{
+  "department_name": "금융투자부",
+  "status": "Ready",
+  "assigned_brain": "stepfun/step-3.7-flash:free",
+  "active_skills": ["file_control", "run_command"]
+}

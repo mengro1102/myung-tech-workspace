@@ -1,0 +1,24 @@
+# Python
+preprocessing/venv/
+__pycache__/
+*.pyc
+
+# Node.js
+bridge/extension/node_modules/
+bridge/extension/out/
+
+# Build artifacts
+*.vsix
+
+# OS
+.DS_Store
+Thumbs.db
+
+# PDF source (large binary)
+preprocessing/s41586-025-09761-x.pdf
+
+# Logs
+preprocessing/parser.log
+
+# Stale artifacts
+preprocessing/D/
