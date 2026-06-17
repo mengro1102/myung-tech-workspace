@@ -1,0 +1,8 @@
+{
+  "department_name": "오케스트레이션팀",
+  "status": "Ready",
+  "assigned_brain": "qwen/qwen-2.5-14b-instruct:free",
+  "role": "moderator",
+  "description": "전 부서 에이전트를 지휘·취합하고 디렉터에게 최종 보고하는 마스터 컨트롤 타워",
+  "active_skills": ["task_routing", "result_aggregation", "report_generation", "inter_dept_coordination"]
+}

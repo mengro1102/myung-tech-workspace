@@ -1,0 +1,545 @@
+/* ══════════════════════════════════════════════════
+   명테크 Agent Studio — Dashboard (실시간 모니터)
+   v1.1
+══════════════════════════════════════════════════ */
+
+/* ── Root ── */
+.db-root {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+  background: #07070f;
+  padding: 0;
+}
+
+/* ── Stat strip ── */
+.db-stat-strip {
+  display: flex;
+  gap: 0;
+  border-bottom: 1px solid rgba(255,255,255,0.07);
+  flex-shrink: 0;
+}
+
+.db-stat-pill {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 16px;
+  border-right: 1px solid rgba(255,255,255,0.05);
+}
+.db-stat-pill:last-child { border-right: none; }
+
+.db-stat-pill-left {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.db-stat-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.db-stat-label {
+  font-size: 10px;
+  color: #64748b;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  font-weight: 600;
+}
+
+.db-stat-value {
+  font-size: 15px;
+  font-weight: 700;
+  color: #e2e8f0;
+  line-height: 1;
+}
+
+.db-stat-sub {
+  font-size: 10px;
+  color: #374151;
+}
+
+/* ── Main 3-column ── */
+.db-main {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 1fr 1.15fr 0.85fr;
+  gap: 0;
+  overflow: hidden;
+  min-height: 0;
+}
+
+.db-col {
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid rgba(255,255,255,0.07);
+  overflow: hidden;
+  min-height: 0;
+}
+.db-col:last-child { border-right: none; }
+
+.db-col-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px 9px;
+  border-bottom: 1px solid rgba(255,255,255,0.07);
+  flex-shrink: 0;
+}
+
+.db-col-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: #94a3b8;
+  letter-spacing: 0.04em;
+  flex: 1;
+}
+
+.live-tag {
+  font-size: 9px;
+  font-weight: 700;
+  color: #10b981;
+  background: rgba(16,185,129,0.12);
+  border: 1px solid rgba(16,185,129,0.3);
+  border-radius: 4px;
+  padding: 1px 6px;
+  letter-spacing: 0.08em;
+  animation: live-pulse 2s ease-in-out infinite;
+}
+
+@keyframes live-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+
+/* ══ Col 1: 통신 흐름 ══ */
+.db-flow-col {}
+
+.db-flow-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 6px 0;
+}
+
+.db-empty {
+  padding: 32px 16px;
+  font-size: 12px;
+  color: #374151;
+  text-align: center;
+  line-height: 1.6;
+}
+
+.db-flow-item {
+  padding: 8px 14px;
+  border-left: 2px solid transparent;
+  transition: background 0.12s;
+  cursor: default;
+}
+.db-flow-item:hover {
+  background: rgba(255,255,255,0.025);
+}
+
+.db-flow-route {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-bottom: 4px;
+  flex-wrap: wrap;
+}
+
+.db-flow-tag {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: 3px;
+  border: 1px solid;
+  letter-spacing: 0.03em;
+}
+
+.db-flow-arrow {
+  font-size: 10px;
+  color: #374151;
+}
+
+.db-flow-time {
+  margin-left: auto;
+  font-size: 10px;
+  color: #374151;
+  font-variant-numeric: tabular-nums;
+}
+
+.db-flow-text {
+  font-size: 12px;
+  color: #94a3b8;
+  line-height: 1.5;
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* ══ Col 2: 워크플로우 실행 ══ */
+.db-exec-col {
+  background: rgba(255,255,255,0.01);
+}
+
+.db-multimodal-hint {
+  font-size: 10px;
+  color: #a855f7;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+
+.db-mode-tabs {
+  display: flex;
+  gap: 0;
+  border-bottom: 1px solid rgba(255,255,255,0.07);
+  flex-shrink: 0;
+}
+
+.db-mode-tab {
+  flex: 1;
+  padding: 8px 6px;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: #4b5563;
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s;
+  font-family: inherit;
+}
+.db-mode-tab:hover { color: #94a3b8; }
+.db-mode-tab.active {
+  color: #e2e8f0;
+  border-bottom-color: #10b981;
+  background: rgba(16,185,129,0.04);
+}
+
+.db-input-area {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px 6px;
+  flex-shrink: 0;
+}
+
+/* File drop zone */
+.db-file-drop {
+  border: 1.5px dashed rgba(255,255,255,0.12);
+  border-radius: 8px;
+  padding: 12px;
+  cursor: pointer;
+  transition: border-color 0.15s;
+  background: rgba(255,255,255,0.02);
+}
+.db-file-drop:hover {
+  border-color: rgba(16,185,129,0.4);
+  background: rgba(16,185,129,0.04);
+}
+
+.db-file-placeholder {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  color: #4b5563;
+  font-size: 12px;
+}
+
+.db-file-attached {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.db-file-preview-img {
+  width: 40px;
+  height: 40px;
+  object-fit: cover;
+  border-radius: 4px;
+  border: 1px solid rgba(255,255,255,0.1);
+}
+
+.db-file-icon { font-size: 28px; }
+
+.db-file-name {
+  flex: 1;
+  font-size: 12px;
+  color: #94a3b8;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.db-file-remove {
+  background: none;
+  border: none;
+  color: #4b5563;
+  cursor: pointer;
+  padding: 2px 4px;
+  font-size: 12px;
+}
+.db-file-remove:hover { color: #ef4444; }
+
+/* Image URL input */
+.db-url-input {
+  width: 100%;
+  padding: 7px 10px;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 6px;
+  color: #e2e8f0;
+  font-size: 12px;
+  font-family: inherit;
+  box-sizing: border-box;
+  transition: border-color 0.15s;
+}
+.db-url-input::placeholder { color: #374151; }
+.db-url-input:focus {
+  outline: none;
+  border-color: rgba(16,185,129,0.4);
+}
+
+/* Textarea */
+.db-task-input {
+  width: 100%;
+  resize: none;
+  padding: 10px 12px;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 8px;
+  color: #e2e8f0;
+  font-size: 12.5px;
+  font-family: inherit;
+  line-height: 1.55;
+  box-sizing: border-box;
+  transition: border-color 0.15s;
+}
+.db-task-input::placeholder { color: #374151; }
+.db-task-input:focus {
+  outline: none;
+  border-color: rgba(16,185,129,0.4);
+}
+
+/* Exec footer */
+.db-exec-footer {
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+  padding: 8px 12px 10px;
+  flex-shrink: 0;
+  border-bottom: 1px solid rgba(255,255,255,0.07);
+}
+
+.db-dept-select-wrap {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.db-dept-label {
+  font-size: 10px;
+  color: #64748b;
+  letter-spacing: 0.05em;
+}
+
+.db-dept-select {
+  padding: 7px 8px;
+  background: rgba(255,255,255,0.05);
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 6px;
+  color: #e2e8f0;
+  font-size: 11.5px;
+  font-family: inherit;
+  cursor: pointer;
+  transition: border-color 0.15s;
+}
+.db-dept-select:focus {
+  outline: none;
+  border-color: rgba(16,185,129,0.4);
+}
+.db-dept-select option {
+  background: #1a1a2e;
+  color: #e2e8f0;
+}
+
+/* Run button */
+.db-run-btn {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 16px;
+  background: linear-gradient(135deg, #059669, #0d9668);
+  border: none;
+  border-radius: 7px;
+  color: white;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.15s;
+  font-family: inherit;
+}
+.db-run-btn:hover:not(:disabled) {
+  background: linear-gradient(135deg, #10b981, #0d9668);
+  transform: translateY(-1px);
+}
+.db-run-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+  transform: none;
+}
+.db-run-btn.running {
+  background: linear-gradient(135deg, #0d9668, #047857);
+  animation: run-pulse 1.5s ease-in-out infinite;
+}
+@keyframes run-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.8; }
+}
+
+.db-spinner {
+  width: 12px;
+  height: 12px;
+  border: 2px solid rgba(255,255,255,0.3);
+  border-top-color: white;
+  border-radius: 50%;
+  animation: spin 0.6s linear infinite;
+}
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* Execution log */
+.db-exec-log {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+  border-top: none;
+}
+
+.db-exec-log-title {
+  padding: 7px 12px 6px;
+  font-size: 10px;
+  font-weight: 700;
+  color: #374151;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  border-top: 1px solid rgba(255,255,255,0.05);
+  flex-shrink: 0;
+}
+
+.db-exec-log-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 4px 0 8px;
+}
+
+.db-log-line {
+  display: flex;
+  gap: 8px;
+  padding: 3px 12px;
+  font-size: 11.5px;
+  line-height: 1.5;
+  font-family: 'JetBrains Mono', 'Consolas', monospace;
+}
+.db-log-ts {
+  color: #374151;
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+}
+.db-log-info    { color: #94a3b8; }
+.db-log-success { color: #10b981; }
+.db-log-error   { color: #ef4444; }
+.db-log-warn    { color: #f59e0b; }
+
+/* ══ Col 3: 에이전트 상태 ══ */
+.db-agents-col {}
+
+.db-agent-count {
+  font-size: 11px;
+  color: #4b5563;
+  font-weight: 600;
+}
+
+.db-agent-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 4px 0;
+}
+
+.db-agent-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  transition: background 0.1s;
+}
+.db-agent-row:hover {
+  background: rgba(255,255,255,0.025);
+}
+
+.db-agent-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  transition: background 0.3s;
+}
+
+.db-agent-name {
+  flex: 1;
+  font-size: 12.5px;
+  color: #cbd5e1;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.db-agent-dept {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  flex-shrink: 0;
+}
+
+.db-agent-badge {
+  font-size: 9px;
+  font-weight: 600;
+  padding: 2px 7px;
+  border-radius: 20px;
+  border: 1px solid;
+  letter-spacing: 0.04em;
+  flex-shrink: 0;
+}
+.db-agent-badge.idle {
+  color: #374151;
+  border-color: rgba(55,65,81,0.4);
+  background: transparent;
+}
+.db-agent-badge.active {
+  /* inline style handles color */
+}
+
+/* ── scrollbars ── */
+.db-flow-list::-webkit-scrollbar,
+.db-agent-list::-webkit-scrollbar,
+.db-exec-log-body::-webkit-scrollbar {
+  width: 3px;
+}
+.db-flow-list::-webkit-scrollbar-thumb,
+.db-agent-list::-webkit-scrollbar-thumb,
+.db-exec-log-body::-webkit-scrollbar-thumb {
+  background: rgba(255,255,255,0.1);
+  border-radius: 2px;
+}

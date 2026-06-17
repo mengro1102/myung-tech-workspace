@@ -1,0 +1,23 @@
+[Unit]
+Description=Myung-Tech Orchestration Core (FastAPI)
+After=network.target docker.service
+Requires=docker.service
+
+[Service]
+Type=simple
+User=%i
+WorkingDirectory=/home/%i/myung-tech-workspace
+ExecStart=/home/%i/myung-tech-workspace/scripts/start_orchestrator.sh
+Restart=always
+RestartSec=5s
+StartLimitBurst=10
+StartLimitInterval=60s
+
+Environment=PYTHONUNBUFFERED=1
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=myungtech-orchestrator
+
+[Install]
+WantedBy=multi-user.target

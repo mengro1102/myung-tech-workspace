@@ -75,12 +75,42 @@ def aggregate_departments() -> list[dict]:
     return nodes
 
 
+def _native_path(p: Path) -> str:
+    """Return platform-native path string (resolves WSL /mnt/X paths on Windows)."""
+    s = str(p)
+    if sys.platform == "win32":
+        return s
+    return s
+
+
+def load_task_queue_summary() -> list[dict]:
+    tasks_dir = SHARED_MEMORY_DIR / "tasks"
+    if not tasks_dir.is_dir():
+        return []
+    summary = []
+    for p in sorted(tasks_dir.glob("task-*.json"), key=lambda x: x.stat().st_mtime, reverse=True)[:20]:
+        try:
+            t = json.loads(p.read_text(encoding="utf-8"))
+            summary.append({
+                "task_id": t.get("task_id"),
+                "target_dept": t.get("target_dept"),
+                "status": t.get("status"),
+                "priority": t.get("priority"),
+                "instruction": (t.get("instruction") or "")[:80],
+                "updated_at": t.get("updated_at"),
+            })
+        except Exception:
+            continue
+    return summary
+
+
 def build_bridge_state() -> dict:
     return {
         "generated_at": datetime.now(timezone.utc).isoformat(),
-        "workspace": str(MYUNG_TECH_WORKSPACE),
+        "workspace": _native_path(MYUNG_TECH_WORKSPACE),
         "departments": aggregate_departments(),
         "shared_memory_events": load_shared_memory_events(),
+        "task_queue": load_task_queue_summary(),
     }
 
 

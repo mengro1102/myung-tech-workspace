@@ -44,7 +44,8 @@ def log_error(message: str) -> None:
     ts = datetime.now().isoformat(timespec="seconds")
     line = f"[{ts}] {message}\n"
     try:
-        (BASE_DIR / "parser.log").write_text(line, encoding="utf-8", errors="replace")
+        with open(BASE_DIR / "parser.log", "a", encoding="utf-8", errors="replace") as f:
+            f.write(line)
     except Exception:
         pass
     print(line, end="", file=sys.stderr)

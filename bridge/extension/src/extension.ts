@@ -37,8 +37,7 @@ class BridgeViewProvider implements vscode.WebviewViewProvider {
     // Load static shell ONCE — all subsequent updates via postMessage
     webviewView.webview.html = getStaticShellHtml();
 
-    // Send initial data after shell is loaded
-    setTimeout(() => this.pushState(), 300);
+    // Initial data is pushed when WebView signals ready via postMessage
 
     // Watch bridge_state.json for changes → push data only
     this.setupFileWatcher();
@@ -91,7 +90,7 @@ class BridgeViewProvider implements vscode.WebviewViewProvider {
     this.watcher.onDidChange(onFileChange);
     this.watcher.onDidCreate(onFileChange);
 
-    this.context.subscriptions.push(this.watcher);
+    // Do NOT push to context.subscriptions — disposed manually in onDidDispose to avoid double-dispose
   }
 
   /** Push JSON data to WebView via postMessage — NO HTML reload */
@@ -106,12 +105,16 @@ class BridgeViewProvider implements vscode.WebviewViewProvider {
   /** Handle incoming RPC messages from WebView */
   private handleWebviewMessage(msg: { command: string; payload?: unknown }) {
     switch (msg.command) {
+      case 'ready':
+        this.pushState();
+        break;
       case 'requestRefresh':
         this.pushState();
         break;
       case 'openManifest':
         if (typeof msg.payload === 'string') {
-          const uri = vscode.Uri.file(msg.payload);
+          const resolved = resolveWslPath(msg.payload);
+          const uri = vscode.Uri.file(resolved);
           vscode.workspace.openTextDocument(uri).then(doc => {
             vscode.window.showTextDocument(doc);
           });
@@ -126,6 +129,17 @@ class BridgeViewProvider implements vscode.WebviewViewProvider {
         break;
     }
   }
+}
+
+/** Converts WSL paths (/mnt/d/...) to Windows paths (D:\...) on win32. */
+function resolveWslPath(p: string): string {
+  if (process.platform === 'win32') {
+    const m = p.match(/^\/mnt\/([a-z])(\/.*)?$/i);
+    if (m) {
+      return m[1].toUpperCase() + ':' + (m[2] ?? '').replace(/\//g, '\\');
+    }
+  }
+  return p;
 }
 
 /**
@@ -185,6 +199,22 @@ function getStaticShellHtml(): string {
     .badge.status-ready { background: #2d4f47; color: #4ec9b0; }
     .badge.brain { background: #3b3147; color: #c586c0; }
     .badge.skill { background: #2b3d4f; color: #9cdcfe; }
+    .task-card {
+      background: var(--vscode-editorWidget-background, #252526);
+      border: 1px solid var(--vscode-panel-border, #333);
+      border-radius: 6px; padding: 8px 12px; margin-bottom: 6px;
+      display: flex; align-items: center; gap: 8px;
+    }
+    .task-status {
+      flex-shrink: 0; font-size: 10px; padding: 2px 6px; border-radius: 3px; font-family: monospace;
+    }
+    .task-status.pending   { background: #3b3427; color: #cca700; }
+    .task-status.in_progress { background: #1e3a5f; color: #9cdcfe; }
+    .task-status.done      { background: #2d4f47; color: #4ec9b0; }
+    .task-status.failed    { background: #4f2d2d; color: #f14c4c; }
+    .task-body { flex: 1; min-width: 0; }
+    .task-instruction { font-size: 12px; color: var(--vscode-foreground, #ccc); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .task-meta { font-size: 10px; color: var(--vscode-descriptionForeground, #666); margin-top: 2px; }
     .events-section { margin-top: 16px; }
     .event-card {
       background: var(--vscode-editorWidget-background, #252526);
@@ -237,6 +267,13 @@ function getStaticShellHtml(): string {
     </div>
   </div>
 
+  <div class="events-section">
+    <div class="section-title">Task Queue</div>
+    <div id="task-queue-container">
+      <div class="empty-state">태스크 없음</div>
+    </div>
+  </div>
+
   <div class="canvas-container">
     <canvas id="topology-canvas" width="320" height="180"></canvas>
   </div>
@@ -249,9 +286,15 @@ function getStaticShellHtml(): string {
       vscode.postMessage({ command: 'requestRefresh' });
     });
 
-    function openManifest(manifestPath) {
-      vscode.postMessage({ command: 'openManifest', payload: manifestPath });
-    }
+    document.getElementById('dept-grid').addEventListener('click', (e) => {
+      const card = e.target.closest('[data-manifest-path]');
+      if (card) {
+        vscode.postMessage({ command: 'openManifest', payload: card.dataset.manifestPath });
+      }
+    });
+
+    // Signal extension that WebView is ready
+    vscode.postMessage({ command: 'ready' });
 
     // ─── RPC: Receive messages FROM extension ───
     window.addEventListener('message', (event) => {
@@ -284,7 +327,7 @@ function getStaticShellHtml(): string {
                               (dept.error_detail ? 'error' : 'unknown');
           const skills = (dept.active_skills || [])
             .map(s => '<span class="badge skill">' + escHtml(s) + '</span>').join('');
-          html += '<div class="dept-card ' + statusClass + '" onclick="openManifest(\\''+escHtml(dept.manifest_path || '')+'\\')">'+
+          html += '<div class="dept-card ' + statusClass + '" data-manifest-path="' + escHtml(dept.manifest_path || '') + '">'+
             '<div class="dept-name">' + escHtml(dept.name || dept.id) + '</div>' +
             '<div class="dept-meta">' +
               '<span class="badge status-ready">' + escHtml(dept.status) + '</span>' +
@@ -316,6 +359,23 @@ function getStaticShellHtml(): string {
           '</div>';
         });
         evContainer.innerHTML = html;
+      }
+
+      // Task Queue
+      const tqContainer = document.getElementById('task-queue-container');
+      const tasks = state.task_queue || [];
+      if (tasks.length === 0) {
+        tqContainer.innerHTML = '<div class="empty-state">태스크 없음</div>';
+      } else {
+        tqContainer.innerHTML = tasks.map(t => {
+          const statusClass = escHtml(t.status || 'pending');
+          return '<div class="task-card">' +
+            '<span class="task-status ' + statusClass + '">' + escHtml(t.status) + '</span>' +
+            '<div class="task-body">' +
+              '<div class="task-instruction">' + escHtml(t.instruction || '') + '</div>' +
+              '<div class="task-meta">' + escHtml(t.target_dept || '') + ' · p' + escHtml(String(t.priority ?? 5)) + ' · ' + escHtml(t.updated_at || '') + '</div>' +
+            '</div></div>';
+        }).join('');
       }
 
       // Topology Canvas

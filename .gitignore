@@ -1,24 +1,59 @@
-# Python
-preprocessing/venv/
+# ── Python ───────────────────────────────────────
 __pycache__/
-*.pyc
+*.py[cod]
+*.pyo
+.Python
+venv/
+env/
+*.egg-info/
 
-# Node.js
-bridge/extension/node_modules/
+# ── 환경변수 / 시크릿 ────────────────────────────
+.env
+.env.*
+secrets.json
+
+# ── 런타임 파일 ──────────────────────────────────
+.pids
+logs/
+*.log
+
+# ── 공유 메모리 이벤트 (런타임 생성) ──────────────
+shared_memory/evt-*.json
+shared_memory/tasks/
+
+# ── Node.js ──────────────────────────────────────
+node_modules/
+npm-debug.log*
+dist/
+.vite/
+
+# ── VS Code Extension 빌드 ────────────────────────
 bridge/extension/out/
+bridge/extension/node_modules/
 
-# Build artifacts
-*.vsix
-
-# OS
+# ── OS ───────────────────────────────────────────
 .DS_Store
 Thumbs.db
+desktop.ini
 
-# PDF source (large binary)
-preprocessing/s41586-025-09761-x.pdf
+# ── IDE ──────────────────────────────────────────
+.idea/
+*.swp
 
-# Logs
-preprocessing/parser.log
+# ── 모델 / 대용량 파일 ───────────────────────────
+*.bin
+*.safetensors
+*.gguf
+*.pt
+*.pth
 
-# Stale artifacts
-preprocessing/D/
+# ── 전처리 venv ───────────────────────────────────
+preprocessing/venv/
+
+# ── 브릿지 스냅샷 (런타임 생성) ──────────────────
+bridge/bridge_state.json
+# ── Claude 세션 파일 ──────────────────────────────
+.claude/
+
+# ── 빌드 산출물 ──────────────────────────────────
+*.vsix

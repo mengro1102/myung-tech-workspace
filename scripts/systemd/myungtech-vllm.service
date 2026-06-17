@@ -1,0 +1,30 @@
+[Unit]
+Description=Myung-Tech vLLM Inference Server
+After=network.target
+Wants=network.target
+
+[Service]
+Type=simple
+User=%i
+WorkingDirectory=/home/%i/myung-tech-workspace
+ExecStart=/home/%i/myung-tech-workspace/scripts/start_vllm.sh
+Restart=on-failure
+RestartSec=15s
+RestartPreventExitStatus=130 143
+# 크래시 폭풍 방지: 5분 내 5회 이상 재시작 시 중단
+StartLimitBurst=5
+StartLimitInterval=300s
+
+# GPU 메모리 누수 방지: 재시작 전 CUDA 컨텍스트 정리 대기
+TimeoutStopSec=30s
+KillSignal=SIGTERM
+
+Environment=PYTHONUNBUFFERED=1
+Environment=CUDA_VISIBLE_DEVICES=0
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=myungtech-vllm
+
+[Install]
+WantedBy=multi-user.target

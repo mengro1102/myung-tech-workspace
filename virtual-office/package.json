@@ -1,0 +1,45 @@
+{
+  "name": "myung-tech-studio",
+  "version": "1.1.0",
+  "description": "명테크 Agent Studio - 멀티에이전트 오케스트레이션 플랫폼",
+  "private": true,
+  "type": "module",
+  "main": "electron/main.js",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "electron": "NODE_ENV=development electron .",
+    "electron:build": "npm run build && electron-builder",
+    "generate-sprites": "node scripts/generate-sprites.mjs",
+    "init-v1": "node scripts/init-v1.mjs"
+  },
+  "dependencies": {
+    "phaser": "^3.80.0",
+    "react": "^18.3.0",
+    "react-dom": "^18.3.0",
+    "react-router-dom": "^6.26.0"
+  },
+  "devDependencies": {
+    "@napi-rs/canvas": "^1.0.0",
+    "@types/react": "^18.3.0",
+    "@types/react-dom": "^18.3.0",
+    "@vitejs/plugin-react": "^4.3.0",
+    "autoprefixer": "^10.4.0",
+    "electron": "^28.0.0",
+    "electron-builder": "^24.0.0",
+    "postcss": "^8.4.0",
+    "tailwindcss": "^3.4.0",
+    "typescript": "^5.5.0",
+    "vite": "^5.4.0"
+  },
+  "build": {
+    "appId": "com.myungtech.office",
+    "productName": "명테크 Agent Studio",
+    "directories": { "output": "release" },
+    "files": ["dist/**/*", "electron/**/*", "public/**/*"],
+    "win": { "target": "nsis", "icon": "public/icon.png" },
+    "mac": { "target": "dmg", "icon": "public/icon.icns" },
+    "linux": { "target": "AppImage" }
+  }
+}

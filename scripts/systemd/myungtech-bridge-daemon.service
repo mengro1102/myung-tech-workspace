@@ -1,0 +1,20 @@
+[Unit]
+Description=Myung-Tech Bridge Daemon (File Watcher)
+After=network.target
+
+[Service]
+Type=simple
+User=%i
+WorkingDirectory=/home/%i/myung-tech-workspace
+ExecStart=/home/%i/myung-tech-workspace/orchestrator/venv/bin/python bridge/bridge_daemon.py
+Restart=always
+RestartSec=3s
+
+Environment=PYTHONUNBUFFERED=1
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=myungtech-bridge
+
+[Install]
+WantedBy=multi-user.target

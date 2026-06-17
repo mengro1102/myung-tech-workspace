@@ -1,0 +1,23 @@
+{
+  "name": "myungtech-office",
+  "displayName": "명테크 AI 오피스",
+  "description": "명테크 AI Agent ERP 워크스페이스",
+  "version": "1.0.0",
+  "engines": { "vscode": "^1.75.0" },
+  "categories": ["Other"],
+  "activationEvents": [],
+  "main": "./extension.js",
+  "contributes": {
+    "commands": [{
+      "command": "myungtech.openOffice",
+      "title": "명테크: 오피스 열기",
+      "icon": "$(server)"
+    }],
+    "menus": {
+      "editor/title": [{
+        "command": "myungtech.openOffice",
+        "group": "navigation"
+      }]
+    }
+  }
+}

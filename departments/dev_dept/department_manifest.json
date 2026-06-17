@@ -1,0 +1,8 @@
+{
+  "department_name": "개발/자동화팀",
+  "status": "Ready",
+  "assigned_brain": "qwen/qwen-2.5-14b-instruct:free",
+  "role": "development",
+  "description": "코드 생성, 인프라 자동화 스크립트 작성, QA 검증 및 테스트를 전담하는 기술 부서",
+  "active_skills": ["code_generation", "script_automation", "qa_testing", "code_review", "refactoring"]
+}
