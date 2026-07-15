@@ -9,7 +9,28 @@ set -e
 WORKSPACE_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 ENV_FILE="$WORKSPACE_DIR/.env"
 LOG_DIR="$WORKSPACE_DIR/logs"
-OLLAMA_MODEL="qwen2.5-coder:7b"
+OLLAMA_MODEL="qwen2.5:3b"
+
+# Ollama 자동 감지: localhost → Windows 호스트 IP 순서
+if curl -sf "http://localhost:11434/api/tags" &>/dev/null; then
+    export OLLAMA_HOST="http://localhost:11434"
+    log "Ollama 로컬 감지됨"
+else
+    WIN_HOST=$(cat /etc/resolv.conf | grep nameserver | awk '{print $2}')
+    if [ -n "$WIN_HOST" ] && curl -sf "http://${WIN_HOST}:11434/api/tags" &>/dev/null; then
+        export OLLAMA_HOST="http://${WIN_HOST}:11434"
+        log "Ollama Windows 호스트 감지됨 → $OLLAMA_HOST"
+        # .env에 자동 기록 (이미 없으면)
+        if ! grep -q "^OLLAMA_HOST=" "$ENV_FILE" 2>/dev/null; then
+            echo "OLLAMA_HOST=\"$OLLAMA_HOST\"" >> "$ENV_FILE"
+            echo "OLLAMA_BASE_URL=\"$OLLAMA_HOST\"" >> "$ENV_FILE"
+        fi
+    else
+        export OLLAMA_HOST="http://localhost:11434"
+        warn "Ollama 미감지. 나중에 실행 후 재시도하세요."
+    fi
+fi
+export OLLAMA_BASE_URL="$OLLAMA_HOST"
 
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
@@ -60,11 +81,53 @@ log "$PYTHON_VER 확인됨"
 
 # ── 3. Python 패키지 설치 ─────────────────────────────────────
 info "Python 패키지 확인 중..."
+
+# pip 확인 및 설치
+if ! python3 -m pip --version &>/dev/null; then
+    warn "pip 없음. 설치 중..."
+    sudo apt-get install -y python3-pip -q
+fi
+
 python3 -c "import telebot" 2>/dev/null || {
     warn "pyTelegramBotAPI 없음. 설치 중..."
-    pip3 install pyTelegramBotAPI -q
+    python3 -m pip install pyTelegramBotAPI -q
     log "pyTelegramBotAPI 설치 완료"
 }
+
+python3 -c "import psutil" 2>/dev/null || {
+    warn "psutil 없음. 설치 중..."
+    # 방법 1: apt
+    sudo apt-get install -y python3-psutil -q 2>/dev/null
+    # 방법 2: pip (apt 실패 시)
+    python3 -c "import psutil" 2>/dev/null || python3 -m pip install psutil -q 2>/dev/null || true
+    # 방법 3: wheel 수동 설치 (pip도 없는 경우 — Ubuntu 22.04 WSL 환경)
+    if ! python3 -c "import psutil" 2>/dev/null; then
+        warn "pip 없음. wheel 수동 설치 시도..."
+        WHL_DEST="/tmp/psutil_whl"
+        mkdir -p "$WHL_DEST" ~/.local/lib/python3.$(python3 -c "import sys; print(f'{sys.version_info.minor}')")/site-packages
+        PYVER="3.$(python3 -c "import sys; print(sys.version_info.minor)")"
+        # PyPI JSON API로 wheel URL 조회 후 다운로드
+        WHL_URL=$(curl -s "https://pypi.org/pypi/psutil/json" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+urls = d.get('urls', [])
+for u in urls:
+    fn = u['filename']
+    if 'manylinux' in fn and 'x86_64' in fn and 'cp310' in fn or 'abi3' in fn:
+        print(u['url']); break
+" 2>/dev/null)
+        if [ -n "$WHL_URL" ]; then
+            curl -sL "$WHL_URL" -o "$WHL_DEST/psutil.whl"
+            python3 -c "
+import zipfile, os
+with zipfile.ZipFile('$WHL_DEST/psutil.whl', 'r') as z:
+    z.extractall(os.path.expanduser('~/.local/lib/python${PYVER}/site-packages'))
+" 2>/dev/null
+        fi
+    fi
+    python3 -c "import psutil" 2>/dev/null && log "psutil 설치 완료" || warn "psutil 설치 실패 — 클러스터 성능 지표가 0으로 표시됩니다"
+}
+
 log "Python 패키지 OK"
 
 # ── 4. Ollama 확인 및 설치 ────────────────────────────────────
@@ -113,6 +176,7 @@ PID_FILE="$WORKSPACE_DIR/.pids"
 
 # ── 9. API 서버 시작 ─────────────────────────────────────────
 info "API 서버 시작 중 (포트 9000)..."
+export GRAPHRAG_KB_PATH="${GRAPHRAG_KB_PATH:-/mnt/d/AI_Workspace/mrlee-wiki-graphrag}"
 python3 "$WORKSPACE_DIR/server.py" > "$LOG_DIR/server.log" 2>&1 &
 SERVER_PID=$!
 echo "server=$SERVER_PID" >> "$PID_FILE"

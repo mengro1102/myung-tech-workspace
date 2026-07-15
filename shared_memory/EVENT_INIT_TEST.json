@@ -1,7 +1,0 @@
-{
-  "event_id": "test-uuid-0001",
-  "sender": "research_dept",
-  "target": "finance_dept",
-  "payload": "Nature RL 논문 파싱 완료. 투자 전략 백테스팅 연동 준비 바람.",
-  "timestamp": "2026-06-04T12:00:00Z"
-}

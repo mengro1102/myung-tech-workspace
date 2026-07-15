@@ -1,8 +1,9 @@
 {
   "department_name": "학술연구팀",
   "status": "Ready",
-  "assigned_brain": "qwen/qwen-2.5-14b-instruct:free",
+  "assigned_brain": "qwen2.5:7b",
   "role": "research",
   "description": "데이터 분석, 학술 리서치, 심층 크롤링을 전담하며 인사이트를 금융팀과 콘텐츠팀에 공급",
   "active_skills": ["data_analysis", "academic_research", "deep_crawling", "markdown_parsing", "insight_extraction"]
 }
+

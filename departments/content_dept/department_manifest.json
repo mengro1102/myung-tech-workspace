@@ -1,8 +1,9 @@
 {
   "department_name": "콘텐츠/디자인팀",
   "status": "Ready",
-  "assigned_brain": "qwen/qwen-2.5-14b-instruct:free",
+  "assigned_brain": "qwen2.5:7b",
   "role": "content",
   "description": "기술 문서·분석 결과를 SNS 콘텐츠·UI 설계로 재가공하는 크리에이티브 부서",
   "active_skills": ["content_writing", "visual_design", "html_css", "sns_marketing", "card_news", "tailwind"]
 }
+

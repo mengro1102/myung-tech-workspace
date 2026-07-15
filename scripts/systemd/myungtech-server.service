@@ -1,0 +1,19 @@
+[Unit]
+Description=Myung-Tech API Server (server.py :9000)
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/mnt/d/myung-tech-workspace
+ExecStart=/bin/bash /mnt/d/myung-tech-workspace/scripts/start_server.sh
+Restart=always
+RestartSec=5s
+
+Environment=PYTHONUNBUFFERED=1
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=myungtech-server
+
+[Install]
+WantedBy=default.target

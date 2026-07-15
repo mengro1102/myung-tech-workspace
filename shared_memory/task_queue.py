@@ -90,6 +90,17 @@ def get_task(task_id: str) -> dict | None:
         return None
 
 
+def delete_task(task_id: str) -> bool:
+    path = _task_path(task_id)
+    if path.exists():
+        try:
+            path.unlink()
+            return True
+        except Exception:
+            return False
+    return False
+
+
 if __name__ == "__main__":
     t = enqueue("orchestrator", "research_dept", "RL 논문 요약 후 핵심 알고리즘 추출", priority=8)
     print(json.dumps(t, ensure_ascii=False, indent=2))

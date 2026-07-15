@@ -27,7 +27,12 @@ import task_queue
 import message_broker
 
 # ── 백엔드 설정 ─────────────────────────────────────────
-OLLAMA_BASE_URL     = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
+_ollama_raw      = os.environ.get("OLLAMA_BASE_URL") or os.environ.get("OLLAMA_HOST", "http://localhost:11434")
+# OLLAMA_HOST=0.0.0.0 처럼 scheme이 없는 경우 http://localhost:11434로 정규화
+if _ollama_raw and not _ollama_raw.startswith("http"):
+    OLLAMA_BASE_URL = "http://localhost:11434"
+else:
+    OLLAMA_BASE_URL = _ollama_raw or "http://localhost:11434"
 OLLAMA_CHAT_URL     = f"{OLLAMA_BASE_URL}/v1/chat/completions"
 OPENROUTER_CHAT_URL = "https://openrouter.ai/api/v1/chat/completions"
 OPENROUTER_API_KEY  = os.environ.get("OPENROUTER_API_KEY", "")
@@ -37,13 +42,13 @@ USE_OLLAMA = not bool(OPENROUTER_API_KEY)
 
 # 부서별 Ollama 모델 매핑 (manifest의 assigned_brain이 OpenRouter 형식일 때 대체)
 OLLAMA_MODEL_MAP = {
-    "orchestration_dept": "qwen2.5-coder:7b",
-    "research_dept":      "qwen2.5-coder:7b",
-    "finance_dept":       "qwen2.5-coder:7b",
-    "dev_dept":           "qwen2.5-coder:7b",
-    "content_dept":       "qwen2.5-coder:7b",
+    "orchestration_dept": "qwen2.5:7b",
+    "research_dept":      "qwen2.5:7b",
+    "finance_dept":       "qwen2.5:7b",
+    "dev_dept":           "qwen2.5:7b",
+    "content_dept":       "qwen2.5:7b",
 }
-OLLAMA_DEFAULT_MODEL = "qwen2.5-coder:7b"
+OLLAMA_DEFAULT_MODEL = "qwen2.5:7b"
 
 POLL_INTERVAL   = 3.0   # seconds between queue polls
 REQUEST_TIMEOUT = 300   # seconds

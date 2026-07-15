@@ -1,0 +1,19 @@
+[Unit]
+Description=Myung-Tech Agent Dispatcher (run.py dispatch daemon)
+After=network-online.target myungtech-server.service
+
+[Service]
+Type=simple
+WorkingDirectory=/mnt/d/myung-tech-workspace
+ExecStart=/bin/bash /mnt/d/myung-tech-workspace/scripts/start_dispatcher.sh
+Restart=always
+RestartSec=5s
+
+Environment=PYTHONUNBUFFERED=1
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=myungtech-dispatcher
+
+[Install]
+WantedBy=default.target
