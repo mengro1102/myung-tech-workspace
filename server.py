@@ -92,6 +92,37 @@ OLLAMA_HOST = _detect_ollama_host()
 
 PORT = int(os.environ.get("API_PORT", 9000))
 
+# ── Ollama 상태 프로브 캐시 ───────────────────────────────────
+# Ollama가 내려가 있으면 연결 시도가 TCP 타임아웃까지 수 초 블로킹된다. /api/health는
+# UI가 10초마다 폴링하므로 매 요청 프로브하면 응답이 계속 느려진다. 성공은 짧게,
+# 실패는 조금 더 길게 캐시해 실패 시 반복 대기를 피한다.
+_OLLAMA_CACHE = {"at": 0.0, "ok": False, "err": ""}
+_OLLAMA_TTL_OK = 5.0
+_OLLAMA_TTL_ERR = 15.0
+_ollama_cache_lock = threading.Lock()
+
+
+def _probe_ollama_cached() -> tuple[bool, str]:
+    """(ok, error) 반환. TTL 안이면 캐시된 값을 즉시 반환."""
+    import urllib.request as _ur
+
+    now = time.time()
+    with _ollama_cache_lock:
+        ttl = _OLLAMA_TTL_OK if _OLLAMA_CACHE["ok"] else _OLLAMA_TTL_ERR
+        if _OLLAMA_CACHE["at"] and (now - _OLLAMA_CACHE["at"]) < ttl:
+            return _OLLAMA_CACHE["ok"], _OLLAMA_CACHE["err"]
+
+    ok, err = False, ""
+    try:
+        with _ur.urlopen(f"{OLLAMA_HOST}/api/tags", timeout=2) as r:
+            ok = r.status == 200
+    except Exception as e:  # noqa: BLE001
+        err = str(e)[:80]
+
+    with _ollama_cache_lock:
+        _OLLAMA_CACHE.update(at=time.time(), ok=ok, err=err)
+    return ok, err
+
 
 # ── 단기기억(GraphRAG) 헬퍼 ──────────────────────────────────
 def _kb_git(*args, timeout=30):
@@ -298,15 +329,10 @@ class Handler(BaseHTTPRequestHandler):
 
         # ── GET /api/health  (상세 서비스 헬스체크)
         if path == "/api/health":
-            import urllib.request as _ur
-
-            # Ollama/vLLM 체크
-            vllm_ok, vllm_err = False, ""
-            try:
-                with _ur.urlopen(f"{OLLAMA_HOST}/api/tags", timeout=3) as r:
-                    vllm_ok = r.status == 200
-            except Exception as e:
-                vllm_err = str(e)[:80]
+            # Ollama/vLLM 체크 — 결과를 짧게 캐시한다.
+            # Ollama가 내려가 있으면 TCP 타임아웃까지 수 초가 걸려 /api/health 자체가
+            # 느려지고(관측: 5.7초) UI 폴링·상태 스크립트가 타임아웃된다.
+            vllm_ok, vllm_err = _probe_ollama_cached()
 
             # KB 경로 체크
             kb_ok, kb_path, kb_err = False, "", ""
