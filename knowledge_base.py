@@ -16,6 +16,17 @@ Shared knowledge base accessor — Myung-Tech ↔ mrlee-wiki-graphrag.
         ...
     text = read_node("concepts/transformer")
     hits = search("attention")
+
+GraphRAG 검색 (그래프 순회 기반):
+    from knowledge_base import retrieve, build_context
+    for doc in retrieve("PPO와 GRPO 차이", hops=1, include_body=False):
+        print(doc["slug"], doc["score"], doc["why"])
+    prompt_ctx = build_context("PPO와 GRPO 차이")
+
+retrieve() 는 어휘 검색으로 씨앗 노드를 찾은 뒤 graph/graph.json 의
+related/wikilink 엣지를 따라 이웃까지 확장한다. 어휘 검색만으로는 놓치는
+"직접 언급되지 않았지만 구조적으로 연결된" 문서를 끌어온다.
+그래프가 없거나 낡았으면 조용히 씨앗(어휘 검색)만으로 동작한다.
 """
 from __future__ import annotations
 
@@ -53,6 +64,7 @@ KB_PATH = _resolve_kb_path()
 
 # 그래프의 주요 진입점(노드 카테고리 + 스키마/인덱스/로그).
 NODE_DIRS = ("concepts", "entities", "comparisons")
+GRAPH_PATH = KB_PATH / "graph" / "graph.json"
 SCHEMA_PATH = KB_PATH / "SCHEMA.md"
 INDEX_PATH = KB_PATH / "index.md"
 LOG_PATH = KB_PATH / "log.md"
@@ -114,6 +126,201 @@ def search(pattern: str, *, limit: int = 50) -> list[tuple[str, str]]:
     return hits
 
 
+# ---------------------------------------------------------------------------
+# GraphRAG — 그래프 순회 기반 검색
+# ---------------------------------------------------------------------------
+# 어휘 검색은 질의어가 본문에 그대로 있는 문서만 찾는다. 그래서 "PPO와 GRPO 차이"를
+# 물으면 comparisons/grpo-vs-ppo.md 는 찾아도, 그 비교가 전제하는 actor-critic·
+# value-function 은 놓친다. graph.json 의 엣지를 한두 홉 따라가면 그 전제들이 딸려온다.
+# 이것이 이 저장소를 GraphRAG "자료원"이 아니라 실제 GraphRAG 로 쓰는 부분이다.
+
+_GRAPH_CACHE: dict | None = None
+_GRAPH_MTIME: float | None = None
+
+# 홉 거리에 따른 점수 감쇠. 2홉까지만 의미 있게 본다.
+_HOP_DECAY = 0.45
+# 엣지 종류별 가중치 — frontmatter related 는 저자가 명시적으로 건 링크라
+# 본문 [[wikilink]] 보다 신뢰도가 높다.
+_EDGE_WEIGHT = {"related": 1.0, "wikilink": 0.8}
+
+
+def load_graph(*, force: bool = False) -> dict:
+    """graph/graph.json 로드 (mtime 기반 캐시). 없으면 빈 그래프를 돌려준다."""
+    global _GRAPH_CACHE, _GRAPH_MTIME
+    try:
+        mtime = GRAPH_PATH.stat().st_mtime
+    except OSError:
+        return {"nodes": {}, "edges": []}
+    if force or _GRAPH_CACHE is None or _GRAPH_MTIME != mtime:
+        import json
+        try:
+            _GRAPH_CACHE = json.loads(GRAPH_PATH.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return {"nodes": {}, "edges": []}
+        _GRAPH_MTIME = mtime
+    return _GRAPH_CACHE
+
+
+def graph_available() -> bool:
+    """그래프를 실제로 순회할 수 있는지."""
+    return bool(load_graph().get("nodes"))
+
+
+def _tokenize(text: str) -> list[str]:
+    import re
+    return [t for t in re.split(r"[^0-9A-Za-z가-힣_.-]+", text.lower()) if t]
+
+
+def _adjacency() -> dict[str, list[tuple[str, str]]]:
+    """무방향 인접 리스트 {slug: [(이웃, 엣지종류), ...]}."""
+    g = load_graph()
+    adj: dict[str, list[tuple[str, str]]] = {}
+    for e in g.get("edges", []):
+        src, dst, kind = e.get("src"), e.get("dst"), e.get("type", "related")
+        if not src or not dst:
+            continue
+        adj.setdefault(src, []).append((dst, kind))
+        adj.setdefault(dst, []).append((src, kind))   # 역방향도 문맥이다
+    return adj
+
+
+def neighbors(slug: str, *, hops: int = 1) -> dict[str, tuple[int, str]]:
+    """slug 에서 hops 이내 이웃. {이웃slug: (홉수, 엣지종류)} (자기 자신 제외)."""
+    adj = _adjacency()
+    seen: dict[str, tuple[int, str]] = {}
+    frontier = [slug]
+    for depth in range(1, max(1, hops) + 1):
+        nxt: list[str] = []
+        for node in frontier:
+            for nb, kind in adj.get(node, []):
+                if nb == slug or nb in seen:
+                    continue
+                seen[nb] = (depth, kind)
+                nxt.append(nb)
+        frontier = nxt
+        if not frontier:
+            break
+    return seen
+
+
+def _seed_scores(query: str, *, max_seeds: int = 6) -> dict[str, float]:
+    """어휘 매칭으로 씨앗 노드와 점수를 뽑는다.
+
+    slug·제목 매치를 태그보다 높게 본다 — 저자가 그 문서의 주제라고 선언한 것이라서다.
+    제목·태그로 아무것도 못 찾을 때만 본문까지 훑는다(느리므로 폴백).
+    """
+    nodes = load_graph().get("nodes") or {}
+    terms = [t for t in _tokenize(query) if len(t) >= 2]
+    if not terms:
+        return {}
+    scores: dict[str, float] = {}
+    for slug, meta in nodes.items():
+        title = str(meta.get("title") or slug).lower()
+        tags = " ".join(str(t) for t in (meta.get("tags") or [])).lower()
+        slug_l = slug.lower()
+        s = 0.0
+        for t in terms:
+            if t in slug_l:
+                s += 3.0
+            if t in title:
+                s += 2.5
+            if t in tags:
+                s += 1.5
+        if s:
+            scores[slug] = s
+    if not scores:
+        for relpath, _line in search(query, limit=30):
+            key = relpath.split("/")[-1]
+            scores[key] = scores.get(key, 0.0) + 1.0
+    return dict(sorted(scores.items(), key=lambda kv: -kv[1])[:max_seeds])
+
+
+def retrieve(
+    query: str,
+    *,
+    hops: int = 1,
+    limit: int = 8,
+    include_body: bool = True,
+    max_chars: int = 4000,
+) -> list[dict]:
+    """GraphRAG 검색 — 씨앗(어휘) 노드에서 그래프로 확장한 뒤 점수순 문서 목록.
+
+    반환 항목: {slug, path, title, type, score, hop, why, body?}
+    `why` 는 이 문서가 왜 선택됐는지에 대한 사람이 읽을 수 있는 사유(근거 추적용).
+    그래프가 없으면 씨앗만 돌려주므로, 어휘 검색으로 자연히 열화된다.
+    """
+    _require()
+    seeds = _seed_scores(query)
+    if not seeds:
+        return []
+
+    nodes = load_graph().get("nodes") or {}
+    scored: dict[str, dict] = {
+        slug: {"score": base, "hop": 0, "why": "질의어 직접 매치"}
+        for slug, base in seeds.items()
+    }
+
+    if graph_available() and hops > 0:
+        for slug, base in seeds.items():
+            src_title = (nodes.get(slug) or {}).get("title", slug)
+            for nb, (depth, kind) in neighbors(slug, hops=hops).items():
+                gain = base * (_HOP_DECAY ** depth) * _EDGE_WEIGHT.get(kind, 0.8)
+                cur = scored.get(nb)
+                if cur is None or gain > cur["score"]:
+                    scored[nb] = {
+                        "score": gain,
+                        "hop": depth,
+                        "why": f"{src_title} 에서 {depth}홉 ({kind})",
+                    }
+
+    out: list[dict] = []
+    for slug, info in sorted(scored.items(), key=lambda kv: -kv[1]["score"])[:limit]:
+        meta = nodes.get(slug) or {}
+        rel = meta.get("path") or ""
+        doc = {
+            "slug": slug,
+            "path": rel,
+            "title": meta.get("title") or slug,
+            "type": meta.get("type") or "",
+            "score": round(info["score"], 3),
+            "hop": info["hop"],
+            "why": info["why"],
+        }
+        if include_body and rel:
+            try:
+                doc["body"] = read_node(rel)[:max_chars]
+            except (OSError, ValueError):
+                doc["body"] = ""
+        out.append(doc)
+    return out
+
+
+def build_context(query: str, *, hops: int = 1, limit: int = 6,
+                  budget_chars: int = 12000) -> str:
+    """retrieve() 결과를 LLM 프롬프트에 바로 넣을 수 있는 문자열로 조립.
+
+    문서마다 출처 경로를 머리에 달아, 모델이 인용할 때 경로를 지어내지 않게 한다.
+    """
+    docs = retrieve(query, hops=hops, limit=limit, include_body=True,
+                    max_chars=max(800, budget_chars // max(1, limit)))
+    if not docs:
+        return ""
+    parts = [f"# 지식베이스 검색 결과 — 질의: {query}", ""]
+    used = 0
+    for d in docs:
+        chunk = (
+            f"## {d['title']}\n"
+            f"- 출처: `{d['path']}`\n"
+            f"- 선택 사유: {d['why']} (score {d['score']})\n\n"
+            f"{d.get('body') or ''}\n"
+        )
+        if used + len(chunk) > budget_chars:
+            break
+        parts.append(chunk)
+        used += len(chunk)
+    return "\n".join(parts)
+
+
 def inject(title: str, content: str, *, source_url: str = "", subdir: str = "articles") -> str:
     """원시 지식을 GraphRAG `raw/` 레이어에 SCHEMA 규약대로 저장. relpath 반환.
 
@@ -152,3 +359,12 @@ if __name__ == "__main__":
         print(f"nodes = {len(nodes)} ({sum(1 for n in nodes if n.startswith('concepts'))} concepts, "
               f"{sum(1 for n in nodes if n.startswith('entities'))} entities, "
               f"{sum(1 for n in nodes if n.startswith('comparisons'))} comparisons)")
+        g = load_graph()
+        print(f"graph = {len(g.get('nodes') or {})} nodes, "
+              f"{len(g.get('edges') or [])} edges (available={graph_available()})")
+        import sys
+        q = " ".join(sys.argv[1:]) or "PPO와 GRPO 차이"
+        print()
+        print(f"--- retrieve({q!r}, hops=1) ---")
+        for d in retrieve(q, hops=1, limit=8, include_body=False):
+            print(f"  {d['score']:6.2f} h{d['hop']}  {d['path']:44} {d['why']}")

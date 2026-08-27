@@ -57,3 +57,4 @@ bridge/bridge_state.json
 
 # ── 빌드 산출물 ──────────────────────────────────
 *.vsix
+knowledge_base.py.bak.*
