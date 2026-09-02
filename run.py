@@ -14,6 +14,12 @@ Usage:
 import json
 import os
 import sys
+
+try:            # cp949 콘솔에서 한글 print 가 죽지 않게
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+except Exception:
+    pass
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
@@ -35,19 +41,16 @@ def cmd_daemon():
 
 
 def cmd_dispatch(mode="once"):
-    import agent_dispatcher
-    key = os.environ.get("OPENROUTER_API_KEY", "")
-    if agent_dispatcher.USE_OLLAMA:
-        print(f"[dispatcher] 백엔드: Ollama ({agent_dispatcher.OLLAMA_BASE_URL})")
-    else:
-        if not key:
-            print("[FATAL] OPENROUTER_API_KEY not set.", file=sys.stderr)
-            sys.exit(1)
-        print(f"[dispatcher] 백엔드: OpenRouter")
+    import agent_dispatcher as ad
+    # 백엔드는 부서 등급에 따라 작업마다 정해진다(라우터 → Ollama → OpenRouter).
+    # 여기서는 어느 쪽이 준비됐는지만 알려준다.
+    router_ready = bool(ad._router_key()) and ad._router_alive()
+    print(f"[dispatcher] 라우터: {'사용 가능 ' + ad.ROUTER_BASE_URL if router_ready else '없음 → 로컬로 대체'}")
+    print(f"[dispatcher] Ollama: {ad.OLLAMA_BASE_URL}")
     if mode == "daemon":
-        agent_dispatcher.run_daemon(key)
+        ad.run_daemon()
     else:
-        n = agent_dispatcher.run_once(key)
+        n = ad.run_once()
         print(f"{n} task(s) dispatched.")
 
 

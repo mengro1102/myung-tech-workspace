@@ -91,6 +91,7 @@ function MainScreen() {
   const [running,     setRunning]     = useState(false);
   const [cycleStatus, setCycleStatus] = useState<string>('stopped');
   const [showSidebar, setShowSidebar] = useState(true);
+  const [liveOpen,    setLiveOpen]    = useState(true);
   const [taskSummary, setTaskSummary] = useState({ pending: 0, in_progress: 0, done: 0, failed: 0 });
   const [backendOk,   setBackendOk]   = useState(false);
   const [healthDetail, setHealthDetail] = useState<HealthStatus | null>(null);
@@ -787,6 +788,28 @@ function MainScreen() {
 
         {/* ── Center ── */}
         <main className="hs-center">
+          {/* 실시간 활동 — 중앙 상단이 비어 있던 자리.
+              부서 이벤트가 흐르므로 시스템이 살아 있는지 첫 화면에서 보인다. */}
+          <section className={`hs-live ${liveOpen ? '' : 'collapsed'}`}>
+            <div className="hs-live-head">
+              <span className={`hs-live-pulse ${activeAgents > 0 || running ? '' : 'idle'}`} />
+              <b>실시간 활동</b>
+              <span>부서 간 상호작용 · 지식베이스 조회</span>
+              <button
+                className="hs-live-toggle"
+                onClick={() => setLiveOpen(v => !v)}
+                aria-expanded={liveOpen}
+              >
+                {liveOpen ? '접기' : '펼치기'}
+              </button>
+            </div>
+            {liveOpen && (
+              <div className="hs-live-body">
+                <AgentFeed compact />
+              </div>
+            )}
+          </section>
+
           {/* Chat section */}
           <div className="hs-chat-section">
             <div className="hs-chat-area">

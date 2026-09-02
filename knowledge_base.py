@@ -168,7 +168,19 @@ def graph_available() -> bool:
 
 def _tokenize(text: str) -> list[str]:
     import re
-    return [t for t in re.split(r"[^0-9A-Za-z가-힣_.-]+", text.lower()) if t]
+    raw = [t for t in re.split(r"[^0-9A-Za-z가-힣_.-]+", text.lower()) if t]
+    # 한국어는 조사가 붙어 'ppo와'·'grpo의' 처럼 나온다. 원 토큰을 그대로 두되
+    # 안에 든 라틴/숫자 덩어리를 따로 떼어내지 않으면 slug 'ppo' 와 매칭되지 않는다.
+    out: list[str] = []
+    for t in raw:
+        out.append(t)
+        for part in re.findall(r"[0-9A-Za-z_.-]{2,}", t):
+            if part != t:
+                out.append(part)
+        for part in re.findall(r"[가-힣]{2,}", t):
+            if part != t:
+                out.append(part)
+    return out
 
 
 def _adjacency() -> dict[str, list[tuple[str, str]]]:
