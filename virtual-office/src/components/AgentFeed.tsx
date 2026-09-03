@@ -41,6 +41,17 @@ const labelOf  = (id: string) => deptLabels[id] ?? SPECIAL[id] ?? id;
 const iconOf   = (id: string) => ICONS[id] ?? '🤖';
 const colorOf  = (id: string) => deptColors[id] ?? '#94a3b8';
 
+/** 이벤트 문구로 종류를 판별한다. 디스패처가 내는 말머리가 고정돼 있어
+ *  이 정도 규칙으로 충분하고, 이벤트 스키마를 바꾸지 않아도 된다. */
+function kindOf(payload: string): string {
+  const p = payload || '';
+  if (p.startsWith('실패') || p.includes('오류')) return 'kind-fail';
+  if (p.startsWith('완료')) return 'kind-done';
+  if (p.startsWith('지식베이스')) return 'kind-kb';
+  if (p.startsWith('작업 접수') || p.startsWith('추론 시작')) return 'kind-start';
+  return '';
+}
+
 export default function AgentFeed({ compact }: { compact?: boolean }) {
   const [events, setEvents]   = useState<FeedEvent[]>([]);
   const [live,   setLive]     = useState(false);
@@ -130,7 +141,9 @@ export default function AgentFeed({ compact }: { compact?: boolean }) {
                     : '백엔드(server.py) 미연결 — 포트 9000 확인'}
             </div>
           ) : events.map(ev => (
-            <div key={ev.event_id} className="af-row">
+            // 이벤트 종류를 문구에서 뽑아 색으로 구분한다. 목록을 훑을 때
+            // 완료/실패/지식베이스 조회가 한눈에 갈리는 편이 훨씬 빠르다.
+            <div key={ev.event_id} className={`af-row ${kindOf(ev.payload)}`}>
               <span className="af-who" style={{ color: colorOf(ev.sender) }}>
                 {iconOf(ev.sender)} {labelOf(ev.sender)}
               </span>

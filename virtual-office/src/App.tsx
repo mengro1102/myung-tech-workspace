@@ -33,6 +33,8 @@ interface TaskItem {
   status: 'pending' | 'in_progress' | 'done' | 'failed';
   target_dept: string;
   updated_at: string;
+  /** 실패 시 사유, 완료 시 결과. 디스패처가 `[backend/model] 오류` 형태로 남긴다. */
+  result?: string | null;
 }
 
 interface HealthStatus {
@@ -393,16 +395,31 @@ function MainScreen() {
         </div>
         <span className="hs-time">오전 {time}</span>
 
-        {/* 서비스 상태 (운영 시작 버튼 왼쪽) */}
+        {/* 서비스 상태.
+            예전에는 상태가 나빠도 점 색만 바뀌어 알아채기 어려웠다. 정상일 때는
+            조용히 두고(작은 점), 문제가 생기면 무엇이 잘못됐는지 글자로 말한다. */}
         <div className="hs-service-status">
           {([
-            ['서버',      backendOk,                          '연결됨',    '#2DD4BF'],
-            ['AI 모델',   healthDetail?.vllm?.ok ?? false,    '정상',      '#8B5CF6'],
-            ['지식 베이스', healthDetail?.knowledge_base?.ok ?? false, '동기화',  '#FB923C'],
-          ] as [string, boolean, string, string][]).map(([label, ok, okTxt, color]) => (
-            <div key={label} className="hs-svc-item" title={`${label}: ${ok ? okTxt : '오류'}`}>
-              <span className="hs-svc-dot" style={{ background: ok ? color : '#EF4444', boxShadow: ok ? `0 0 6px ${color}` : '0 0 6px #EF4444' }} />
+            ['서버',      backendOk,                                 '연결됨',  '#2DD4BF',
+             '백엔드(9000)에 연결할 수 없습니다'],
+            ['AI 모델',   healthDetail?.vllm?.ok ?? false,           '정상',    '#8B5CF6',
+             healthDetail?.vllm?.error || 'Ollama(11434) 응답 없음'],
+            ['지식 베이스', healthDetail?.knowledge_base?.ok ?? false, '동기화',  '#FB923C',
+             healthDetail?.knowledge_base?.error || '위키 경로를 찾을 수 없습니다'],
+          ] as [string, boolean, string, string, string][]).map(([label, ok, okTxt, color, errTxt]) => (
+            <div
+              key={label}
+              className={`hs-svc-item ${ok ? '' : 'down'}`}
+              title={ok ? `${label}: ${okTxt}` : `${label}: ${errTxt}`}
+            >
+              <span
+                className="hs-svc-dot"
+                style={ok
+                  ? { background: color, boxShadow: `0 0 6px ${color}` }
+                  : undefined}
+              />
               <span className="hs-svc-label">{label}</span>
+              {!ok && <span className="hs-svc-err">점검 필요</span>}
             </div>
           ))}
         </div>
@@ -624,6 +641,14 @@ function MainScreen() {
                           <span className="ceo-task-dept">{deptIcons[t.target_dept] ?? '📋'}</span>
                         </div>
                         <div className="ceo-task-text" onClick={() => setDrawerTaskId(t.task_id)} style={{ cursor: 'pointer' }}>{t.instruction}</div>
+                        {/* 실패 사유. 예전에는 카드를 열어야만 볼 수 있어서, 목록만
+                            보면 '왜 실패했는지'를 알 방법이 없었다. */}
+                        {t.status === 'failed' && t.result && (
+                          <div className="ceo-task-reason" title={t.result}>
+                            <span className="ceo-task-reason-mark">!</span>
+                            {t.result}
+                          </div>
+                        )}
                         <div className="ceo-task-footer">
                           <span className="ceo-task-time">
                             {new Date(t.updated_at).toLocaleDateString('ko-KR', { month: 'short', day: 'numeric' })}

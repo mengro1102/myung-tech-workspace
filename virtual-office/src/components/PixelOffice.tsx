@@ -105,16 +105,18 @@ function drawPixelAgent(
 ) {
   const px = Math.round(x);
   const py = Math.round(y);
-  const S = 2; // 2x 스케일 계수
+  // 3x. 2x 에서는 인물이 16x27px 이라 표정도 옷도 구분되지 않았다 — 참고한
+  // 화면에서 인물은 공간의 초점인데 여기서는 점에 가까웠다. 방이 255px 폭이라
+  // 3x(24x40px)로 키워도 서너 명이 넉넉히 들어간다.
+  const S = 3;
+  const U = S / 2;                      // 아래 좌표들이 쓰는 단위
 
-  // 발밑 그림자 — 없으면 캐릭터가 바닥에 떠 있는 것처럼 보인다.
-  // 참고한 게더타운류 화면에서 인물이 공간에 '있는' 느낌의 대부분이 이것이다.
-  softShadow(ctx, px, py + 11, 9, 3.5, 0.34);
+  // 발밑 그림자 — 인물이 바닥에 '있는' 느낌의 대부분은 그림자가 만든다.
+  softShadow(ctx, px, py + 8 * U, 5.5 * S, 2 * S, 0.34);
 
-  // 어두운 외곽선 — 배경과 인물을 분리해 준다. 방 바닥이 어두워 실루엣이
-  // 묻히던 문제가 있었다.
+  // 어두운 실루엣 — 방 바닥이 어두워 인물이 묻히던 것을 분리해 준다.
   ctx.fillStyle = 'rgba(0,0,0,0.55)';
-  ctx.fillRect(px - 9, py - 16, 18, 27);
+  ctx.fillRect(px - 5.5 * S, py - 8 * S, 11 * S, 9.5 * S);
 
   // 머리 (16×14px)
   ctx.fillStyle = skinTone;
@@ -284,16 +286,111 @@ function plant(ctx: CanvasRenderingContext2D, x: number, y: number, s = 1) {
 
 /** 러그 — 방마다 색이 다른 테두리로 정체성을 준다. 참고 이미지의 카펫 역할. */
 function rug(ctx: CanvasRenderingContext2D, cx: number, cy: number, w: number, h: number, c: string) {
-  ctx.fillStyle = 'rgba(0,0,0,0.18)';
-  ctx.fillRect(cx - w / 2, cy - h / 2, w, h);
-  ctx.fillStyle = `${c}26`;
-  ctx.fillRect(cx - w / 2, cy - h / 2, w, h);
-  ctx.strokeStyle = `${c}66`;
+  // 이전 러그는 방 배경과 명도가 비슷해 거의 보이지 않았다. 어두운 바탕을 먼저
+  // 깔아 바닥과 분리한 뒤 부서색 테두리를 얹는다 — 참고 이미지의 카펫처럼
+  // '깔려 있는 물건'으로 읽혀야 한다.
+  const x = cx - w / 2, y = cy - h / 2;
+  softShadow(ctx, cx, cy + h / 2 - 2, w * 0.5, 5, 0.22);
+  ctx.fillStyle = 'rgba(8,10,16,0.55)';
+  ctx.fillRect(x, y, w, h);
+  ctx.fillStyle = `${c}30`;
+  ctx.fillRect(x, y, w, h);
+
+  // 안쪽 무늬 — 단색이면 그냥 사각형으로 보인다
+  ctx.fillStyle = `${c}1a`;
+  for (let gy = y + 6; gy < y + h - 6; gy += 10) ctx.fillRect(x + 6, gy, w - 12, 1);
+
+  ctx.strokeStyle = `${c}aa`;
   ctx.lineWidth = 2;
-  ctx.strokeRect(cx - w / 2 + 3, cy - h / 2 + 3, w - 6, h - 6);
-  ctx.strokeStyle = `${c}33`;
+  ctx.strokeRect(x + 3, y + 3, w - 6, h - 6);
+  ctx.strokeStyle = `${c}55`;
   ctx.lineWidth = 1;
-  ctx.strokeRect(cx - w / 2 + 8, cy - h / 2 + 8, w - 16, h - 16);
+  ctx.strokeRect(x + 8, y + 8, w - 16, h - 16);
+
+  // 술(fringe) — 짧은 선 몇 개로 카펫 느낌이 확 산다
+  ctx.fillStyle = `${c}77`;
+  for (let fx = x + 6; fx < x + w - 4; fx += 7) {
+    ctx.fillRect(fx, y - 2, 2, 3);
+    ctx.fillRect(fx, y + h - 1, 2, 3);
+  }
+}
+
+/** 소파 — 등받이/좌석/팔걸이를 나눠 부피를 만든다. */
+function sofa(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h = 26) {
+  softShadow(ctx, x + w / 2, y + h + 3, w * 0.5, 5, 0.30);
+  ctx.fillStyle = '#3a4560';                      // 등받이
+  ctx.fillRect(x, y, w, 9);
+  ctx.fillStyle = '#4a5878';                      // 좌석
+  ctx.fillRect(x, y + 9, w, h - 12);
+  ctx.fillStyle = '#56668a';                      // 좌석 앞 하이라이트
+  ctx.fillRect(x, y + 9, w, 2);
+  ctx.fillStyle = '#333d55';                      // 팔걸이
+  ctx.fillRect(x - 4, y + 4, 5, h - 6);
+  ctx.fillRect(x + w - 1, y + 4, 5, h - 6);
+  ctx.fillStyle = 'rgba(0,0,0,0.20)';             // 방석 이음새
+  for (let i = 1; i < 3; i++) ctx.fillRect(x + (w / 3) * i, y + 10, 1, h - 14);
+  ctx.fillStyle = '#232a3a';                      // 다리
+  ctx.fillRect(x + 3, y + h - 3, 4, 4);
+  ctx.fillRect(x + w - 7, y + h - 3, 4, 4);
+}
+
+/** 화이트보드 — 벽에 걸린 판. 흐릿한 글씨 자국까지 넣어야 '쓰던 물건'으로 보인다. */
+function whiteboard(ctx: CanvasRenderingContext2D, x: number, y: number, w = 74, h = 42) {
+  ctx.fillStyle = 'rgba(0,0,0,0.35)';
+  ctx.fillRect(x + 2, y + 3, w, h);               // 벽 그림자
+  ctx.fillStyle = '#8d99ae';                      // 프레임
+  ctx.fillRect(x, y, w, h);
+  ctx.fillStyle = '#e8ecf2';                      // 보드면
+  ctx.fillRect(x + 2, y + 2, w - 4, h - 6);
+  ctx.fillStyle = 'rgba(60,80,120,0.45)';         // 글씨 자국
+  for (let i = 0; i < 4; i++) {
+    const lw = 12 + ((noise2(x + i * 7, y) * (w - 26)) | 0);
+    ctx.fillRect(x + 7, y + 8 + i * 7, lw, 2);
+  }
+  ctx.fillStyle = 'rgba(200,60,60,0.5)';          // 빨간 동그라미
+  ctx.beginPath();
+  ctx.ellipse(x + w - 20, y + 16, 9, 6, 0, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.fillStyle = '#5b6577';                      // 마커 트레이
+  ctx.fillRect(x + 4, y + h - 4, w - 8, 3);
+  ctx.fillStyle = '#d94f4f';
+  ctx.fillRect(x + 10, y + h - 5, 6, 2);
+  ctx.fillStyle = '#4f7fd9';
+  ctx.fillRect(x + 20, y + h - 5, 6, 2);
+}
+
+/** 커피 테이블 — 소파 앞 낮은 탁자. 컵과 노트를 올려 생활감을 준다. */
+function coffeeTable(ctx: CanvasRenderingContext2D, cx: number, cy: number, w = 46, h = 20) {
+  softShadow(ctx, cx, cy + h / 2 + 3, w * 0.55, 5, 0.28);
+  ctx.fillStyle = '#3e2b1e';
+  ctx.fillRect(cx - w / 2, cy - h / 2 + h - 3, w, 5);
+  ctx.fillStyle = '#6b4a32';
+  ctx.fillRect(cx - w / 2, cy - h / 2, w, h - 2);
+  ctx.fillStyle = '#87613f';
+  ctx.fillRect(cx - w / 2, cy - h / 2, w, 2);
+  ctx.fillStyle = '#c8d2e0';                      // 노트
+  ctx.fillRect(cx - 16, cy - 4, 13, 9);
+  ctx.fillStyle = '#9aa7b8';
+  ctx.fillRect(cx - 16, cy - 4, 13, 2);
+  ctx.fillStyle = '#b8452f';                      // 머그
+  ctx.fillRect(cx + 6, cy - 5, 7, 8);
+  ctx.fillStyle = '#d9634a';
+  ctx.fillRect(cx + 6, cy - 5, 7, 2);
+}
+
+/** 정수기 — 구석을 채우는 소품. */
+function waterCooler(ctx: CanvasRenderingContext2D, x: number, y: number) {
+  softShadow(ctx, x, y + 3, 9, 4, 0.28);
+  ctx.fillStyle = '#2f3a4a';
+  ctx.fillRect(x - 7, y - 16, 14, 18);
+  ctx.fillStyle = '#3f4d61';
+  ctx.fillRect(x - 7, y - 16, 14, 2);
+  ctx.fillStyle = 'rgba(120,190,230,0.75)';       // 물통
+  ctx.fillRect(x - 6, y - 30, 12, 14);
+  ctx.fillStyle = 'rgba(180,225,245,0.5)';
+  ctx.fillRect(x - 6, y - 30, 4, 14);
+  ctx.fillStyle = '#1f2733';
+  ctx.fillRect(x - 3, y - 8, 6, 3);
 }
 
 function drawRoom(ctx: CanvasRenderingContext2D, room: Room, selected: boolean) {
@@ -369,8 +466,20 @@ function drawRoom(ctx: CanvasRenderingContext2D, room: Room, selected: boolean) 
       ctx.fillStyle = '#3f4d61';
       ctx.beginPath(); ctx.arc(ox, oy - 1, 6, 0, Math.PI * 2); ctx.fill();
     }
-    plant(ctx, room.x + 26, room.y + room.h - 18);
-    plant(ctx, room.x + room.w - 26, room.y + room.h - 18, 0.9);
+    // 회의실은 테이블 하나뿐이라 넓은 바닥이 비어 보였다. 참고 이미지의 밀도에
+    // 맞춰 라운지 구역을 만든다 — 화이트보드(상단 벽), 소파+커피테이블(하단),
+    // 정수기와 화분(구석).
+    whiteboard(ctx, room.x + room.w / 2 - 37, room.y + 12);
+
+    const loungeY = room.y + room.h - 92;
+    rug(ctx, room.x + room.w / 2, loungeY + 28, Math.min(room.w - 44, 176), 74, c);
+    sofa(ctx, room.x + room.w / 2 - 52, loungeY, 104);
+    coffeeTable(ctx, room.x + room.w / 2, loungeY + 44);
+
+    waterCooler(ctx, room.x + 24, room.y + room.h - 20);
+    plant(ctx, room.x + room.w - 24, room.y + room.h - 18, 0.95);
+    plant(ctx, room.x + 26, room.y + 64, 0.85);
+    plant(ctx, room.x + room.w - 26, room.y + 64, 0.8);
   } else {
     rug(ctx, room.x + room.w / 2, room.y + room.h - 44, Math.min(room.w - 56, 150), 62, c);
 
