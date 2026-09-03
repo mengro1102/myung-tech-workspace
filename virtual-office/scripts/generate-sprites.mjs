@@ -166,71 +166,118 @@ function generateTile(type) {
   const canvas = createCanvas(32, 32);
   const ctx = canvas.getContext('2d');
 
-  if (type === 'floor') {
-    // Dark checkerboard
-    ctx.fillStyle = '#14141F';
-    ctx.fillRect(0, 0, 32, 32);
-    ctx.fillStyle = '#16161F';
-    ctx.fillRect(0, 0, 16, 16);
-    ctx.fillRect(16, 16, 16, 16);
-    // subtle grid lines
-    ctx.strokeStyle = '#1A1A2A';
-    ctx.lineWidth = 0.5;
-    ctx.strokeRect(0, 0, 32, 32);
-  } else if (type === 'corridor') {
-    ctx.fillStyle = '#0F0F18';
-    ctx.fillRect(0, 0, 32, 32);
-    ctx.strokeStyle = '#1A1A28';
-    ctx.lineWidth = 0.5;
-    ctx.strokeRect(0, 0, 32, 32);
-  } else if (type === 'desk') {
-    ctx.fillStyle = 'rgba(0,0,0,0)';
-    ctx.clearRect(0, 0, 32, 32);
-    // Desk surface
-    ctx.fillStyle = '#5D4037';
-    ctx.fillRect(2, 6, 28, 20);
-    ctx.fillStyle = '#795548';
-    ctx.fillRect(2, 6, 28, 3);
-    // Monitor
-    ctx.fillStyle = '#1E293B';
-    ctx.fillRect(8, 8, 14, 10);
-    ctx.fillStyle = '#38BDF8';
-    ctx.fillRect(9, 9, 12, 8);
-    // Screen glow
-    ctx.fillStyle = 'rgba(56,189,248,0.2)';
-    ctx.fillRect(8, 8, 14, 10);
-    // Monitor stand
-    ctx.fillStyle = '#455A64';
-    ctx.fillRect(13, 18, 4, 3);
-    // Keyboard
-    ctx.fillStyle = '#2D3748';
-    ctx.fillRect(5, 22, 22, 3);
-    // Desk legs (hint)
-    ctx.fillStyle = '#3E2723';
-    ctx.fillRect(2, 25, 3, 4);
-    ctx.fillRect(27, 25, 3, 4);
-  } else if (type === 'carpet') {
-    ctx.fillStyle = '#1A1A2E';
-    ctx.fillRect(0, 0, 32, 32);
-    // Subtle pattern
-    ctx.fillStyle = '#1E1E35';
-    for (let i = 0; i < 32; i += 8) {
-      for (let j = 0; j < 32; j += 8) {
-        ctx.fillRect(i+2, j+2, 4, 4);
+  // 결정적 난수 — 타일마다 같은 무늬가 나오되 규칙적으로 보이지 않게 한다.
+  // Math.random 을 쓰면 스프라이트를 다시 만들 때마다 화면이 달라진다.
+  let seed = type.split('').reduce((a, c) => a + c.charCodeAt(0), 7);
+  const rnd = () => {
+    seed = (seed * 1664525 + 1013904223) % 4294967296;
+    return seed / 4294967296;
+  };
+  const px = (x, y, w, h, color) => { ctx.fillStyle = color; ctx.fillRect(x, y, w, h); };
+
+  if (type === 'carpet') {
+    // 방 바닥. 씬에서 room.floorColor 로 tint(곱셈)한다. 예전 텍스처는 #1A1A2E 로
+    // 이미 어두워서, 어두운 방 색과 곱하면 거의 검정이 됐다 — 질감이 안 보였다.
+    // 밝은 중간톤으로 그려야 tint 후에도 짜임새가 남는다.
+    px(0, 0, 32, 32, '#C8C8C8');
+    // 카펫 짜임 — 가로/세로 실이 교차하는 느낌
+    for (let y = 0; y < 32; y += 2) {
+      for (let x = 0; x < 32; x += 2) {
+        const warp = ((x >> 1) + (y >> 1)) % 2 === 0;
+        px(x, y, 2, 2, warp ? '#D2D2D2' : '#BEBEBE');
       }
     }
+    // 섬유 노이즈 — 완전히 균일하면 인쇄물처럼 보인다
+    for (let i = 0; i < 90; i++) {
+      const x = (rnd() * 32) | 0, y = (rnd() * 32) | 0;
+      px(x, y, 1, 1, rnd() > 0.5 ? 'rgba(255,255,255,0.18)' : 'rgba(0,0,0,0.10)');
+    }
+    // 타일 경계 — 인접 타일과 붙었을 때 격자가 보이게
+    ctx.strokeStyle = 'rgba(0,0,0,0.13)';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(0.5, 0.5, 31, 31);
+  } else if (type === 'corridor') {
+    // 복도 = 석재 바닥. 참고 이미지의 자갈길처럼 크기가 다른 돌을 깔고
+    // 줄눈을 어둡게 남긴다. tint 하지 않고 그대로 쓴다.
+    px(0, 0, 32, 32, '#232334');
+    const stones = [
+      [1, 1, 14, 9], [16, 1, 15, 9],
+      [1, 11, 9, 9], [11, 11, 20, 9],
+      [1, 21, 18, 10], [20, 21, 11, 10],
+    ];
+    for (const [x, y, w, h] of stones) {
+      const v = 0.5 + rnd() * 0.5;                     // 돌마다 밝기 차이
+      const base = Math.round(46 + v * 16);
+      px(x, y, w, h, `rgb(${base},${base + 2},${base + 14})`);
+      // 위/왼쪽 하이라이트, 아래 그림자 — 살짝 튀어나온 느낌
+      px(x, y, w, 1, `rgba(255,255,255,0.10)`);
+      px(x, y, 1, h, `rgba(255,255,255,0.06)`);
+      px(x, y + h - 1, w, 1, `rgba(0,0,0,0.35)`);
+    }
+    // 이끼/얼룩 몇 점 — 완전히 깨끗하면 인공적이다
+    for (let i = 0; i < 10; i++) {
+      px((rnd() * 32) | 0, (rnd() * 32) | 0, 1, 1, 'rgba(120,150,130,0.10)');
+    }
+  } else if (type === 'floor') {
+    // 공용 바닥 — 카펫보다 매끈한 타일
+    px(0, 0, 32, 32, '#1B1B27');
+    px(0, 0, 16, 16, '#1E1E2B');
+    px(16, 16, 16, 16, '#1E1E2B');
+    for (let i = 0; i < 24; i++) {
+      px((rnd() * 32) | 0, (rnd() * 32) | 0, 1, 1, 'rgba(255,255,255,0.045)');
+    }
+    ctx.strokeStyle = 'rgba(255,255,255,0.05)';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(0.5, 0.5, 31, 31);
+  } else if (type === 'desk') {
+    ctx.clearRect(0, 0, 32, 32);
+
+    // 바닥 그림자 — 물체가 바닥에 놓인 느낌을 만드는 가장 값싼 방법
+    ctx.fillStyle = 'rgba(0,0,0,0.30)';
+    ctx.beginPath();
+    ctx.ellipse(16, 27, 13, 4, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // 책상 — 윗면과 앞면을 나눠 두께를 준다
+    px(2, 20, 28, 5, '#3E2B1E');            // 앞면(어두움)
+    px(2, 7, 28, 13, '#6B4A32');            // 윗면
+    px(2, 7, 28, 2, '#8A6244');             // 윗면 하이라이트
+    for (let i = 0; i < 14; i++) {          // 나뭇결
+      const y = 9 + ((rnd() * 10) | 0);
+      px(3 + ((rnd() * 24) | 0), y, 3 + ((rnd() * 4) | 0), 1, 'rgba(0,0,0,0.10)');
+    }
+    px(4, 25, 3, 5, '#2A1C13');             // 다리
+    px(25, 25, 3, 5, '#2A1C13');
+
+    // 모니터 — 베젤 / 화면 / 발광
+    px(9, 4, 15, 12, '#0E1420');            // 베젤
+    px(10, 5, 13, 10, '#16324A');           // 화면 바탕
+    px(10, 5, 13, 4, '#1E5C86');            // 화면 상단이 더 밝다
+    for (let i = 0; i < 5; i++) {           // 코드 줄
+      px(11, 6 + i * 2, 3 + ((rnd() * 8) | 0), 1, 'rgba(125,211,252,0.75)');
+    }
+    ctx.fillStyle = 'rgba(56,189,248,0.16)';
+    ctx.fillRect(7, 2, 19, 16);             // 화면빛 번짐
+    px(15, 16, 3, 3, '#33404F');            // 스탠드
+    px(12, 19, 9, 1, '#3C4A5A');            // 받침
+
+    // 키보드·머그
+    px(11, 21, 11, 3, '#2C3846');
+    px(12, 22, 9, 1, '#48586B');
+    px(24, 19, 4, 5, '#B8452F');
+    px(24, 19, 4, 1, '#D9634A');
   } else if (type === 'wall_v') {
-    // Vertical wall segment
-    ctx.fillStyle = '#2A2A3E';
-    ctx.fillRect(0, 0, 32, 32);
-    ctx.fillStyle = '#3A3A50';
-    ctx.fillRect(0, 0, 4, 32);
-    ctx.fillStyle = '#1A1A28';
-    ctx.fillRect(4, 0, 28, 32);
+    px(0, 0, 32, 32, '#2A2A3E');
+    px(0, 0, 4, 32, '#3E3E58');             // 안쪽 면 하이라이트
+    px(4, 0, 28, 32, '#1A1A28');
+    for (let i = 0; i < 12; i++) {          // 벽 질감
+      px(4 + ((rnd() * 28) | 0), (rnd() * 32) | 0, 1, 1, 'rgba(255,255,255,0.05)');
+    }
   }
 
   return canvas.toBuffer('image/png');
 }
+
 
 // ── Generate hint/bubble ──────────────────────────────────────────
 

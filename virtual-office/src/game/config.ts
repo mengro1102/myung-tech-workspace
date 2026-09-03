@@ -20,32 +20,32 @@ export const ROOMS: Record<string, RoomDef> = {
   research_dept: {
     x: 1, y: 1, width: 12, height: 10,
     label: '학술연구부', deptKey: 'research',
-    floorColor: 0x1a3328, wallColor: 0x2ecc71,
+    floorColor: 0x3f7a5f, wallColor: 0x2ecc71,
   },
   orchestration_dept: {
     x: 20, y: 1, width: 12, height: 10,
     label: '오케스트레이션팀', deptKey: 'orchestration',
-    floorColor: 0x332a10, wallColor: 0xf59e0b,
+    floorColor: 0x8a6a2f, wallColor: 0xf59e0b,
   },
   finance_dept: {
     x: 39, y: 1, width: 12, height: 10,
     label: '금융투자부', deptKey: 'finance',
-    floorColor: 0x172040, wallColor: 0x3b82f6,
+    floorColor: 0x3d5a9e, wallColor: 0x3b82f6,
   },
   dev_dept: {
     x: 1, y: 19, width: 12, height: 10,
     label: '개발팀', deptKey: 'dev',
-    floorColor: 0x2d1515, wallColor: 0xef4444,
+    floorColor: 0x8d4a45, wallColor: 0xef4444,
   },
   meeting_room: {
     x: 15, y: 14, width: 16, height: 14,
     label: '회의실', deptKey: 'meeting',
-    floorColor: 0x1a1a2e, wallColor: 0x888888,
+    floorColor: 0x5a5f72, wallColor: 0x888888,
   },
   content_dept: {
     x: 39, y: 19, width: 12, height: 10,
     label: '콘텐츠생산부', deptKey: 'content',
-    floorColor: 0x251535, wallColor: 0xa855f7,
+    floorColor: 0x6b4a8c, wallColor: 0xa855f7,
   },
 };
 

@@ -1,0 +1,33 @@
+/* 폰트 셀프 호스팅.
+ *
+ * 예전에는 index.html 에서 Google Fonts 를 불러왔다. 이 앱은 로컬에서 도는데
+ * 외부 CDN 에 매달려 있어, 네트워크가 없으면 시스템 폰트로 떨어지고 화면이
+ * 다르게 보였다(콘솔에도 ERR_CONNECTION_REFUSED 가 계속 찍혔다).
+ * 오픈소스로 배포할 때도 외부 의존은 줄이는 편이 낫다.
+ *
+ * subset 을 골라 담는다. @fontsource/noto-sans-kr 전체는 48MB 지만 실제로
+ * 필요한 korean/latin subset 은 weight 당 540KB 정도다. 로컬에서 서빙하므로
+ * 이 정도는 즉시 로드된다.
+ *
+ * weight 는 실제 쓰는 것만: 400(본문) · 500(강조) · 700(제목).
+ * 300 은 이전에 선언만 돼 있고 쓰이지 않아 뺐다.
+ */
+
+/* 본문 — Inter (라틴) */
+@import '@fontsource/inter/latin-400.css';
+@import '@fontsource/inter/latin-500.css';
+@import '@fontsource/inter/latin-600.css';
+@import '@fontsource/inter/latin-700.css';
+
+/* 코드·수치 — JetBrains Mono */
+@import '@fontsource/jetbrains-mono/latin-400.css';
+@import '@fontsource/jetbrains-mono/latin-500.css';
+@import '@fontsource/jetbrains-mono/latin-700.css';
+
+/* 한국어 — Noto Sans KR */
+@import '@fontsource/noto-sans-kr/latin-400.css';
+@import '@fontsource/noto-sans-kr/latin-500.css';
+@import '@fontsource/noto-sans-kr/latin-700.css';
+@import '@fontsource/noto-sans-kr/korean-400.css';
+@import '@fontsource/noto-sans-kr/korean-500.css';
+@import '@fontsource/noto-sans-kr/korean-700.css';

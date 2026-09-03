@@ -1,7 +1,9 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, lazy, Suspense } from 'react';
 import { Routes, Route, useNavigate, useLocation } from 'react-router-dom';
 import OpsMap         from './components/OpsMap';
-import OfficeView     from './components/OfficeView';
+// 2D 사무실은 Phaser(minify 후 1.5MB)를 끌고 온다. 정적으로 물리면 메인 탭만
+// 볼 사람도 전부 내려받는다. 탭을 열 때만 가져오도록 지연 로드한다.
+const OfficeView   = lazy(() => import('./components/OfficeView'));
 import AgentFeed       from './components/AgentFeed';
 import AgentTeamModal  from './components/AgentTeamModal';
 import MemoryModal     from './components/MemoryModal';
@@ -12,7 +14,7 @@ import ToastContainer, { ToastItem } from './components/Toast';
 import AgentManageTab  from './components/AgentManageTab';
 import CeoOverrideModal from './components/CeoOverrideModal';
 import NotificationBell, { Notification } from './components/NotificationBell';
-import VirtualOffice   from './pages/VirtualOffice';
+const VirtualOffice = lazy(() => import('./pages/VirtualOffice'));
 import { api, AgentSummary, deptLabels } from './api';
 import './styles/hermes.css';
 
@@ -531,6 +533,10 @@ function MainScreen() {
 
       {/* ── Office Tab ── */}
       {activeTab === 'office' && (
+        <Suspense fallback={<div className="hs-lazy-fallback">
+          <span className="hs-lazy-spinner" />
+          2D 사무실을 불러오는 중…
+        </div>}>
         <OfficeView
           agents={agents}
           cycleStatus={cycleStatus}
@@ -541,6 +547,7 @@ function MainScreen() {
             setTimeout(() => send(msg, d), 100);
           }}
         />
+        </Suspense>
       )}
 
       {/* ── CEO 룸 탭 ── */}
@@ -993,7 +1000,9 @@ function OfficeWrapper() {
         <span style={{ fontSize: 12, color: '#64748b' }}>가상 오피스</span>
       </div>
       <div style={{ flex: 1 }}>
-        <VirtualOffice />
+        <Suspense fallback={<div className="hs-lazy-fallback"><span className="hs-lazy-spinner" />가상 오피스를 불러오는 중…</div>}>
+          <VirtualOffice />
+        </Suspense>
       </div>
     </div>
   );

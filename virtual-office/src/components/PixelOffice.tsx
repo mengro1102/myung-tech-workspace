@@ -107,6 +107,15 @@ function drawPixelAgent(
   const py = Math.round(y);
   const S = 2; // 2x 스케일 계수
 
+  // 발밑 그림자 — 없으면 캐릭터가 바닥에 떠 있는 것처럼 보인다.
+  // 참고한 게더타운류 화면에서 인물이 공간에 '있는' 느낌의 대부분이 이것이다.
+  softShadow(ctx, px, py + 11, 9, 3.5, 0.34);
+
+  // 어두운 외곽선 — 배경과 인물을 분리해 준다. 방 바닥이 어두워 실루엣이
+  // 묻히던 문제가 있었다.
+  ctx.fillStyle = 'rgba(0,0,0,0.55)';
+  ctx.fillRect(px - 9, py - 16, 18, 27);
+
   // 머리 (16×14px)
   ctx.fillStyle = skinTone;
   ctx.fillRect(px - 8*S/2, py - 14*S/2, 8*S/2, 7*S/2);
@@ -183,71 +192,240 @@ function drawSpeechBubble(
   lines.forEach((l, i) => ctx.fillText(l, bx + pad, by + pad + 9 + i * 11));
 }
 
+/* ── 오피스 렌더링 ────────────────────────────────────────────────────────
+   예전 방은 단색 바닥 + 부서색 반투명 사각형이라 사물이 '재질'로 읽히지 않았다.
+   개선 방향은 셋이다.
+
+   1) 바닥에 결을 준다 — 판재 이음새와 미세한 얼룩. 완전히 균일한 면은 인쇄물처럼 보인다.
+   2) 가구를 재질색으로 그린다 — 나무는 나무색, 화면은 화면색. 부서색은 방 정체성
+      (라벨·테두리·러그 테두리)에만 쓰고 사물에는 안 쓴다.
+   3) 모든 사물 아래에 부드러운 그림자를 깐다. 바닥에 '놓인' 느낌은 대부분 그림자가 만든다.
+
+   주의: 이 함수는 애니메이션 루프에서 매 프레임 호출된다. 얼룩·결에 Math.random 을
+   쓰면 화면이 지글거린다. 좌표 기반 해시로 결정적으로 뽑는다. */
+
+/** 좌표 해시 — 같은 자리는 항상 같은 값. 매 프레임 호출돼도 무늬가 안 흔들린다. */
+function noise2(x: number, y: number): number {
+  const n = Math.sin(x * 127.1 + y * 311.7) * 43758.5453;
+  return n - Math.floor(n);
+}
+
+/** 사물 아래 타원 그림자. 바닥에 붙어 있는 느낌을 만든다. */
+function softShadow(
+  ctx: CanvasRenderingContext2D, cx: number, cy: number, rx: number, ry: number, a = 0.32,
+) {
+  const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, Math.max(rx, ry));
+  g.addColorStop(0, `rgba(0,0,0,${a})`);
+  g.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.save();
+  ctx.translate(cx, cy);
+  ctx.scale(1, ry / Math.max(rx, ry));
+  ctx.fillStyle = g;
+  ctx.beginPath();
+  ctx.arc(0, 0, Math.max(rx, ry), 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+}
+
+/** 윗면 + 앞면 + 그림자로 두께가 있는 상자. 가구의 기본 단위. */
+function box(
+  ctx: CanvasRenderingContext2D,
+  x: number, y: number, w: number, h: number, depth: number,
+  top: string, side: string, hi?: string,
+) {
+  softShadow(ctx, x + w / 2, y + h + depth - 1, w * 0.62, depth * 1.5, 0.30);
+  ctx.fillStyle = side;
+  ctx.fillRect(x, y + h, w, depth);          // 앞면
+  ctx.fillStyle = top;
+  ctx.fillRect(x, y, w, h);                  // 윗면
+  if (hi) { ctx.fillStyle = hi; ctx.fillRect(x, y, w, 2); }  // 윗면 앞쪽 하이라이트
+}
+
+/** 화면이 켜진 모니터 — 빛 번짐까지 그려야 '켜져 있다'로 읽힌다. */
+function monitor(ctx: CanvasRenderingContext2D, x: number, y: number, w = 26, h = 18) {
+  ctx.fillStyle = 'rgba(56,189,248,0.10)';
+  ctx.fillRect(x - 5, y - 4, w + 10, h + 8);
+  ctx.fillStyle = '#0e1420';
+  ctx.fillRect(x, y, w, h);
+  ctx.fillStyle = '#173049';
+  ctx.fillRect(x + 2, y + 2, w - 4, h - 4);
+  ctx.fillStyle = 'rgba(125,211,252,0.55)';
+  for (let i = 0; i < 4; i++) {
+    const lw = 4 + Math.floor(noise2(x + i, y) * (w - 12));
+    ctx.fillRect(x + 4, y + 4 + i * 3, lw, 1);
+  }
+  ctx.fillStyle = '#334155';
+  ctx.fillRect(x + w / 2 - 2, y + h, 4, 3);
+  ctx.fillRect(x + w / 2 - 7, y + h + 3, 14, 2);
+}
+
+/** 화분 — 잎을 겹쳐 부피감을 준다. */
+function plant(ctx: CanvasRenderingContext2D, x: number, y: number, s = 1) {
+  softShadow(ctx, x, y + 2, 10 * s, 4 * s, 0.28);
+  ctx.fillStyle = '#8a5a3c';
+  ctx.fillRect(x - 6 * s, y - 6 * s, 12 * s, 8 * s);
+  ctx.fillStyle = '#a06a48';
+  ctx.fillRect(x - 6 * s, y - 6 * s, 12 * s, 2 * s);
+  const leaves: [number, number, number, string][] = [
+    [-5, -12, 6, '#2f6b45'], [4, -13, 6, '#2f6b45'],
+    [0, -17, 7, '#3d8a5a'], [-3, -9, 5, '#256b3f'], [4, -9, 5, '#256b3f'],
+  ];
+  for (const [dx, dy, r, col] of leaves) {
+    ctx.fillStyle = col;
+    ctx.beginPath();
+    ctx.ellipse(x + dx * s, y + dy * s, r * s, (r + 1) * s, 0, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.fillStyle = 'rgba(255,255,255,0.16)';
+  ctx.beginPath();
+  ctx.ellipse(x - 1 * s, y - 18 * s, 3 * s, 2 * s, 0, 0, Math.PI * 2);
+  ctx.fill();
+}
+
+/** 러그 — 방마다 색이 다른 테두리로 정체성을 준다. 참고 이미지의 카펫 역할. */
+function rug(ctx: CanvasRenderingContext2D, cx: number, cy: number, w: number, h: number, c: string) {
+  ctx.fillStyle = 'rgba(0,0,0,0.18)';
+  ctx.fillRect(cx - w / 2, cy - h / 2, w, h);
+  ctx.fillStyle = `${c}26`;
+  ctx.fillRect(cx - w / 2, cy - h / 2, w, h);
+  ctx.strokeStyle = `${c}66`;
+  ctx.lineWidth = 2;
+  ctx.strokeRect(cx - w / 2 + 3, cy - h / 2 + 3, w - 6, h - 6);
+  ctx.strokeStyle = `${c}33`;
+  ctx.lineWidth = 1;
+  ctx.strokeRect(cx - w / 2 + 8, cy - h / 2 + 8, w - 16, h - 16);
+}
+
 function drawRoom(ctx: CanvasRenderingContext2D, room: Room, selected: boolean) {
   const c  = DEPT_COLOR[room.dept] ?? '#64748b';
   const dk = DEPT_DARK[room.dept]  ?? '#1a1a2e';
 
-  // 바닥 타일
+  // ── 바닥 ──
   ctx.fillStyle = dk;
   ctx.fillRect(room.x, room.y, room.w, room.h);
 
-  // 타일 격자
-  ctx.strokeStyle = `${c}18`;
-  ctx.lineWidth = 0.5;
-  for (let gx = room.x; gx < room.x + room.w; gx += 24) {
-    ctx.beginPath(); ctx.moveTo(gx, room.y); ctx.lineTo(gx, room.y + room.h); ctx.stroke();
+  // 판재 이음새 — 밝은 선과 어두운 선을 짝지어야 홈처럼 보인다
+  for (let gy = room.y + 18; gy < room.y + room.h; gy += 18) {
+    ctx.fillStyle = 'rgba(0,0,0,0.22)';
+    ctx.fillRect(room.x, gy, room.w, 1);
+    ctx.fillStyle = 'rgba(255,255,255,0.05)';
+    ctx.fillRect(room.x, gy + 1, room.w, 1);
   }
-  for (let gy = room.y; gy < room.y + room.h; gy += 24) {
-    ctx.beginPath(); ctx.moveTo(room.x, gy); ctx.lineTo(room.x + room.w, gy); ctx.stroke();
+  for (let gx = room.x + 26; gx < room.x + room.w; gx += 26) {
+    ctx.fillStyle = 'rgba(0,0,0,0.13)';
+    ctx.fillRect(gx, room.y, 1, room.h);
   }
+  // 미세한 얼룩 — 좌표 해시라 프레임마다 흔들리지 않는다
+  for (let i = 0; i < 26; i++) {
+    const nx = noise2(room.x + i, room.y);
+    const ny = noise2(room.y + i * 3, room.x);
+    ctx.fillStyle = nx > 0.5 ? 'rgba(255,255,255,0.035)' : 'rgba(0,0,0,0.07)';
+    ctx.fillRect(room.x + nx * (room.w - 4), room.y + ny * (room.h - 4), 2, 2);
+  }
+  // 벽 쪽으로 갈수록 어두워지는 감쇠 — 실내 조명 느낌
+  const vg = ctx.createLinearGradient(0, room.y, 0, room.y + room.h);
+  vg.addColorStop(0, 'rgba(0,0,0,0.30)');
+  vg.addColorStop(0.22, 'rgba(0,0,0,0)');
+  vg.addColorStop(1, 'rgba(0,0,0,0.16)');
+  ctx.fillStyle = vg;
+  ctx.fillRect(room.x, room.y, room.w, room.h);
 
-  // 테두리
-  ctx.strokeStyle = selected ? c : `${c}44`;
+  // ── 벽 ──
+  ctx.fillStyle = 'rgba(0,0,0,0.42)';
+  ctx.fillRect(room.x, room.y, room.w, 7);              // 상단 벽 두께
+  ctx.fillStyle = `${c}55`;
+  ctx.fillRect(room.x, room.y, room.w, 2);              // 벽 윗선(부서색)
+  ctx.fillStyle = 'rgba(255,255,255,0.06)';
+  ctx.fillRect(room.x, room.y + 7, room.w, 1);          // 걸레받이 하이라이트
+
+  ctx.strokeStyle = selected ? c : `${c}3a`;
   ctx.lineWidth = selected ? 2 : 1;
   ctx.strokeRect(room.x + 0.5, room.y + 0.5, room.w - 1, room.h - 1);
-
-  // 방 이름 표시판
-  const label = DEPT_LABEL[room.dept] ?? room.dept;
-  const lw    = label.length * 7 + 14;
-  ctx.fillStyle = `${c}33`;
-  ctx.fillRect(room.x + room.w / 2 - lw / 2, room.y + 5, lw, 16);
-  ctx.fillStyle = c;
-  ctx.font = 'bold 9px monospace';
-  ctx.textAlign = 'center';
-  ctx.fillText(label, room.x + room.w / 2, room.y + 17);
-  ctx.textAlign = 'left';
-
-  // 가구 (픽셀 디자인)
-  ctx.fillStyle = `${c}22`;
-  if (room.dept === 'orchestration_dept') {
-    // 원형 회의 테이블
-    ctx.beginPath();
-    ctx.ellipse(room.x + room.w / 2, room.y + room.h / 2, 55, 32, 0, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.strokeStyle = `${c}55`; ctx.lineWidth = 1.5;
-    ctx.stroke();
-    // 의자들
-    for (let i = 0; i < 6; i++) {
-      const angle = (i / 6) * Math.PI * 2;
-      const cx = room.x + room.w / 2 + Math.cos(angle) * 70;
-      const cy = room.y + room.h / 2 + Math.sin(angle) * 42;
-      ctx.fillStyle = `${c}44`;
-      ctx.beginPath(); ctx.arc(cx, cy, 6, 0, Math.PI * 2); ctx.fill();
-    }
-  } else {
-    // L자형 데스크
-    ctx.fillRect(room.x + 20, room.y + 36, room.w - 40, 14);
-    ctx.fillRect(room.x + 20, room.y + 36, 14, room.h - 60);
-    // 모니터
-    ctx.fillStyle = `${c}55`;
-    ctx.fillRect(room.x + 32, room.y + 22, 24, 16);
-    ctx.fillStyle = `${c}22`;
-    ctx.fillRect(room.x + 42, room.y + 38, 4, 4);
-    // 사이드 선반
-    ctx.fillStyle = `${c}18`;
-    ctx.fillRect(room.x + room.w - 30, room.y + 50, 16, room.h - 80);
+  if (selected) {
+    ctx.strokeStyle = `${c}22`;
+    ctx.lineWidth = 6;
+    ctx.strokeRect(room.x + 3, room.y + 3, room.w - 6, room.h - 6);
   }
+
+  // ── 가구 ── 재질색으로 그린다. 부서색은 방 정체성에만 쓴다.
+  if (room.dept === 'orchestration_dept') {
+    rug(ctx, room.x + room.w / 2, room.y + room.h / 2, Math.min(room.w - 40, 190), Math.min(room.h - 50, 120), c);
+
+    const cx = room.x + room.w / 2, cy = room.y + room.h / 2;
+    softShadow(ctx, cx, cy + 26, 62, 16, 0.34);
+    ctx.fillStyle = '#523726';
+    ctx.beginPath(); ctx.ellipse(cx, cy + 6, 56, 33, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#6d4a32';
+    ctx.beginPath(); ctx.ellipse(cx, cy, 56, 33, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = 'rgba(255,255,255,0.10)';
+    ctx.beginPath(); ctx.ellipse(cx - 12, cy - 10, 26, 12, -0.3, 0, Math.PI * 2); ctx.fill();
+
+    for (let i = 0; i < 6; i++) {
+      const a = (i / 6) * Math.PI * 2;
+      const ox = cx + Math.cos(a) * 74, oy = cy + Math.sin(a) * 46;
+      softShadow(ctx, ox, oy + 5, 9, 4, 0.28);
+      ctx.fillStyle = '#2f3a4a';
+      ctx.beginPath(); ctx.arc(ox, oy, 7, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#3f4d61';
+      ctx.beginPath(); ctx.arc(ox, oy - 1, 6, 0, Math.PI * 2); ctx.fill();
+    }
+    plant(ctx, room.x + 26, room.y + room.h - 18);
+    plant(ctx, room.x + room.w - 26, room.y + room.h - 18, 0.9);
+  } else {
+    rug(ctx, room.x + room.w / 2, room.y + room.h - 44, Math.min(room.w - 56, 150), 62, c);
+
+    // L 자 책상 — 윗면/앞면을 나눠 두께를 준다
+    box(ctx, room.x + 20, room.y + 34, room.w - 46, 16, 6, '#6b4a32', '#3e2b1e', '#87613f');
+    box(ctx, room.x + 20, room.y + 34, 16, room.h - 74, 6, '#63432d', '#38271b');
+
+    monitor(ctx, room.x + 40, room.y + 16);
+    if (room.w > 190) monitor(ctx, room.x + 78, room.y + 18, 22, 15);
+
+    // 키보드·머그
+    ctx.fillStyle = '#2b3543';
+    ctx.fillRect(room.x + 44, room.y + 40, 22, 6);
+    ctx.fillStyle = '#3f4d5e';
+    ctx.fillRect(room.x + 45, room.y + 41, 20, 2);
+    ctx.fillStyle = '#b8452f';
+    ctx.fillRect(room.x + 72, room.y + 38, 7, 8);
+    ctx.fillStyle = '#d9634a';
+    ctx.fillRect(room.x + 72, room.y + 38, 7, 2);
+
+    // 책장 — 책등 색을 섞어 디테일을 준다
+    const sx = room.x + room.w - 34, sy = room.y + 46, sh = Math.max(40, room.h - 92);
+    box(ctx, sx, sy, 20, sh, 5, '#3a2a1c', '#2a1c13');
+    const spines = ['#8d5a3c', '#3f6b8a', '#7a4a6b', '#4a7a5a', '#a08040'];
+    for (let r = 0; r < Math.floor(sh / 14); r++) {
+      const shelfY = sy + 4 + r * 14;
+      ctx.fillStyle = '#2a1c13';
+      ctx.fillRect(sx + 1, shelfY + 10, 18, 2);
+      for (let b = 0; b < 5; b++) {
+        ctx.fillStyle = spines[(r * 5 + b + room.x) % spines.length];
+        ctx.fillRect(sx + 2 + b * 3.4, shelfY, 3, 10);
+      }
+    }
+    plant(ctx, room.x + room.w - 22, room.y + room.h - 16, 0.85);
+  }
+
+  // ── 방 이름표 ── 벽에 붙은 명패처럼
+  const label = DEPT_LABEL[room.dept] ?? room.dept;
+  const lw = label.length * 7 + 18;
+  const lx = room.x + room.w / 2 - lw / 2, ly = room.y + 6;
+  softShadow(ctx, room.x + room.w / 2, ly + 19, lw / 2, 4, 0.3);
+  ctx.fillStyle = 'rgba(10,12,20,0.88)';
+  ctx.fillRect(lx, ly, lw, 17);
+  ctx.fillStyle = c;
+  ctx.fillRect(lx, ly, 3, 17);
+  ctx.strokeStyle = `${c}55`;
+  ctx.lineWidth = 1;
+  ctx.strokeRect(lx + 0.5, ly + 0.5, lw - 1, 16);
+  ctx.fillStyle = c;
+  ctx.font = 'bold 9px "Noto Sans KR", monospace';
+  ctx.textAlign = 'center';
+  ctx.fillText(label, room.x + room.w / 2 + 1, ly + 12);
+  ctx.textAlign = 'left';
 }
+
 
 function lerp(a: number, b: number, t: number) { return a + (b - a) * t; }
 

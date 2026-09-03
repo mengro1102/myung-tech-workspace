@@ -2,6 +2,6 @@
 @tailwind components;
 @tailwind utilities;
 
-body {
-  font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
-}
+/* body 의 font-family 는 styles/hermes.css 한 곳에서만 정한다.
+   여기서 'Segoe UI' 를 다시 선언하는 바람에(나중에 로드돼 이겼다) 자체 호스팅한
+   Inter·Noto Sans KR 이 적용되지 않고 시스템 폰트로 렌더되고 있었다. */
