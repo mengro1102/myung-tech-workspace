@@ -121,7 +121,6 @@ function MainScreen() {
   ]);
   const [time,        setTime]        = useState(nowStr());
   const [sidebarW,    setSidebarW]    = useState(220);   // 사이드바 너비 (px)
-  const [feedOpen,    setFeedOpen]    = useState(true);  // 에이전트 활동 토글
   const [isMobile,    setIsMobile]    = useState(() => window.innerWidth < 768);
   const navigate = useNavigate();
   const chatEndRef = useRef<HTMLDivElement>(null);
@@ -765,16 +764,9 @@ function MainScreen() {
             })}
           </div>
 
-          {/* 에이전트 활동 피드 헤드 — 토글 */}
-          <button className="hs-sidebar-toggle-title" onClick={() => setFeedOpen(o => !o)}>
-            <span>에이전트 활동</span>
-            <span className="hs-toggle-icon">{feedOpen ? '▾' : '▸'}</span>
-          </button>
-          {feedOpen && (
-            <div className="hs-feed-head">
-              <AgentFeed compact />
-            </div>
-          )}
+          {/* 활동 피드는 중앙 상단으로 옮겼다. 여기 두면 같은 화면에 같은 피드가
+              둘 뜨고(태블릿 폭에서 특히 눈에 띈다), 사이드바는 좁아 읽기도 어렵다.
+              사이드바는 '상태와 할 일', 중앙은 '지금 일어나는 일'로 나눈다. */}
         </aside>}
 
         {/* 사이드바 드래그 핸들 — 데스크톱 전용 */}
@@ -872,12 +864,11 @@ function MainScreen() {
 
           {/* Chat input */}
           <div className="hs-input-bar">
+            {/* 인라인 스타일이던 것을 클래스로 옮겼다. 좁은 화면에서 줄어들지도
+                줄바꿈되지도 않아 전송 버튼을 화면 밖으로 밀어냈다. */}
             <select
-              style={{
-                background: 'var(--bg3)', border: '1px solid var(--border)',
-                borderRadius: 8, color: '#64748b', fontSize: 11, padding: '5px 8px',
-                cursor: 'pointer', outline: 'none',
-              }}
+              className="hs-dept-select"
+              aria-label="지시할 부서 선택"
               value={dept}
               onChange={e => setDept(e.target.value)}
             >
@@ -888,7 +879,9 @@ function MainScreen() {
               <option value="content_dept">✍️ 콘텐츠</option>
             </select>
 
-            <div className="hs-textarea-wrap" style={{ flex: 1 }}>
+            {/* 인라인 flex 를 제거했다 — 클래스에 이미 flex:1 이 있고, 인라인이
+                우선하는 바람에 모바일에서 줄바꿈(flex-basis:100%)이 먹지 않았다. */}
+            <div className="hs-textarea-wrap">
               <textarea
                 ref={textareaRef}
                 className="hs-textarea"
