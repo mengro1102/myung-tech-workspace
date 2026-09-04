@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { useLocalState } from '../localStore';
 
 interface Props {
   onClose: () => void;
@@ -118,19 +119,20 @@ export default function ManageModal({ onClose, agentCount, globalModel, onOpenTe
   const [ideaLoading, setIdeaLoading] = useState(false);
   const [ideaCtx,     setIdeaCtx]    = useState('');
 
-  // 태스크 보드
-  const [tasks,       setTasks]       = useState<TaskItem[]>([]);
+  /* 아래 셋은 서버에 스키마가 없어 브라우저에만 남긴다. 예전에는 그냥 React
+   * state 라 새로고침 한 번에 사라졌다. */
+  const [tasks,       setTasks]       = useLocalState<TaskItem[]>('mt.tasks', []);
   const [taskInput,   setTaskInput]   = useState('');
 
-  // 승인 큐
-  const [approvals]                   = useState<Approval[]>([]);
+  const [approvals,   setApprovals]   = useLocalState<Approval[]>('mt.approvals', []);
 
   // 내 서비스
   const [svcName,     setSvcName]     = useState('');
   const [svcUrl,      setSvcUrl]      = useState('');
   const [svcGithub,   setSvcGithub]   = useState('');
   const [svcDesc,     setSvcDesc]     = useState('');
-  const [services,    setServices]    = useState<{name:string;url:string;github:string;desc:string}[]>([]);
+  const [services,    setServices]    =
+    useLocalState<{name:string;url:string;github:string;desc:string}[]>('mt.services', []);
 
   // 연동 자격증명
   const [tgToken,     setTgToken]     = useState('');
@@ -305,6 +307,15 @@ export default function ManageModal({ onClose, agentCount, globalModel, onOpenTe
     showToast('✅ 서비스 등록됨');
   };
 
+  /* 승인 큐 — 아직 에이전트가 결재를 올리는 경로가 없다. 이 버튼은 큐가
+   * 어떻게 보이는지 확인하는 용도다(이름 그대로 '테스트'). */
+  const addSampleApproval = () => {
+    setApprovals(prev => [...prev, {
+      id: Date.now().toString(),
+      label: `[샘플] 광고 집행 ₩250,000 결제 승인 요청 — ${new Date().toLocaleTimeString('ko-KR')}`,
+    }]);
+  };
+
   /* 태스크 추가 */
   const addTask = () => {
     if (!taskInput.trim()) return;
@@ -425,7 +436,7 @@ export default function ManageModal({ onClose, agentCount, globalModel, onOpenTe
             {/* 태스크 보드 */}
             <div style={{ marginBottom: 16 }}>
               <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)', marginBottom: 8 }}>
-                📋 태스크 보드 — 할 일 <span style={{ fontSize: 10, color: 'var(--muted)' }}>(에이전트가 자동으로 쌓기도 함)</span>
+                📋 태스크 보드 — 할 일 <span style={{ fontSize: 10, color: 'var(--muted)' }}>(이 브라우저에 저장됩니다)</span>
               </div>
               <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
                 <input
@@ -439,7 +450,7 @@ export default function ManageModal({ onClose, agentCount, globalModel, onOpenTe
                 <button className="hm-save-btn" style={{ margin: 0, padding: '6px 14px', fontSize: 12 }} onClick={addTask}>+ 추가</button>
               </div>
               {tasks.length === 0 ? (
-                <div className="mem-beta-note" style={{ margin: 0 }}>할 일이 없어요 — 위에 입력하거나, 에이전트가 자동으로 쌓아요.</div>
+                <div className="mem-beta-note" style={{ margin: 0 }}>할 일이 없어요 — 위에 추가해 보세요.</div>
               ) : (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                   {tasks.map(t => (
@@ -469,13 +480,26 @@ export default function ManageModal({ onClose, agentCount, globalModel, onOpenTe
                   marginLeft: 'auto', padding: '4px 12px',
                   background: 'transparent', border: '1px solid var(--border)',
                   borderRadius: 6, color: 'var(--muted)', fontSize: 11, cursor: 'pointer',
-                }}>큰 결제 테스트</button>
+                }} onClick={addSampleApproval}>큰 결제 테스트</button>
               </div>
               {approvals.length === 0 ? (
-                <div className="mem-beta-note" style={{ margin: 0 }}>대기 중인 승인이 없어요.</div>
+                <div className="mem-beta-note" style={{ margin: 0 }}>
+                  대기 중인 승인이 없어요. (에이전트가 결재를 올리는 경로는 아직 없습니다 —
+                  위 버튼으로 큐 모양만 확인할 수 있어요.)
+                </div>
               ) : approvals.map(a => (
-                <div key={a.id} style={{ padding: '8px 12px', background: 'var(--bg3)', borderRadius: 8, marginBottom: 6, fontSize: 12 }}>
-                  {a.label}
+                <div key={a.id} style={{
+                  display: 'flex', alignItems: 'center', gap: 8,
+                  padding: '8px 12px', background: 'var(--bg3)', borderRadius: 8,
+                  marginBottom: 6, fontSize: 12,
+                }}>
+                  <span style={{ flex: 1 }}>{a.label}</span>
+                  <button
+                    onClick={() => setApprovals(prev => prev.filter(x => x.id !== a.id))}
+                    style={{ background: 'none', border: 'none', color: 'var(--muted2)',
+                             cursor: 'pointer', fontSize: 14 }}
+                    aria-label="승인 항목 삭제"
+                  >✕</button>
                 </div>
               ))}
             </div>
@@ -485,7 +509,7 @@ export default function ManageModal({ onClose, agentCount, globalModel, onOpenTe
         {/* ══ 내 서비스 ══ */}
         {tab === '내 서비스' && (
           <div className="mem-content">
-            <p className="mem-hint">등록한 서비스는 에이전트가 인지해서 답변·작업에 활용합니다. 깃헙 레포를 넣으면 에이전트가 그 코드를 읽고 SEO-GEO 같은 가벼운 수정은 직접, 핵심 변경은 결재로 올립니다.</p>
+            <p className="mem-hint">내가 운영하는 서비스를 적어 두는 목록입니다. 이 브라우저에 저장됩니다. 에이전트가 이 목록을 읽어 코드를 고치거나 결재를 올리는 연동은 아직 없습니다.</p>
 
             <Field label="서비스 이름 (예: 내 랜딩 페이지)" value={svcName} onChange={setSvcName} />
             <Field label="웹사이트 주소" placeholder="https://..." value={svcUrl} onChange={setSvcUrl} />
@@ -584,10 +608,12 @@ export default function ManageModal({ onClose, agentCount, globalModel, onOpenTe
               connected={!!connKeys.YOUTUBE_OAUTH_CLIENT_ID}
               onSave={() => save('YouTube OAuth', { YOUTUBE_OAUTH_CLIENT_ID: ytOauthId, YOUTUBE_OAUTH_CLIENT_SECRET: ytOauthSec })}
               extraActions={
-                <button style={{
+                <button disabled
+                  title="구글 OAuth 왕복을 처리하는 콜백 서버가 아직 없습니다"
+                  style={{
                   padding: '8px 14px', background: 'rgba(15,253,106,0.1)',
                   border: '1px solid rgba(15,253,106,0.3)', borderRadius: 8,
-                  color: 'var(--green)', fontSize: 13, cursor: 'pointer',
+                  color: 'var(--green)', fontSize: 13, cursor: 'not-allowed',
                 }}>⚡ 자동 연결</button>
               }
             >
@@ -683,7 +709,8 @@ export default function ManageModal({ onClose, agentCount, globalModel, onOpenTe
               <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 8 }}>+ 새 MCP 서버 추가</div>
               <Field label="서버 이름" placeholder="my-mcp-server" value="" onChange={() => {}} />
               <Field label="Command" placeholder="npx @modelcontextprotocol/server-filesystem /path" value="" onChange={() => {}} />
-              <button className="hm-save-btn" style={{ marginTop: 10 }}>연결</button>
+              <button className="hm-save-btn" style={{ marginTop: 10 }} disabled
+                      title="MCP 서버를 띄우고 관리하는 백엔드가 아직 없습니다">연결</button>
             </div>
           </div>
         )}

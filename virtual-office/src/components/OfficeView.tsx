@@ -251,8 +251,12 @@ export default function OfficeView({ agents, cycleStatus, taskSummary, onDeptCha
                     에이전트 <span style={{ color: meta.color, fontWeight: 700 }}>{senderLabel(e.sender)}</span>에서 이상 감지: {cleaned}
                   </div>
                   <div style={{ marginTop: 8, display: 'flex', gap: 6 }}>
-                    <button className="ov-critical-btn primary">승인</button>
-                    <button className="ov-critical-btn ghost">중단</button>
+                    {/* 결재를 받아 처리하는 백엔드가 아직 없다. 눌러도 아무
+                        일이 없느니, 아직 없다고 말하는 편이 낫다. */}
+                    <button className="ov-critical-btn primary" disabled
+                            title="결재 처리 백엔드가 아직 없습니다">승인</button>
+                    <button className="ov-critical-btn ghost" disabled
+                            title="작업 중단 API 가 아직 없습니다">중단</button>
                   </div>
                 </div>
               );

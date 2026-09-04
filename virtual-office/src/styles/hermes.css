@@ -875,6 +875,10 @@ body {
 }
 .hm-save-btn:hover { opacity: 0.88; }
 .hm-save-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* 아직 만들지 않은 기능의 버튼은 눌리지 않을 뿐 아니라 눌리지 않아 보여야
+   한다. 멀쩡해 보이는데 아무 일도 안 하는 버튼이 제일 나쁘다. */
+button:disabled { opacity: 0.45; cursor: not-allowed; }
 .hm-footer-hint { font-size: 10px; color: var(--muted2); text-align: center; padding: 10px; border-top: 1px solid var(--border); }
 
 /* ══════════════════════════════════════════════════════
