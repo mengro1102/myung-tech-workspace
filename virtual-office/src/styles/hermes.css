@@ -876,6 +876,21 @@ body {
 .hm-save-btn:hover { opacity: 0.88; }
 .hm-save-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 
+/* 승인 큐 — 결재는 잘못 누르면 곤란하므로 승인/거절을 색으로 구분한다. */
+.hm-approve-btn {
+  flex-shrink: 0;
+  padding: 3px 10px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+  background: transparent;
+}
+.hm-approve-btn.ok { border: 1px solid rgba(45,212,191,.45); color: #2DD4BF; }
+.hm-approve-btn.ok:hover { background: rgba(45,212,191,.12); }
+.hm-approve-btn.no { border: 1px solid rgba(248,113,113,.4); color: #F87171; }
+.hm-approve-btn.no:hover { background: rgba(248,113,113,.12); }
+
 /* 아직 만들지 않은 기능의 버튼은 눌리지 않을 뿐 아니라 눌리지 않아 보여야
    한다. 멀쩡해 보이는데 아무 일도 안 하는 버튼이 제일 나쁘다. */
 button:disabled { opacity: 0.45; cursor: not-allowed; }

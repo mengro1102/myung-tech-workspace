@@ -49,6 +49,7 @@ sys.path.insert(0, str(MYUNG_TECH_WORKSPACE / "shared_memory"))
 sys.path.insert(0, str(MYUNG_TECH_WORKSPACE))
 import task_queue
 import message_broker
+import workspace_store
 
 try:
     import knowledge_base as kb
@@ -316,9 +317,31 @@ def kb_context(instruction: str) -> tuple[str, list[str]]:
         return "", []
 
 
+# 에이전트가 화면에 무언가를 남기는 방법.
+#
+# 키워드로 결과 문장을 훑어 "결제 같아 보이면 결재를 올린다" 식으로 하려다
+# 말았다. 산문을 추측하는 방식은 조용히 틀리고, 틀린 것을 알아채기 어렵다.
+# 대신 출력 약속을 준다 — 줄 맨 앞에 표시를 달면 그 줄만 꺼내 쓴다.
+TODO_MARK = "[할일]"
+APPROVAL_MARK = "[결재요청]"
+
+
 def _system_prompt(dept_name: str, has_kb: bool) -> str:
     base = (f"당신은 명테크의 {dept_name} 소속 AI 에이전트입니다. "
             "주어진 지시를 한국어로 간결하고 구조적으로 수행하세요.")
+
+    services = workspace_store.services_brief()
+    if services:
+        base += ("\n\n" + services +
+                 "\n답변이 이 서비스들과 관련될 때는 이름을 그대로 쓰세요.")
+
+    base += (
+        f"\n\n답변 맨 아래에, 필요할 때만 다음 줄을 덧붙일 수 있습니다.\n"
+        f"- 후속으로 사람이 처리해야 할 일이 생기면: `{TODO_MARK} 할 일 한 줄`\n"
+        f"- 돈을 쓰거나, 외부에 공개하거나, 되돌리기 어려운 일을 하려면 먼저: "
+        f"`{APPROVAL_MARK} 무엇을 왜 하려는지 한 줄`\n"
+        "각각 한 줄씩, 필요 없으면 쓰지 마세요. 이 줄들은 사장님 화면의 "
+        "태스크 보드와 승인 큐에 그대로 올라갑니다.")
     if has_kb:
         base += (
             "\n\n아래 '지식베이스 검색 결과'는 우리 조직의 위키에서 가져온 실제 문서입니다. "
@@ -326,6 +349,28 @@ def _system_prompt(dept_name: str, has_kb: bool) -> str:
             "**검색 결과에 없는 내용을 사실처럼 서술하거나 경로를 지어내지 마세요.** "
             "근거가 부족하면 '위키에 근거 없음'이라고 명시하고 추론임을 밝히세요.")
     return base
+
+
+def _harvest_marks(result: str) -> list[tuple[str, str]]:
+    """결과에서 [할일]·[결재요청] 줄을 꺼낸다. (종류, 내용) 목록.
+
+    모델이 표시를 굵게(**[할일]**) 쓰거나 목록 기호를 붙이는 일이 흔해서
+    앞쪽 장식은 걷어내고 본다. 한 종류당 세 줄까지만 받는다 — 모델이
+    폭주해도 화면이 잠기지 않게.
+    """
+    found: list[tuple[str, str]] = []
+    counts = {"todo": 0, "approval": 0}
+    for raw_line in result.splitlines():
+        line = raw_line.strip().lstrip("-*•> ").replace("**", "").strip()
+        for mark, kind in ((TODO_MARK, "todo"), (APPROVAL_MARK, "approval")):
+            if not line.startswith(mark):
+                continue
+            text = line[len(mark):].strip(" :：-—").strip()
+            if text and counts[kind] < 3:
+                counts[kind] += 1
+                found.append((kind, text[:200]))
+            break
+    return found
 
 
 # ── 작업 수행 ───────────────────────────────────────────────────────────────
@@ -362,6 +407,18 @@ def _dispatch_task(task: dict) -> None:
         if paths:
             footer = "\n\n---\n참조: " + ", ".join(f"`{p}`" for p in paths[:5])
         task_queue.update_status(task_id, "done", result=result + footer)
+
+        for kind, text in _harvest_marks(result):
+            try:
+                if kind == "todo":
+                    workspace_store.add_task(text, source=dept_id, department=dept_id)
+                    emit(dept_id, "studio_ui", f"할 일 등록 — {text[:120]}")
+                else:
+                    workspace_store.request_approval(text, department=dept_id,
+                                                     detail=task["instruction"][:300])
+                    emit(dept_id, "studio_ui", f"결재 요청 — {text[:120]}")
+            except Exception as exc:  # noqa: BLE001
+                print(f"[dispatcher] 저장소 기록 실패(무시): {exc}", file=sys.stderr)
 
         emit(dept_id, requester,
              f"완료 ({elapsed:.1f}s) — {result[:220]}{'…' if len(result) > 220 else ''}")

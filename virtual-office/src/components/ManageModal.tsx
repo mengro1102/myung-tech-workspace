@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
-import { useLocalState } from '../localStore';
+import { useStore } from '../useStore';
+import { deptColors, deptLabels, type ApprovalRow, type ServiceRow, type TaskRow } from '../api';
 
 interface Props {
   onClose: () => void;
@@ -119,20 +120,22 @@ export default function ManageModal({ onClose, agentCount, globalModel, onOpenTe
   const [ideaLoading, setIdeaLoading] = useState(false);
   const [ideaCtx,     setIdeaCtx]    = useState('');
 
-  /* 아래 셋은 서버에 스키마가 없어 브라우저에만 남긴다. 예전에는 그냥 React
-   * state 라 새로고침 한 번에 사라졌다. */
-  const [tasks,       setTasks]       = useLocalState<TaskItem[]>('mt.tasks', []);
+  /* 서버 저장소. 에이전트도 같은 곳에 쓴다 — 화면에서 지운 할 일이 다시
+   * 살아나지 않고, 에이전트가 올린 결재가 여기 뜬다. */
+  const taskStore     = useStore<TaskRow>('tasks');
+  const serviceStore  = useStore<ServiceRow>('services');
+  const approvalStore = useStore<ApprovalRow>('approvals');
+  const tasks     = taskStore.items;
+  const services  = serviceStore.items;
+  const approvals = approvalStore.items;
   const [taskInput,   setTaskInput]   = useState('');
 
-  const [approvals,   setApprovals]   = useLocalState<Approval[]>('mt.approvals', []);
 
   // 내 서비스
   const [svcName,     setSvcName]     = useState('');
   const [svcUrl,      setSvcUrl]      = useState('');
   const [svcGithub,   setSvcGithub]   = useState('');
   const [svcDesc,     setSvcDesc]     = useState('');
-  const [services,    setServices]    =
-    useLocalState<{name:string;url:string;github:string;desc:string}[]>('mt.services', []);
 
   // 연동 자격증명
   const [tgToken,     setTgToken]     = useState('');
@@ -300,26 +303,29 @@ export default function ManageModal({ onClose, agentCount, globalModel, onOpenTe
   };
 
   /* 서비스 등록 */
-  const addService = () => {
+  const addService = async () => {
     if (!svcName && !svcUrl) return;
-    setServices(prev => [...prev, { name: svcName, url: svcUrl, github: svcGithub, desc: svcDesc }]);
+    const ok = await serviceStore.add({ name: svcName, url: svcUrl, github: svcGithub, desc: svcDesc });
+    if (!ok) { showToast('❌ 서비스 등록 실패 — 서버 확인'); return; }
     setSvcName(''); setSvcUrl(''); setSvcGithub(''); setSvcDesc('');
-    showToast('✅ 서비스 등록됨');
+    showToast('✅ 서비스 등록됨 — 에이전트가 이제 이 서비스를 압니다');
   };
 
   /* 승인 큐 — 아직 에이전트가 결재를 올리는 경로가 없다. 이 버튼은 큐가
    * 어떻게 보이는지 확인하는 용도다(이름 그대로 '테스트'). */
   const addSampleApproval = () => {
-    setApprovals(prev => [...prev, {
-      id: Date.now().toString(),
+    approvalStore.add({
       label: `[샘플] 광고 집행 ₩250,000 결제 승인 요청 — ${new Date().toLocaleTimeString('ko-KR')}`,
-    }]);
+      status: 'pending',
+      department: '',
+    });
   };
 
   /* 태스크 추가 */
-  const addTask = () => {
+  const addTask = async () => {
     if (!taskInput.trim()) return;
-    setTasks(prev => [...prev, { id: Date.now().toString(), text: taskInput, done: false }]);
+    const ok = await taskStore.add({ text: taskInput.trim(), done: false, source: 'user' });
+    if (!ok) { showToast('❌ 할 일 저장 실패 — 서버 확인'); return; }
     setTaskInput('');
   };
 
@@ -436,7 +442,7 @@ export default function ManageModal({ onClose, agentCount, globalModel, onOpenTe
             {/* 태스크 보드 */}
             <div style={{ marginBottom: 16 }}>
               <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)', marginBottom: 8 }}>
-                📋 태스크 보드 — 할 일 <span style={{ fontSize: 10, color: 'var(--muted)' }}>(이 브라우저에 저장됩니다)</span>
+                📋 태스크 보드 — 할 일 <span style={{ fontSize: 10, color: 'var(--muted)' }}>(에이전트가 올린 것도 여기 쌓입니다)</span>
               </div>
               <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
                 <input
@@ -450,7 +456,7 @@ export default function ManageModal({ onClose, agentCount, globalModel, onOpenTe
                 <button className="hm-save-btn" style={{ margin: 0, padding: '6px 14px', fontSize: 12 }} onClick={addTask}>+ 추가</button>
               </div>
               {tasks.length === 0 ? (
-                <div className="mem-beta-note" style={{ margin: 0 }}>할 일이 없어요 — 위에 추가해 보세요.</div>
+                <div className="mem-beta-note" style={{ margin: 0 }}>할 일이 없어요 — 위에 추가하거나, 에이전트가 올릴 때까지 기다리세요.</div>
               ) : (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                   {tasks.map(t => (
@@ -460,11 +466,16 @@ export default function ManageModal({ onClose, agentCount, globalModel, onOpenTe
                       border: '1px solid var(--border)',
                     }}>
                       <input type="checkbox" checked={t.done}
-                        onChange={() => setTasks(prev => prev.map(x => x.id===t.id ? {...x,done:!x.done} : x))}
+                        onChange={() => taskStore.update(t.id, { done: !t.done })}
                         style={{ accentColor: 'var(--green)', cursor: 'pointer' }}
                       />
                       <span style={{ flex: 1, fontSize: 12, color: t.done ? 'var(--muted)' : 'var(--text)', textDecoration: t.done ? 'line-through' : 'none' }}>{t.text}</span>
-                      <button onClick={() => setTasks(prev => prev.filter(x => x.id!==t.id))}
+                      {t.source && t.source !== 'user' && (
+                        <span style={{ fontSize: 10, color: 'var(--secondary)', flexShrink: 0 }}>
+                          {deptLabels[t.source] ?? t.source}
+                        </span>
+                      )}
+                      <button onClick={() => taskStore.remove(t.id)}
                         style={{ background: 'none', border: 'none', color: 'var(--muted2)', cursor: 'pointer', fontSize: 14 }}>✕</button>
                     </div>
                   ))}
@@ -484,24 +495,46 @@ export default function ManageModal({ onClose, agentCount, globalModel, onOpenTe
               </div>
               {approvals.length === 0 ? (
                 <div className="mem-beta-note" style={{ margin: 0 }}>
-                  대기 중인 승인이 없어요. (에이전트가 결재를 올리는 경로는 아직 없습니다 —
-                  위 버튼으로 큐 모양만 확인할 수 있어요.)
+                  대기 중인 승인이 없어요. 에이전트가 돈을 쓰거나 되돌리기 어려운 일을
+                  하려 할 때 여기로 올립니다.
                 </div>
-              ) : approvals.map(a => (
-                <div key={a.id} style={{
-                  display: 'flex', alignItems: 'center', gap: 8,
-                  padding: '8px 12px', background: 'var(--bg3)', borderRadius: 8,
-                  marginBottom: 6, fontSize: 12,
-                }}>
-                  <span style={{ flex: 1 }}>{a.label}</span>
-                  <button
-                    onClick={() => setApprovals(prev => prev.filter(x => x.id !== a.id))}
-                    style={{ background: 'none', border: 'none', color: 'var(--muted2)',
-                             cursor: 'pointer', fontSize: 14 }}
-                    aria-label="승인 항목 삭제"
-                  >✕</button>
-                </div>
-              ))}
+              ) : approvals.map(a => {
+                const done = a.status && a.status !== 'pending';
+                return (
+                  <div key={a.id} style={{
+                    display: 'flex', alignItems: 'center', gap: 8,
+                    padding: '8px 12px', background: 'var(--bg3)', borderRadius: 8,
+                    marginBottom: 6, fontSize: 12,
+                    opacity: done ? 0.55 : 1,
+                  }}>
+                    <span style={{ flex: 1 }}>
+                      {a.department && (
+                        <span style={{ color: deptColors[a.department] ?? 'var(--secondary)', marginRight: 6 }}>
+                          [{deptLabels[a.department] ?? a.department}]
+                        </span>
+                      )}
+                      {a.label}
+                      {done && <span style={{ marginLeft: 6, color: 'var(--muted2)' }}>
+                        — {a.status === 'approved' ? '승인함' : '거절함'}
+                      </span>}
+                    </span>
+                    {!done && (
+                      <>
+                        <button className="hm-approve-btn ok"
+                          onClick={() => approvalStore.update(a.id, { status: 'approved' })}>승인</button>
+                        <button className="hm-approve-btn no"
+                          onClick={() => approvalStore.update(a.id, { status: 'rejected' })}>거절</button>
+                      </>
+                    )}
+                    <button
+                      onClick={() => approvalStore.remove(a.id)}
+                      style={{ background: 'none', border: 'none', color: 'var(--muted2)',
+                               cursor: 'pointer', fontSize: 14 }}
+                      aria-label="승인 항목 삭제"
+                    >✕</button>
+                  </div>
+                );
+              })}
             </div>
           </div>
         )}
@@ -509,7 +542,7 @@ export default function ManageModal({ onClose, agentCount, globalModel, onOpenTe
         {/* ══ 내 서비스 ══ */}
         {tab === '내 서비스' && (
           <div className="mem-content">
-            <p className="mem-hint">내가 운영하는 서비스를 적어 두는 목록입니다. 이 브라우저에 저장됩니다. 에이전트가 이 목록을 읽어 코드를 고치거나 결재를 올리는 연동은 아직 없습니다.</p>
+            <p className="mem-hint">내가 운영하는 서비스 목록입니다. 등록하면 에이전트의 시스템 프롬프트에 들어가 답변에 반영됩니다. (깃헙 레포를 직접 고치는 연동은 아직 없습니다.)</p>
 
             <Field label="서비스 이름 (예: 내 랜딩 페이지)" value={svcName} onChange={setSvcName} />
             <Field label="웹사이트 주소" placeholder="https://..." value={svcUrl} onChange={setSvcUrl} />
@@ -533,7 +566,7 @@ export default function ManageModal({ onClose, agentCount, globalModel, onOpenTe
                       {svc.url && <div style={{ fontSize: 11, color: 'var(--muted)' }}>{svc.url}</div>}
                       {svc.github && <div style={{ fontSize: 10, color: 'var(--muted2)' }}>📦 {svc.github}</div>}
                     </div>
-                    <button onClick={() => setServices(prev => prev.filter((_, j) => j !== i))}
+                    <button onClick={() => serviceStore.remove(svc.id)}
                       style={{ background: 'none', border: 'none', color: 'var(--muted2)', cursor: 'pointer' }}>✕</button>
                   </div>
                 ))}

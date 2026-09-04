@@ -88,6 +88,7 @@ sys.path.insert(0, str(ROOT / "orchestrator"))
 
 import task_queue
 import message_broker
+import workspace_store
 from cycle_runner import runner as cycle_runner
 
 # 단기기억 = GraphRAG 지식베이스 참조 (knowledge_base.py, repo 루트). import 실패해도 서버는 떠야 하므로 guard.
@@ -541,6 +542,16 @@ class Handler(BaseHTTPRequestHandler):
                 "total":       len(all_tasks),
             })
 
+        # ── GET /api/store/<collection>  (할 일 · 등록 서비스 · 승인 큐)
+        #    브라우저에만 있던 것들을 서버로 올렸다. 에이전트도 같은 파일을 읽고
+        #    쓴다 — 그래야 "에이전트가 할 일을 쌓는다"가 말이 된다.
+        elif path.startswith("/api/store/"):
+            collection = path.split("/api/store/")[1]
+            if collection not in workspace_store.COLLECTIONS:
+                _json_resp(self, 404, {"error": f"알 수 없는 컬렉션: {collection}"})
+                return
+            _json_resp(self, 200, {"items": workspace_store.load(collection)})
+
         # ── GET /api/config/model  (공통 두뇌 — 디스패처와 공유하는 단일 출처)
         elif path == "/api/config/model":
             cfg = _runtime_config()
@@ -634,6 +645,23 @@ class Handler(BaseHTTPRequestHandler):
         else:
             _json_resp(self, 404, {"error": "Not found"})
 
+    def do_PUT(self):
+        """PATCH 대신 PUT 을 쓴다 — do_PATCH 는 이미 에이전트 수정에 쓰고 있다."""
+        parsed = urlparse(self.path)
+        path = parsed.path.rstrip("/")
+        if path.startswith("/api/store/"):
+            rest = path.split("/api/store/")[1].split("/")
+            if len(rest) != 2 or rest[0] not in workspace_store.COLLECTIONS:
+                _json_resp(self, 404, {"error": "Not found"})
+                return
+            row = workspace_store.update(rest[0], rest[1], self._read_body())
+            if row is None:
+                _json_resp(self, 404, {"ok": False, "error": "항목이 없습니다"})
+            else:
+                _json_resp(self, 200, {"ok": True, "item": row})
+        else:
+            _json_resp(self, 404, {"error": "Not found"})
+
     def do_DELETE(self):
         # do_DELETE 가 클래스 안에 두 번 정의돼 있었다. 파이썬은 뒤엣것으로
         # 덮어쓰므로 에이전트 삭제만 살아 있고 태스크 삭제는 죽어 있었다 —
@@ -641,7 +669,14 @@ class Handler(BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
         path = parsed.path.rstrip("/")
 
-        if path.startswith("/api/tasks/"):
+        if path.startswith("/api/store/"):
+            rest = path.split("/api/store/")[1].split("/")
+            if len(rest) != 2 or rest[0] not in workspace_store.COLLECTIONS:
+                _json_resp(self, 404, {"error": "Not found"})
+                return
+            _json_resp(self, 200, {"ok": workspace_store.remove(rest[0], rest[1])})
+
+        elif path.startswith("/api/tasks/"):
             task_id = path.split("/api/tasks/")[1]
             ok = task_queue.delete_task(task_id) if hasattr(task_queue, "delete_task") else False
             _json_resp(self, 200, {"ok": ok, "task_id": task_id})
@@ -743,6 +778,18 @@ class Handler(BaseHTTPRequestHandler):
                 )
                 created.append({"task_id": task["task_id"], "department": t.get("department")})
             _json_resp(self, 200, {"ok": True, "tasks": created, "count": len(created)})
+
+        # ── POST /api/store/<collection>  {…}  (항목 추가)
+        elif path.startswith("/api/store/"):
+            collection = path.split("/api/store/")[1]
+            if collection not in workspace_store.COLLECTIONS:
+                _json_resp(self, 404, {"error": f"알 수 없는 컬렉션: {collection}"})
+                return
+            body = self._read_body()
+            try:
+                _json_resp(self, 200, {"ok": True, "item": workspace_store.add(collection, body)})
+            except Exception as e:  # noqa: BLE001
+                _json_resp(self, 400, {"ok": False, "error": str(e)})
 
         # ── POST /api/config/model  {model}
         elif path == "/api/config/model":

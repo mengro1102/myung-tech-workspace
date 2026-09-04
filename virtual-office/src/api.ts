@@ -74,6 +74,34 @@ async function safeJson<T>(p: Promise<Response>): Promise<T | null> {
   }
 }
 
+export type StoreCollection = 'tasks' | 'services' | 'approvals';
+
+export interface StoreItem {
+  id: string;
+  created_at: number;
+  updated_at?: number;
+  [key: string]: unknown;
+}
+
+export interface TaskRow extends StoreItem {
+  text: string;
+  done: boolean;
+  /** 'user' 면 사람이, 부서 id 면 그 부서 에이전트가 쌓은 것 */
+  source?: string;
+  department?: string;
+}
+
+export interface ServiceRow extends StoreItem {
+  name: string; url?: string; github?: string; desc?: string;
+}
+
+export interface ApprovalRow extends StoreItem {
+  label: string;
+  department?: string;
+  detail?: string;
+  status?: 'pending' | 'approved' | 'rejected';
+}
+
 export const api = {
   health: () => safeJson<{ status: string; redis: string; vllm: string }>(fetch(`${API_BASE}/health`)),
   listAgents: () => safeJson<{ total: number; agents: AgentSummary[] }>(fetch(`${API_BASE}/agents`)),
@@ -155,6 +183,30 @@ export const api = {
         body: JSON.stringify({ path, content }),
       })
     ),
+  /* 할 일 · 등록 서비스 · 승인 큐.
+   * 브라우저에만 있던 것들이라 에이전트가 읽을 수 없었다. 서버로 올렸고,
+   * 디스패처가 같은 파일을 읽고 쓴다. */
+  storeList: <T = StoreItem>(collection: StoreCollection) =>
+    safeJson<{ items: T[] }>(fetch(`${API_BASE}/store/${collection}`)),
+  storeAdd: <T = StoreItem>(collection: StoreCollection, item: Record<string, unknown>) =>
+    safeJson<{ ok: boolean; item: T; error?: string }>(
+      fetch(`${API_BASE}/store/${collection}`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(item),
+      })
+    ),
+  storeUpdate: <T = StoreItem>(collection: StoreCollection, id: string, patch: Record<string, unknown>) =>
+    safeJson<{ ok: boolean; item: T; error?: string }>(
+      fetch(`${API_BASE}/store/${collection}/${id}`, {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(patch),
+      })
+    ),
+  storeRemove: (collection: StoreCollection, id: string) =>
+    safeJson<{ ok: boolean }>(
+      fetch(`${API_BASE}/store/${collection}/${id}`, { method: 'DELETE' })
+    ),
+
   listModels: () =>
     safeJson<{ models: { id: string; size: number }[]; error?: string }>(
       fetch(`${API_BASE}/models`)

@@ -21,6 +21,9 @@ logs/
 shared_memory/evt-*.json
 shared_memory/tasks/
 
+# ── 할 일 · 등록 서비스 · 승인 큐 (내 데이터) ──────
+shared_memory/store/
+
 # ── 런타임 설정 (이 PC 의 선택) ────────────────────
 # UI 에서 고른 공통 두뇌. 설치된 Ollama 모델에 따라 달라지므로 PC 마다 다르다.
 runtime_config.json
