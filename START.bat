@@ -17,7 +17,23 @@ echo   myung-tech Agent Studio  START
 echo  ==========================================
 echo.
 
-echo  [1/4] API server (port 9000)...
+echo  [1/5] Ollama (port 11434)...
+REM  Ollama is the last-resort backend: when the router is down every
+REM  department falls back to it. Health-checking it at the end was not
+REM  enough - if it is not running the fallback does not exist. Start it.
+curl -s -o nul --max-time 3 http://localhost:11434/api/version && (
+    echo         already running - skipped.
+) || (
+    if exist "%LOCALAPPDATA%\Programs\Ollama\ollama.exe" (
+        start "mt-ollama" /min "%LOCALAPPDATA%\Programs\Ollama\ollama.exe" serve
+        echo         launched.
+    ) else (
+        echo         ollama.exe not found - local fallback unavailable.
+    )
+)
+
+echo.
+echo  [2/5] API server (port 9000)...
 netstat -ano | findstr ":9000 " | findstr LISTENING > nul && (
     echo         already running - skipped.
 ) || (
@@ -26,7 +42,7 @@ netstat -ano | findstr ":9000 " | findstr LISTENING > nul && (
 )
 
 echo.
-echo  [2/4] Agent dispatcher (daemon)...
+echo  [3/5] Agent dispatcher (daemon)...
 REM  Without this nobody drains the task queue, so the 2D office and the live
 REM  feed stay empty. Running it as a daemon is what makes the screen move.
 tasklist /FI "WINDOWTITLE eq mt-dispatch*" 2>nul | findstr "cmd.exe" > nul && (
@@ -37,7 +53,7 @@ tasklist /FI "WINDOWTITLE eq mt-dispatch*" 2>nul | findstr "cmd.exe" > nul && (
 )
 
 echo.
-echo  [3/4] UI dev server (port 5174)...
+echo  [4/5] UI dev server (port 5174)...
 netstat -ano | findstr ":5174 " | findstr LISTENING > nul && (
     echo         already running - skipped.
 ) || (
@@ -46,7 +62,7 @@ netstat -ano | findstr ":5174 " | findstr LISTENING > nul && (
 )
 
 echo.
-echo  [4/4] Waiting for services...
+echo  [5/5] Waiting for services...
 timeout /t 8 /nobreak > nul
 
 echo.

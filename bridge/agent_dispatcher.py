@@ -26,6 +26,8 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
+import subprocess
 import sys
 import time
 import urllib.error
@@ -124,6 +126,69 @@ def _router_alive() -> bool:
         return False
 
 
+# 로컬 백엔드는 "언제나 있다"는 전제로 마지막 폴백에 놓여 있다. 그런데 실제로는
+# Ollama 가 꺼져 있으면 그 폴백이 없는 것과 같다 — 2026-06-29 의 실패 기록이
+# 전부 이 경우였다(Connection refused). 그래서 부르기 전에 살아 있는지 보고,
+# 죽어 있으면 직접 띄운다.
+_OLLAMA_EXE_HINTS = [
+    Path(os.environ.get("LOCALAPPDATA", "")) / "Programs" / "Ollama" / "ollama.exe",
+    Path(r"C:\Program Files\Ollama\ollama.exe"),
+]
+_ollama_start_attempted = False
+
+
+def _ollama_alive(timeout: float = 3.0) -> bool:
+    try:
+        with urllib.request.urlopen(f"{OLLAMA_BASE_URL}/api/tags", timeout=timeout) as r:
+            return r.status == 200
+    except Exception:
+        return False
+
+
+def _ollama_exe() -> str | None:
+    found = shutil.which("ollama")
+    if found:
+        return found
+    for p in _OLLAMA_EXE_HINTS:
+        if p.is_file():
+            return str(p)
+    return None
+
+
+def ensure_ollama(wait: float = 25.0) -> bool:
+    """Ollama 가 응답할 때까지 보장한다. 기동 시도는 프로세스당 한 번만 한다."""
+    global _ollama_start_attempted
+    if _ollama_alive():
+        return True
+    if _ollama_start_attempted:
+        return _ollama_alive()
+    _ollama_start_attempted = True
+
+    exe = _ollama_exe()
+    if not exe:
+        print("[dispatcher] Ollama 실행 파일을 찾지 못했습니다.", file=sys.stderr)
+        return False
+    print(f"[dispatcher] Ollama 가 응답하지 않아 기동합니다: {exe}", file=sys.stderr)
+    try:
+        # DETACHED_PROCESS. CREATE_NO_WINDOW 와 같이 주면 CreateProcess 가 실패한다.
+        flags = 0x00000008 if sys.platform == "win32" else 0
+        subprocess.Popen([exe, "serve"],
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                         creationflags=flags)
+    except Exception as exc:
+        print(f"[dispatcher] Ollama 기동 실패: {exc}", file=sys.stderr)
+        return False
+
+    deadline = time.time() + wait
+    while time.time() < deadline:
+        if _ollama_alive(timeout=2.0):
+            print("[dispatcher] Ollama 준비됨.", file=sys.stderr)
+            return True
+        time.sleep(1.0)
+    print(f"[dispatcher] Ollama 가 {wait:.0f}초 안에 뜨지 않았습니다.", file=sys.stderr)
+    return False
+
+
 def choose_backend(dept_id: str) -> tuple[str, str]:
     """(backend, model) 을 고른다. 라우터가 없으면 조용히 로컬로 내려간다."""
     tier = DEPT_TIER.get(dept_id, "cloud")
@@ -176,9 +241,22 @@ def call_llm(backend: str, model: str, messages: list[dict]) -> str:
                            "HTTP-Referer": "https://myung-tech.internal",
                            "X-Title": "Myung-Tech Orchestration"},
                           f"OpenRouter({model})")
-    return _post_chat(f"{OLLAMA_BASE_URL}/v1/chat/completions",
-                      {"model": model, "messages": messages, "stream": False},
-                      {}, f"Ollama({model})")
+    # 로컬은 마지막 보루다. 꺼져 있으면 띄우고, 그래도 안 되면 한 번만 다시 시도한다.
+    if not ensure_ollama():
+        raise RuntimeError(
+            f"Ollama({model}) 연결 실패: {OLLAMA_BASE_URL} 이 응답하지 않고 자동 기동도 "
+            "되지 않았습니다. `ollama serve` 를 실행한 뒤 다시 시도하세요.")
+    try:
+        return _post_chat(f"{OLLAMA_BASE_URL}/v1/chat/completions",
+                          {"model": model, "messages": messages, "stream": False},
+                          {}, f"Ollama({model})")
+    except RuntimeError as exc:
+        if "연결 실패" not in str(exc):
+            raise
+        time.sleep(2.0)
+        return _post_chat(f"{OLLAMA_BASE_URL}/v1/chat/completions",
+                          {"model": model, "messages": messages, "stream": False},
+                          {}, f"Ollama({model}, 재시도)")
 
 
 # ── 이벤트 ──────────────────────────────────────────────────────────────────
