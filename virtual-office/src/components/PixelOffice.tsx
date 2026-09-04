@@ -110,12 +110,12 @@ function lerp(a: number, b: number, t: number) { return a + (b - a) * t; }
 
 // ── 말풍선 ───────────────────────────────────────────────
 function drawSpeechBubble(ctx: CanvasRenderingContext2D, x: number, y: number, text: string) {
-  const line = text.length > 26 ? text.slice(0, 25) + '…' : text;
-  ctx.font = '8px "JetBrains Mono", monospace';
-  const w = Math.max(40, ctx.measureText(line).width + 12);
-  const h = 16;
+  const line = text.length > 24 ? text.slice(0, 23) + '…' : text;
+  ctx.font = '11px "Noto Sans KR", sans-serif';
+  const w = Math.max(52, ctx.measureText(line).width + 16);
+  const h = 21;
   const bx = x - w / 2;
-  const by = y - CHAR_H - 26;
+  const by = y - CHAR_H - 32;
 
   ctx.fillStyle = 'rgba(9,11,18,0.92)';
   ctx.fillRect(bx, by, w, h);
@@ -130,9 +130,9 @@ function drawSpeechBubble(ctx: CanvasRenderingContext2D, x: number, y: number, t
   ctx.closePath();
   ctx.fill();
 
-  ctx.fillStyle = '#dbe4f0';
+  ctx.fillStyle = '#e6ecf5';
   ctx.textAlign = 'center';
-  ctx.fillText(line, x, by + 11);
+  ctx.fillText(line, x, by + 14);
   ctx.textAlign = 'left';
 }
 
@@ -495,25 +495,25 @@ export default function PixelOffice({ agents, cycleStatus, recentMessages, onAge
         ctx.lineWidth = 1;
         ctx.strokeRect(rx + 0.5, ry + 0.5, rw - 1, rh - 1);
       }
-      ctx.font = 'bold 9px "Noto Sans KR", sans-serif';
-      const lw = ctx.measureText(room.label).width + 12;
-      ctx.fillStyle = 'rgba(6,8,14,0.85)';
-      ctx.fillRect(rx + 6, ry + 3, lw, 14);
+      ctx.font = 'bold 13px "Noto Sans KR", sans-serif';
+      const lw = ctx.measureText(room.label).width + 16;
+      ctx.fillStyle = 'rgba(6,8,14,0.88)';
+      ctx.fillRect(rx + 6, ry + 3, lw, 19);
       ctx.fillStyle = room.accent;
-      ctx.fillRect(rx + 6, ry + 3, 2, 14);
-      ctx.fillStyle = '#e6ecf5';
-      ctx.fillText(room.label, rx + 13, ry + 13);
+      ctx.fillRect(rx + 6, ry + 3, 3, 19);
+      ctx.fillStyle = '#eef3f9';
+      ctx.fillText(room.label, rx + 15, ry + 17);
     }
 
     // ── 사람 위 표시: 이름 · 작업중 · 말풍선 ──
     for (const a of pixelAgents) {
-      ctx.font = '8px "JetBrains Mono", monospace';
+      ctx.font = '600 12px "Noto Sans KR", sans-serif';
       ctx.textAlign = 'center';
-      const nw = ctx.measureText(a.name).width + 8;
-      ctx.fillStyle = 'rgba(6,8,14,0.82)';
-      ctx.fillRect(a.x - nw / 2, a.y + 2, nw, 11);
+      const nw = ctx.measureText(a.name).width + 12;
+      ctx.fillStyle = 'rgba(6,8,14,0.86)';
+      ctx.fillRect(a.x - nw / 2, a.y + 2, nw, 16);
       ctx.fillStyle = DEPT_COLOR[a.dept] ?? '#94a3b8';
-      ctx.fillText(a.name, a.x, a.y + 10);
+      ctx.fillText(a.name, a.x, a.y + 14);
       ctx.textAlign = 'left';
 
       if (a.busy) {
@@ -522,7 +522,7 @@ export default function PixelOffice({ agents, cycleStatus, recentMessages, onAge
           ctx.fillStyle = d === lit
             ? (DEPT_COLOR[a.dept] ?? '#0ffd6a')
             : 'rgba(255,255,255,0.22)';
-          ctx.fillRect(a.x - 5 + d * 4, a.y - CHAR_H - 7, 2, 2);
+          ctx.fillRect(a.x - 7 + d * 6, a.y - CHAR_H - 9, 3, 3);
         }
       }
 
@@ -568,10 +568,10 @@ export default function PixelOffice({ agents, cycleStatus, recentMessages, onAge
       ctx.beginPath(); ctx.arc(px, py, 2.5, 0, Math.PI * 2); ctx.fill();
 
       if (p.t > 0.2 && p.t < 0.8) {
-        ctx.font = '7px "JetBrains Mono", monospace';
-        ctx.fillStyle = p.color + 'cc';
+        ctx.font = '10px "Noto Sans KR", sans-serif';
+        ctx.fillStyle = p.color + 'dd';
         ctx.textAlign = 'center';
-        ctx.fillText(p.label.slice(0, 18), px, py - 14);
+        ctx.fillText(p.label.slice(0, 18), px, py - 16);
         ctx.textAlign = 'left';
       }
     }
@@ -590,22 +590,22 @@ export default function PixelOffice({ agents, cycleStatus, recentMessages, onAge
       const room = ROOMS.find(r => r.dept === 'orchestration_dept');
       if (room) {
         const label = '● 회의 중';
-        ctx.font = 'bold 9px "Noto Sans KR", sans-serif';
-        const lw = ctx.measureText(label).width + 12;
+        ctx.font = 'bold 12px "Noto Sans KR", sans-serif';
+        const lw = ctx.measureText(label).width + 16;
         const bx = (room.x + room.w / 2) * TILE - lw / 2;
         const by = 15 * TILE + 4;
         ctx.fillStyle = 'rgba(6,8,14,0.9)';
-        ctx.fillRect(bx, by, lw, 14);
+        ctx.fillRect(bx, by, lw, 18);
         ctx.fillStyle = room.accent;
-        ctx.fillText(label, bx + 6, by + 10);
+        ctx.fillText(label, bx + 8, by + 13);
       }
     }
 
     if (cycleStatus !== 'stopped') {
-      ctx.font = 'bold 9px "JetBrains Mono", monospace';
-      ctx.fillStyle = 'rgba(15,253,106,0.6)';
+      ctx.font = 'bold 12px "JetBrains Mono", monospace';
+      ctx.fillStyle = 'rgba(15,253,106,0.7)';
       ctx.textAlign = 'right';
-      ctx.fillText(`● LIVE · ${cycleStatus}`, BASE_W - 8, BASE_H - 8);
+      ctx.fillText(`● LIVE · ${cycleStatus}`, BASE_W - 10, BASE_H - 10);
       ctx.textAlign = 'left';
     }
   }, [hoveredDept, cycleStatus]);
@@ -671,6 +671,7 @@ export default function PixelOffice({ agents, cycleStatus, recentMessages, onAge
         display: 'block',
         width: '100%',
         height: '100%',
+        objectFit: 'contain',
         imageRendering: 'pixelated',
         cursor: 'pointer',
       }}

@@ -100,19 +100,21 @@ export default function AgentFeed({ compact }: { compact?: boolean }) {
       <div className="af-compact">
         <div className="af-compact-status">
           <span className={`af-dot ${live ? 'live' : ''}`} />
-          <span style={{ fontSize: 9, color: live ? '#0ffd6a' : '#64748b' }}>{live ? 'LIVE' : '미연결'}</span>
-          <span style={{ fontSize: 9, color: '#374151', marginLeft: 'auto' }}>{events.length}건</span>
+          <span className="af-compact-status-label" style={{ color: live ? '#0ffd6a' : '#64748b' }}>
+            {live ? 'LIVE' : '미연결'}
+          </span>
+          <span className="af-compact-status-count">{events.length}건</span>
         </div>
         <div className="af-compact-list">
           {events.length === 0
             ? <div className="af-compact-empty">{live ? '대기 중…' : '포트 9000 확인'}</div>
             : events.slice(-6).reverse().map((ev, i) => (
               <div key={`${ev.event_id}-${i}`} className="af-compact-row">
-                <span style={{ color: colorOf(ev.sender), fontSize: 9, fontWeight: 700, flexShrink: 0 }}>
+                <span className="af-compact-who" style={{ color: colorOf(ev.sender) }}>
                   {iconOf(ev.sender)}
                 </span>
-                <span style={{ color: '#475569', fontSize: 9, flexShrink: 0 }}>→</span>
-                <span style={{ color: colorOf(ev.target), fontSize: 9, fontWeight: 700, flexShrink: 0 }}>
+                <span className="af-compact-arrow">→</span>
+                <span className="af-compact-who" style={{ color: colorOf(ev.target) }}>
                   {iconOf(ev.target)}
                 </span>
                 <span className="af-compact-text">{cleanPayload(ev.payload)}</span>

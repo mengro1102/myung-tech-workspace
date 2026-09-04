@@ -149,7 +149,7 @@ export default function OfficeView({ agents, cycleStatus, taskSummary, onDeptCha
                 return (
                   <div key={deptId} className="ov-dept-bubble">
                     <div className="ov-dept-bubble-msg" style={{ borderColor: meta.color }}>
-                      <span style={{ fontSize: 9, fontFamily: 'JetBrains Mono, monospace', color: meta.color }}>
+                      <span style={{ fontSize: 11, fontFamily: 'JetBrains Mono, monospace', color: meta.color }}>
                         {recentMsg ? cleanPayload(recentMsg.payload).slice(0, 40) : `${meta.room} 작업 중`}
                       </span>
                     </div>
@@ -165,11 +165,11 @@ export default function OfficeView({ agents, cycleStatus, taskSummary, onDeptCha
             <div className="ov-status-overlay">
               <div className="ov-status-dot-row">
                 <div className={`ov-status-dot ${cycleStatus !== 'stopped' ? 'active' : ''}`} />
-                <span style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 9, color: cycleStatus !== 'stopped' ? '#2DD4BF' : '#64748B', textTransform: 'uppercase', letterSpacing: '0.1em' }}>
+                <span style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 11, color: cycleStatus !== 'stopped' ? '#2DD4BF' : '#64748B', textTransform: 'uppercase', letterSpacing: '0.1em' }}>
                   {cycleStatus !== 'stopped' ? '오피스_렌더링_활성' : '오피스_대기_중'}
                 </span>
               </div>
-              <div style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 8, color: '#64748B' }}>
+              <div style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 10, color: '#64748B' }}>
                 에이전트: {String(agents.length).padStart(2, '0')} | 활성: {String(activeCount).padStart(2, '0')} | 이벤트: {feed.length}
               </div>
             </div>
@@ -272,7 +272,7 @@ export default function OfficeView({ agents, cycleStatus, taskSummary, onDeptCha
           {feed.length > 0 && (
             <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 0' }}>
               <div className="ov-status-dot active" style={{ width: 6, height: 6 }} />
-              <span style={{ fontSize: 9, color: 'rgba(45,212,191,0.6)', fontFamily: 'JetBrains Mono, monospace', textTransform: 'uppercase', letterSpacing: '0.1em' }}>
+              <span style={{ fontSize: 11, color: 'rgba(45,212,191,0.6)', fontFamily: 'JetBrains Mono, monospace', textTransform: 'uppercase', letterSpacing: '0.1em' }}>
                 새 데이터 스트림 대기 중...
               </span>
             </div>
