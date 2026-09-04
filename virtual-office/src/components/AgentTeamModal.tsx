@@ -1,16 +1,8 @@
 import { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import PixelOffice from './PixelOffice';
 import { api, AgentDetail, AgentSummary, deptColors, deptLabels } from '../api';
 
-const OLLAMA_MODELS = [
-  'qwen2.5:3b',
-  'qwen2.5:7b',
-  'qwen2.5:14b',
-  'qwen2.5-coder:7b',
-  'llama3.2:3b',
-  'llama3.1:8b',
-  'gemma3:4b',
-  'mistral:7b',
-];
 
 interface Props {
   onClose: () => void;
@@ -28,13 +20,18 @@ function deptIcon(dept: string) {
 }
 
 export default function AgentTeamModal({ onClose, globalModel, onGlobalModelChange }: Props) {
+  const navigate = useNavigate();
   const [agents,   setAgents]   = useState<AgentSummary[]>([]);
+  /* 모델 목록이 하드코딩돼 있었다. 설치되지 않은 gemma3:4b·mistral:7b 가 뜨고,
+   * 정작 있는 qwen3:30b-a3b 는 없었다. Ollama 에 물어본다. */
+  const [models,   setModels]   = useState<string[]>([]);
   const [selected, setSelected] = useState<AgentDetail | null>(null);
   const [saving,   setSaving]   = useState(false);
   const [toast,    setToast]    = useState('');
 
   useEffect(() => {
     api.listAgents().then(d => setAgents(d?.agents ?? []));
+    api.listModels().then(d => setModels((d?.models ?? []).map(x => x.id)));
   }, []);
 
   const showToast = (msg: string) => {
@@ -72,16 +69,25 @@ export default function AgentTeamModal({ onClose, globalModel, onGlobalModelChan
           <button className="hm-close" onClick={onClose}>✕</button>
         </div>
 
-        {/* pixel office preview */}
+        {/* 사무실 미리보기.
+            바닥·가구 그림 두 장을 겹쳐 놓은 정적 이미지였다. 사무실 탭과
+            그림체가 달랐고, 누가 어디서 뭘 하는지도 보여 주지 않았다.
+            실제 렌더러를 그대로 쓴다. */}
         <div className="hm-office-preview">
-          <img src="/assets/floor.png"     className="hm-office-floor" alt="" />
-          <img src="/assets/furniture.png" className="hm-office-furniture" alt="" />
+          <PixelOffice
+            agents={agents}
+            cycleStatus="running"
+            recentMessages={[]}
+          />
           <div className="hm-office-label">
             {agents.filter(a => a.status !== 'Idle').length > 0
               ? `${agents.filter(a => a.status !== 'Idle').length}명 작업 중`
               : '전원 대기 중'}
           </div>
-          <button className="hm-office-expand">↗ 크게 보기</button>
+          {/* onClick 이 없어 눌러도 아무 일이 없었다. */}
+          <button className="hm-office-expand" onClick={() => navigate('/office')}>
+            ↗ 크게 보기
+          </button>
         </div>
 
         {/* global model selector */}
@@ -92,7 +98,8 @@ export default function AgentTeamModal({ onClose, globalModel, onGlobalModelChan
             value={globalModel}
             onChange={e => onGlobalModelChange(e.target.value)}
           >
-            {OLLAMA_MODELS.map(m => (
+            {models.length === 0 && <option value="">불러오는 중…</option>}
+            {models.map(m => (
               <option key={m} value={m}>{m}</option>
             ))}
           </select>
@@ -129,14 +136,14 @@ export default function AgentTeamModal({ onClose, globalModel, onGlobalModelChan
         {selected && (
           <div className="hm-detail">
             <div className="hm-detail-title">{selected.character_name} 설정</div>
-            <label className="hm-field-label">전용 두뇌 모델 (비우면 공통 두뇌 사용)</label>
+            <label className="hm-field-label">전용 두뇌 모델 (비우면 공통 두뇌 · 이 에이전트가 속한 부서 작업에 적용)</label>
             <select
               className="hm-model-select"
               value={selected.preferred_model ?? ''}
               onChange={e => setSelected({ ...selected, preferred_model: e.target.value || undefined })}
             >
               <option value="">공통 두뇌 ({globalModel})</option>
-              {OLLAMA_MODELS.map(m => (
+              {models.map(m => (
                 <option key={m} value={m}>{m}</option>
               ))}
             </select>

@@ -117,7 +117,24 @@ function MainScreen() {
   const [overrideTask, setOverrideTask] = useState<TaskItem | null>(null);
   const [showGridMenu, setShowGridMenu] = useState(false);
   const gridMenuRef = useRef<HTMLDivElement>(null);
-  const [globalModel, setGlobalModel] = useState('qwen2.5:3b');
+  /* 공통 두뇌. 예전에는 여기 하드코딩된 값이 전부라 새로고침하면 사라졌고
+   * 추론에는 아무 영향도 없었다. 이제 서버(runtime_config.json)에서 읽고,
+   * 바꾸면 서버에 저장한다 — 디스패처가 같은 파일을 본다. */
+  const [globalModel, setGlobalModelState] = useState('');
+  useEffect(() => {
+    api.getGlobalModel().then(d => { if (d?.global_model) setGlobalModelState(d.global_model); });
+  }, []);
+  const setGlobalModel = useCallback(async (model: string) => {
+    const prev = globalModel;
+    setGlobalModelState(model);           // 낙관적 반영
+    const r = await api.setGlobalModel(model);
+    if (!r?.ok) {
+      setGlobalModelState(prev);
+      pushNotif('error', `공통 두뇌 변경 실패${r?.error ? ` — ${r.error}` : ''}`);
+      return;
+    }
+    pushNotif('info', `공통 두뇌를 ${model} 로 바꿨습니다`);
+  }, [globalModel]);
   const [termInput,   setTermInput]   = useState('');
   const [termLines,   setTermLines]   = useState<string[]>([
     '[명테크 Agent Studio] 터미널 준비됨',
@@ -1025,7 +1042,9 @@ function OfficeWrapper() {
         >← 돌아가기</button>
         <span style={{ fontSize: 12, color: '#64748b' }}>가상 오피스</span>
       </div>
-      <div style={{ flex: 1 }}>
+      {/* minHeight: 0 이 없으면 flex 아이템이 내용 높이 밑으로 줄어들지 않는다.
+          안쪽 height:100% 가 갈 곳을 잃어 오피스가 화면 밖으로 자랐다. */}
+      <div style={{ flex: 1, minHeight: 0 }}>
         <Suspense fallback={<div className="hs-lazy-fallback"><span className="hs-lazy-spinner" />가상 오피스를 불러오는 중…</div>}>
           <VirtualOffice />
         </Suspense>

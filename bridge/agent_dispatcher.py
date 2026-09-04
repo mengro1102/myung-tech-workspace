@@ -74,14 +74,45 @@ else:
 OPENROUTER_CHAT_URL = "https://openrouter.ai/api/v1/chat/completions"
 OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY", "")
 
-OLLAMA_DEFAULT_MODEL = "qwen2.5:7b"
-OLLAMA_MODEL_MAP = {
-    "orchestration_dept": "qwen2.5:7b",
-    "research_dept":      "qwen2.5:7b",
-    "finance_dept":       "qwen2.5:7b",
-    "dev_dept":           "qwen2.5:7b",
-    "content_dept":       "qwen2.5:7b",
-}
+# 로컬 모델은 세 군데에서 정해졌다 — 여기 하드코딩, UI 의 '공통 두뇌', 그리고
+# 에이전트 파일의 preferred_model. 그런데 앞의 둘은 서로 몰랐고 UI 쪽은 React
+# state 에만 있어 새로고침하면 사라졌다. 고를 수는 있는데 추론에는 아무 영향이
+# 없는 장식이었다.
+#
+# 이제 출처는 하나다: server.py 와 공유하는 runtime_config.json.
+# 우선순위는 부서 소속 에이전트의 preferred_model → 공통 두뇌 → 기본값.
+# 매번 파일을 읽는다. 데몬을 재시작하지 않아도 UI 에서 바꾼 값이 바로 먹는다.
+FALLBACK_LOCAL_MODEL = "qwen2.5:7b"
+RUNTIME_CONFIG = MYUNG_TECH_WORKSPACE / "runtime_config.json"
+
+
+def global_model() -> str:
+    """UI '공통 두뇌'로 고른 모델."""
+    try:
+        cfg = json.loads(RUNTIME_CONFIG.read_text(encoding="utf-8"))
+        return (cfg.get("global_model") or "").strip() or FALLBACK_LOCAL_MODEL
+    except Exception:
+        return FALLBACK_LOCAL_MODEL
+
+
+def dept_local_model(dept_id: str) -> str:
+    """부서에 쓸 로컬 모델.
+
+    태스크는 에이전트가 아니라 부서로 들어온다. 그래서 에이전트 개인에게
+    모델을 붙일 자리가 없다 — 부서 안에 전용 두뇌를 지정해 둔 에이전트가
+    있으면 그 부서 전체가 그 모델을 쓰는 것으로 해석한다. 파일 이름 순으로
+    처음 발견한 것을 쓴다(같은 입력이면 같은 결과가 나오도록).
+    """
+    agents_dir = MYUNG_TECH_WORKSPACE / "departments" / dept_id / "agents"
+    try:
+        for f in sorted(agents_dir.glob("*.json")):
+            data = json.loads(f.read_text(encoding="utf-8-sig"))
+            picked = (data.get("preferred_model") or "").strip()
+            if picked:
+                return picked
+    except Exception:
+        pass
+    return global_model()
 
 # 부서별 두뇌 등급. 완전무료를 유지하면서 성능을 확보하는 배분이다.
 #   cloud — 조사·종합·기획처럼 문맥이 길고 판단이 필요한 일 → 라우터 무료 체인
@@ -197,7 +228,7 @@ def choose_backend(dept_id: str) -> tuple[str, str]:
     if OPENROUTER_API_KEY and tier == "cloud":
         manifest = _load_dept_manifest(dept_id)
         return "openrouter", manifest.get("assigned_brain", "qwen/qwen-2.5-7b-instruct:free")
-    return "ollama", OLLAMA_MODEL_MAP.get(dept_id, OLLAMA_DEFAULT_MODEL)
+    return "ollama", dept_local_model(dept_id)
 
 
 def _load_dept_manifest(dept_id: str) -> dict:

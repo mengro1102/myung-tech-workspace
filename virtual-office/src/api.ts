@@ -155,6 +155,25 @@ export const api = {
         body: JSON.stringify({ path, content }),
       })
     ),
+  listModels: () =>
+    safeJson<{ models: { id: string; size: number }[]; error?: string }>(
+      fetch(`${API_BASE}/models`)
+    ),
+
+  /* 공통 두뇌 — server.py 의 runtime_config.json 이 단일 출처다.
+   * 디스패처도 같은 파일을 읽으므로 여기서 바꾸면 추론에 바로 반영된다. */
+  getGlobalModel: () =>
+    safeJson<{ global_model: string; default: string }>(
+      fetch(`${API_BASE}/config/model`)
+    ),
+  setGlobalModel: (model: string) =>
+    safeJson<{ ok: boolean; global_model?: string; error?: string }>(
+      fetch(`${API_BASE}/config/model`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model }),
+      })
+    ),
+
   termRun: (cmd: string) =>
     safeJson<{ ok: boolean; code?: number; output?: string; error?: string }>(
       fetch(`${API_BASE}/term/run`, {

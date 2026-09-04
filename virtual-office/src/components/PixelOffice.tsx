@@ -11,6 +11,14 @@ import {
   type Facing, type RoomDef, type Seat,
 } from '../office/officeLayout';
 
+/** 발밑 좌표가 벽인가. 조작 캐릭터가 벽을 통과하지 않게 한다. */
+function blockedAt(tiles: Uint8Array, x: number, y: number): boolean {
+  const col = Math.floor(x / TILE);
+  const row = Math.floor((y - 1) / TILE);
+  if (col < 0 || col >= GRID_W || row < 0 || row >= GRID_H) return true;
+  return tiles[row * GRID_W + col] === TILE_WALL;
+}
+
 interface Agent { agent_id: string; character_name: string; role: string; department?: string; status?: string; }
 interface TaskMsg { sender: string; target: string; payload: string; }
 
@@ -19,6 +27,8 @@ interface Props {
   cycleStatus: string;
   recentMessages: TaskMsg[];
   onAgentClick?: (agentId: string, dept: string) => void;
+  /** 직접 걸어 다닐 수 있게 한다(WASD·방향키). 가상 오피스 화면에서 쓴다. */
+  playable?: boolean;
 }
 
 /* 오피스 2D 렌더러.
@@ -195,7 +205,9 @@ function paintStatic(assets: OfficeAssets): HTMLCanvasElement {
   return c;
 }
 
-export default function PixelOffice({ agents, cycleStatus, recentMessages, onAgentClick }: Props) {
+export default function PixelOffice({
+  agents, cycleStatus, recentMessages, onAgentClick, playable = false,
+}: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const assetsRef = useRef<OfficeAssets | null>(null);
   const staticRef = useRef<HTMLCanvasElement | null>(null);
@@ -216,9 +228,42 @@ export default function PixelOffice({ agents, cycleStatus, recentMessages, onAge
     meetingUntil: 0, nextMeeting: 60 * 45, meetingRequested: false,
   });
   const animRef = useRef<number>(0);
+  /* 조작 캐릭터. 복도 한가운데에서 시작한다. 키 상태는 ref 에 둔다 —
+   * state 로 두면 키를 누를 때마다 렌더가 돈다. */
+  const playerRef = useRef({ x: 19.5 * TILE, y: 17 * TILE, face: 'down' as Facing, moving: false });
+  const keysRef = useRef<Set<string>>(new Set());
   const [hoveredDept, setHoveredDept] = useState<string | null>(null);
   const [ready, setReady] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
+
+  // 키 입력 — playable 일 때만 듣는다.
+  useEffect(() => {
+    if (!playable) return;
+    const MOVE_KEYS = new Set([
+      'w', 'a', 's', 'd', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright',
+    ]);
+    const norm = (e: KeyboardEvent) => e.key.toLowerCase();
+    const down = (e: KeyboardEvent) => {
+      const k = norm(e);
+      if (!MOVE_KEYS.has(k)) return;
+      // 입력창에 타이핑 중이면 가로채지 않는다.
+      const el = document.activeElement;
+      if (el && /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName)) return;
+      e.preventDefault();
+      keysRef.current.add(k);
+    };
+    const up = (e: KeyboardEvent) => keysRef.current.delete(norm(e));
+    const blur = () => keysRef.current.clear();
+    window.addEventListener('keydown', down);
+    window.addEventListener('keyup', up);
+    window.addEventListener('blur', blur);
+    return () => {
+      window.removeEventListener('keydown', down);
+      window.removeEventListener('keyup', up);
+      window.removeEventListener('blur', blur);
+      keysRef.current.clear();
+    };
+  }, [playable]);
 
   // 스프라이트 로드
   useEffect(() => {
@@ -367,6 +412,26 @@ export default function PixelOffice({ agents, cycleStatus, recentMessages, onAge
       }
     }
 
+    // ── 조작 캐릭터 ──
+    if (playable) {
+      const me = playerRef.current;
+      const k = keysRef.current;
+      const dx = (k.has('d') || k.has('arrowright') ? 1 : 0) - (k.has('a') || k.has('arrowleft') ? 1 : 0);
+      const dy = (k.has('s') || k.has('arrowdown') ? 1 : 0) - (k.has('w') || k.has('arrowup') ? 1 : 0);
+      me.moving = dx !== 0 || dy !== 0;
+      if (me.moving) {
+        const SPEED = 1.6;
+        // 축을 따로 밀어야 벽에 비스듬히 붙어도 미끄러진다.
+        const nx = me.x + (dx / (Math.hypot(dx, dy) || 1)) * SPEED;
+        const ny = me.y + (dy / (Math.hypot(dx, dy) || 1)) * SPEED;
+        if (!blockedAt(tiles, nx, me.y)) me.x = Math.max(4, Math.min(BASE_W - 4, nx));
+        if (!blockedAt(tiles, me.x, ny)) me.y = Math.max(TILE, Math.min(BASE_H - 2, ny));
+        me.face = Math.abs(dx) > Math.abs(dy)
+          ? (dx > 0 ? 'right' : 'left')
+          : (dy > 0 ? 'down' : 'up');
+      }
+    }
+
     // ── 에이전트 이동 ──
     for (const a of pixelAgents) {
       // 목적지: 경로가 남아 있으면 다음 경유지, 아니면 하던 대로.
@@ -481,6 +546,46 @@ export default function PixelOffice({ agents, cycleStatus, recentMessages, onAge
       });
     }
 
+    if (playable) {
+      const me = playerRef.current;
+      const sheet = assets.chars[0];
+      const flip = me.face === 'left';
+      const rowKey: keyof typeof CHAR_ROW =
+        me.face === 'up' ? 'up' : me.face === 'down' ? 'down' : 'right';
+      const frame = me.moving ? FRAME.walk[(F >> 3) % FRAME.walk.length] : FRAME.walk[0];
+      const sx = frame * CHAR_W;
+      const sy = CHAR_ROW[rowKey] * CHAR_H;
+      const mx = Math.round(me.x), my = Math.round(me.y);
+
+      layer.push({
+        y: me.y,
+        draw: () => {
+          ctx.fillStyle = 'rgba(0,0,0,0.28)';
+          ctx.beginPath();
+          ctx.ellipse(mx, my - 1, 6, 2.5, 0, 0, Math.PI * 2);
+          ctx.fill();
+          // 조작 캐릭터임을 알리는 발밑 링 — 12명 사이에서 자기를 못 찾으면
+          // 걸어 다닐 수가 없다.
+          ctx.strokeStyle = 'rgba(125,211,252,0.85)';
+          ctx.lineWidth = 1;
+          ctx.beginPath();
+          ctx.ellipse(mx, my - 1, 8, 3.5, 0, 0, Math.PI * 2);
+          ctx.stroke();
+
+          if (flip) {
+            ctx.save();
+            ctx.translate(mx - CHAR_W / 2 + CHAR_W, my - CHAR_H);
+            ctx.scale(-1, 1);
+            ctx.drawImage(sheet, sx, sy, CHAR_W, CHAR_H, 0, 0, CHAR_W, CHAR_H);
+            ctx.restore();
+          } else {
+            ctx.drawImage(sheet, sx, sy, CHAR_W, CHAR_H,
+              mx - CHAR_W / 2, my - CHAR_H, CHAR_W, CHAR_H);
+          }
+        },
+      });
+    }
+
     layer.sort((p, q) => p.y - q.y);
     for (const d of layer) d.draw();
 
@@ -531,6 +636,19 @@ export default function PixelOffice({ agents, cycleStatus, recentMessages, onAge
         drawSpeechBubble(ctx, a.x, a.y, a.speechBubble);
         ctx.globalAlpha = 1;
       }
+    }
+
+    if (playable) {
+      const me = playerRef.current;
+      ctx.font = '600 12px "Noto Sans KR", sans-serif';
+      ctx.textAlign = 'center';
+      const label = '나';
+      const nw = ctx.measureText(label).width + 12;
+      ctx.fillStyle = 'rgba(8,14,24,0.9)';
+      ctx.fillRect(me.x - nw / 2, me.y + 2, nw, 16);
+      ctx.fillStyle = '#7dd3fc';
+      ctx.fillText(label, me.x, me.y + 14);
+      ctx.textAlign = 'left';
     }
 
     // ── 메시지 파티클 ──
@@ -608,7 +726,7 @@ export default function PixelOffice({ agents, cycleStatus, recentMessages, onAge
       ctx.fillText(`● LIVE · ${cycleStatus}`, BASE_W - 10, BASE_H - 10);
       ctx.textAlign = 'left';
     }
-  }, [hoveredDept, cycleStatus]);
+  }, [hoveredDept, cycleStatus, playable]);
 
   useEffect(() => {
     animRef.current = requestAnimationFrame(animate);
