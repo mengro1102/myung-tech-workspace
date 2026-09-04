@@ -47,6 +47,89 @@ RUNTIME_CONFIG = ROOT / "runtime_config.json"
 DEFAULT_GLOBAL_MODEL = "qwen2.5:7b"
 
 
+# ── YouTube Analytics OAuth ─────────────────────────────────────────────
+#
+# '자동 연결' 버튼은 onClick 조차 없었다. 구글은 인가 코드를 브라우저 리다이렉트로
+# 돌려주므로, 그 코드를 받을 자리가 이쪽에 있어야 한다. 로컬 루프백을 리다이렉트
+# URI 로 쓰는 것은 구글이 데스크톱 앱에 권장하는 방식이다.
+#
+# 받은 refresh_token 만 .env 에 남긴다. access_token 은 한 시간이면 만료되므로
+# 저장할 이유가 없다.
+YT_OAUTH_PORT = 5814
+YT_REDIRECT_URI = f"http://127.0.0.1:{YT_OAUTH_PORT}/yt-oauth-callback"
+YT_SCOPE = "https://www.googleapis.com/auth/yt-analytics.readonly"
+_yt_oauth: dict = {"state": "", "code": "", "error": "", "started_at": 0.0}
+
+
+def _env_get(key: str) -> str:
+    if not ENV_FILE.exists():
+        return ""
+    for line in ENV_FILE.read_text(encoding="utf-8").splitlines():
+        if line.startswith(f"{key}=") and not line.startswith("#"):
+            return line.split("=", 1)[1].strip().strip('"')
+    return ""
+
+
+def _env_set(key: str, value: str) -> None:
+    lines = []
+    if ENV_FILE.exists():
+        lines = [l for l in ENV_FILE.read_text(encoding="utf-8").splitlines()
+                 if not l.startswith(f"{key}=")]
+    lines.append(f'{key}="{value}"')
+    ENV_FILE.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def _yt_catch_code(timeout: int = 180) -> None:
+    """리다이렉트를 한 번만 받고 닫는 아주 작은 서버.
+
+    구글이 브라우저를 이 주소로 되돌려 보낼 때 쿼리에 code 가 실려 온다.
+    사람이 로그인하는 동안만 살아 있으면 되므로 스레드 하나로 충분하다.
+    """
+    import http.server
+
+    class _Once(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):  # noqa: N802
+            q = parse_qs(urlparse(self.path).query)
+            _yt_oauth["code"] = (q.get("code") or [""])[0]
+            _yt_oauth["error"] = (q.get("error") or [""])[0]
+            ok = bool(_yt_oauth["code"]) and (q.get("state") or [""])[0] == _yt_oauth["state"]
+            if not ok and not _yt_oauth["error"]:
+                _yt_oauth["error"] = "state 불일치 — 다시 시도하세요"
+            msg = ("연결되었습니다. 이 창을 닫고 명테크로 돌아가세요."
+                   if ok else f"실패: {_yt_oauth['error'] or '알 수 없는 오류'}")
+            body = f"<meta charset='utf-8'><body style='font-family:sans-serif'>{msg}</body>"
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.end_headers()
+            self.wfile.write(body.encode("utf-8"))
+
+        def log_message(self, *a):  # 콘솔을 더럽히지 않는다
+            pass
+
+    try:
+        srv = http.server.HTTPServer(("127.0.0.1", YT_OAUTH_PORT), _Once)
+    except OSError as e:  # 포트가 이미 물려 있다
+        _yt_oauth["error"] = f"포트 {YT_OAUTH_PORT} 를 열 수 없습니다: {e}"
+        return
+    srv.timeout = timeout
+    srv.handle_request()      # 딱 한 번
+    srv.server_close()
+
+
+def _yt_exchange(code: str, client_id: str, client_secret: str) -> dict:
+    """인가 코드를 refresh_token 으로 바꾼다."""
+    import urllib.parse
+    import urllib.request
+    data = urllib.parse.urlencode({
+        "code": code, "client_id": client_id, "client_secret": client_secret,
+        "redirect_uri": YT_REDIRECT_URI, "grant_type": "authorization_code",
+    }).encode()
+    req = urllib.request.Request("https://oauth2.googleapis.com/token", data=data,
+                                 method="POST")
+    with urllib.request.urlopen(req, timeout=30) as r:
+        return json.loads(r.read().decode("utf-8"))
+
+
 def _ollama_models() -> list[dict]:
     """Ollama 에 실제로 설치된 모델 목록. 실패하면 빈 목록."""
     try:
@@ -80,6 +163,8 @@ ALLOWED_ENV_KEYS = {
     "PAYPAL_CLIENT_ID", "PAYPAL_CLIENT_SECRET",
     "TOSS_SECRET_KEY",
     "GITHUB_TOKEN", "HUGGINGFACE_TOKEN",
+    # OAuth 왕복으로 받은 refresh_token. 서버가 직접 쓴다.
+    "YOUTUBE_OAUTH_REFRESH_TOKEN",
 }
 
 sys.path.insert(0, str(ROOT / "shared_memory"))
@@ -547,6 +632,17 @@ class Handler(BaseHTTPRequestHandler):
                 return
             _json_resp(self, 200, {"items": workspace_store.load(collection)})
 
+        # ── GET /api/youtube/oauth/status
+        elif path == "/api/youtube/oauth/status":
+            _json_resp(self, 200, {
+                "connected": bool(_env_get("YOUTUBE_OAUTH_REFRESH_TOKEN")),
+                "has_client": bool(_env_get("YOUTUBE_OAUTH_CLIENT_ID")
+                                   and _env_get("YOUTUBE_OAUTH_CLIENT_SECRET")),
+                "redirect_uri": YT_REDIRECT_URI,
+                "pending": bool(_yt_oauth["state"]) and not _yt_oauth["code"],
+                "error": _yt_oauth["error"],
+            })
+
         # ── GET /api/config/model  (공통 두뇌 — 디스패처와 공유하는 단일 출처)
         elif path == "/api/config/model":
             cfg = _runtime_config()
@@ -752,6 +848,58 @@ class Handler(BaseHTTPRequestHandler):
                 _json_resp(self, 200, {"ok": True, "item": workspace_store.add(collection, body)})
             except Exception as e:  # noqa: BLE001
                 _json_resp(self, 400, {"ok": False, "error": str(e)})
+
+        # ── POST /api/youtube/oauth/start  → 구글 로그인 주소를 돌려준다
+        elif path == "/api/youtube/oauth/start":
+            client_id = _env_get("YOUTUBE_OAUTH_CLIENT_ID")
+            if not client_id or not _env_get("YOUTUBE_OAUTH_CLIENT_SECRET"):
+                _json_resp(self, 400, {
+                    "ok": False,
+                    "error": "Client ID/Secret 을 먼저 저장하세요.",
+                })
+                return
+            import urllib.parse
+            _yt_oauth.update({"state": uuid.uuid4().hex, "code": "", "error": "",
+                              "started_at": time.time()})
+            threading.Thread(target=_yt_catch_code, daemon=True).start()
+            auth_url = "https://accounts.google.com/o/oauth2/v2/auth?" + urllib.parse.urlencode({
+                "client_id": client_id,
+                "redirect_uri": YT_REDIRECT_URI,
+                "response_type": "code",
+                "scope": YT_SCOPE,
+                "access_type": "offline",
+                "prompt": "consent",          # refresh_token 을 확실히 받으려면 필요
+                "state": _yt_oauth["state"],
+            })
+            _json_resp(self, 200, {"ok": True, "auth_url": auth_url,
+                                   "redirect_uri": YT_REDIRECT_URI})
+
+        # ── POST /api/youtube/oauth/finish  (콜백을 받았는지 확인 후 토큰 교환)
+        elif path == "/api/youtube/oauth/finish":
+            if _yt_oauth["error"]:
+                _json_resp(self, 400, {"ok": False, "error": _yt_oauth["error"]})
+                return
+            if not _yt_oauth["code"]:
+                _json_resp(self, 202, {"ok": False, "pending": True,
+                                       "error": "아직 구글에서 돌아오지 않았습니다."})
+                return
+            try:
+                tok = _yt_exchange(_yt_oauth["code"],
+                                   _env_get("YOUTUBE_OAUTH_CLIENT_ID"),
+                                   _env_get("YOUTUBE_OAUTH_CLIENT_SECRET"))
+            except Exception as e:  # noqa: BLE001
+                _json_resp(self, 400, {"ok": False, "error": f"토큰 교환 실패: {e}"})
+                return
+            refresh = tok.get("refresh_token")
+            if not refresh:
+                _json_resp(self, 400, {
+                    "ok": False,
+                    "error": "refresh_token 이 오지 않았습니다. 구글 계정의 앱 권한을 지우고 다시 시도하세요.",
+                })
+                return
+            _env_set("YOUTUBE_OAUTH_REFRESH_TOKEN", refresh)
+            _yt_oauth.update({"state": "", "code": "", "error": ""})
+            _json_resp(self, 200, {"ok": True, "connected": True})
 
         # ── POST /api/config/model  {model}
         elif path == "/api/config/model":

@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useStore } from '../useStore';
-import { deptColors, deptLabels, type ApprovalRow, type ServiceRow, type TaskRow } from '../api';
+import { api, deptColors, deptLabels, type ApprovalRow, type ServiceRow, type TaskRow } from '../api';
 
 interface Props {
   onClose: () => void;
@@ -114,6 +114,8 @@ export default function ManageModal({ onClose, agentCount, globalModel, onOpenTe
   const [tab,         setTab]         = useState<Tab>('대시보드');
   const [toast,       setToast]       = useState('');
   const [connKeys,    setConnKeys]    = useState<Record<string, boolean>>({});
+  const [ytOauth,     setYtOauth]     = useState<{ connected: boolean; has_client: boolean } | null>(null);
+  const [ytBusy,      setYtBusy]      = useState(false);
 
   // 비즈니스 아이디어
   const [ideas,       setIdeas]       = useState<Idea[]>([]);
@@ -164,7 +166,43 @@ export default function ManageModal({ onClose, agentCount, globalModel, onOpenTe
   /* 저장된 키 로드 */
   useEffect(() => {
     fetch('/api/config/load').then(r => r.json()).then(d => setConnKeys(d.keys ?? {})).catch(() => {});
+    api.ytOauthStatus().then(d => d && setYtOauth(d));
   }, []);
+
+  /* YouTube Analytics 연결.
+   *
+   * 구글은 인가 코드를 브라우저 리다이렉트로 돌려준다. 그래서 세 걸음이다 —
+   * 서버가 콜백 받을 자리를 열고 로그인 주소를 주면, 사람이 새 창에서
+   * 로그인하고, 우리는 코드가 돌아왔는지 물어본다. */
+  const connectYouTube = async () => {
+    setYtBusy(true);
+    try {
+      const start = await api.ytOauthStart();
+      if (!start?.ok || !start.auth_url) {
+        showToast(`❌ ${start?.error ?? '연결을 시작하지 못했습니다'}`);
+        return;
+      }
+      window.open(start.auth_url, '_blank', 'noopener,width=520,height=680');
+      showToast('🔐 새 창에서 구글 로그인을 마쳐 주세요');
+      // 3초마다 최대 3분. 사람이 로그인하는 데 걸리는 시간이다.
+      for (let i = 0; i < 60; i++) {
+        await new Promise(r => setTimeout(r, 3000));
+        const fin = await api.ytOauthFinish();
+        if (fin?.ok) {
+          showToast('✅ YouTube Analytics 연결됨');
+          setYtOauth(await api.ytOauthStatus());
+          return;
+        }
+        if (fin && !fin.pending) {
+          showToast(`❌ ${fin.error ?? '연결 실패'}`);
+          return;
+        }
+      }
+      showToast('❌ 시간 초과 — 다시 시도해 주세요');
+    } finally {
+      setYtBusy(false);
+    }
+  };
 
   const save = useCallback(async (service: string, payload: Record<string, string>) => {
     const msg = await saveCredentials(service, payload);
@@ -638,15 +676,19 @@ export default function ManageModal({ onClose, agentCount, globalModel, onOpenTe
 
             {/* YouTube Analytics OAuth */}
             <IntegCard icon="📊" title="YouTube Analytics (OAuth)" desc="시청 지속률·트래픽·구독 증감. 저장 후 '⚡ 자동 연결'로 구글 로그인."
-              connected={!!connKeys.YOUTUBE_OAUTH_CLIENT_ID}
+              connected={!!ytOauth?.connected}
               onSave={() => save('YouTube OAuth', { YOUTUBE_OAUTH_CLIENT_ID: ytOauthId, YOUTUBE_OAUTH_CLIENT_SECRET: ytOauthSec })}
               extraActions={
-                <button disabled
-                  title="구글 OAuth 왕복을 처리하는 콜백 서버가 아직 없습니다"
+                <button
+                  onClick={connectYouTube}
+                  disabled={ytBusy || !ytOauth?.has_client}
+                  title={ytOauth?.has_client
+                    ? '구글 로그인 창을 엽니다'
+                    : 'Client ID/Secret 을 먼저 저장하세요'}
                   style={{
                   padding: '8px 14px', background: 'rgba(15,253,106,0.1)',
                   border: '1px solid rgba(15,253,106,0.3)', borderRadius: 8,
-                  color: 'var(--green)', fontSize: 13, cursor: 'not-allowed',
+                  color: 'var(--green)', fontSize: 13, cursor: 'pointer',
                 }}>⚡ 자동 연결</button>
               }
             >

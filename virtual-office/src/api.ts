@@ -167,7 +167,45 @@ export const api = {
       })
     ),
 
-  /* ── Phase 4: 에이전트 워크스페이스 (FS/터미널) ── */
+  /* 할 일 · 등록 서비스 · 승인 큐.
+   * 브라우저에만 있던 것들이라 에이전트가 읽을 수 없었다. 서버로 올렸고,
+   * 디스패처가 같은 파일을 읽고 쓴다. */
+  storeList: <T = StoreItem>(collection: StoreCollection) =>
+    safeJson<{ items: T[] }>(fetch(`${API_BASE}/store/${collection}`)),
+  storeAdd: <T = StoreItem>(collection: StoreCollection, item: Record<string, unknown>) =>
+    safeJson<{ ok: boolean; item: T; error?: string }>(
+      fetch(`${API_BASE}/store/${collection}`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(item),
+      })
+    ),
+  storeUpdate: <T = StoreItem>(collection: StoreCollection, id: string, patch: Record<string, unknown>) =>
+    safeJson<{ ok: boolean; item: T; error?: string }>(
+      fetch(`${API_BASE}/store/${collection}/${id}`, {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(patch),
+      })
+    ),
+  storeRemove: (collection: StoreCollection, id: string) =>
+    safeJson<{ ok: boolean }>(
+      fetch(`${API_BASE}/store/${collection}/${id}`, { method: 'DELETE' })
+    ),
+
+  /* YouTube Analytics OAuth. 구글이 인가 코드를 브라우저 리다이렉트로
+   * 돌려주므로, 시작 → 사람이 로그인 → 완료 세 걸음으로 나뉜다. */
+  ytOauthStatus: () =>
+    safeJson<{ connected: boolean; has_client: boolean; redirect_uri: string; pending: boolean; error: string }>(
+      fetch(`${API_BASE}/youtube/oauth/status`)
+    ),
+  ytOauthStart: () =>
+    safeJson<{ ok: boolean; auth_url?: string; redirect_uri?: string; error?: string }>(
+      fetch(`${API_BASE}/youtube/oauth/start`, { method: 'POST' })
+    ),
+  ytOauthFinish: () =>
+    safeJson<{ ok: boolean; connected?: boolean; pending?: boolean; error?: string }>(
+      fetch(`${API_BASE}/youtube/oauth/finish`, { method: 'POST' })
+    ),
+
   listModels: () =>
     safeJson<{ models: { id: string; size: number }[]; error?: string }>(
       fetch(`${API_BASE}/models`)
