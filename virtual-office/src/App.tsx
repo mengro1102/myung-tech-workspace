@@ -968,6 +968,7 @@ function MainScreen() {
           onClose={() => setShowManage(false)}
           agentCount={agents.length}
           globalModel={globalModel}
+          onOpenTeam={() => { setShowManage(false); setShowTeam(true); }}
         />
       )}
 

@@ -18,7 +18,7 @@ const PERSONALITIES = [
   { id: 'calm',       label: '😌 차분함',  desc: '논리적, 침착한 응답' },
   { id: 'balanced',  label: '⚖️ 균형',    desc: '중립적, 균형 잡힌 관점' },
   { id: 'creative',  label: '✨ 창의적',  desc: '아이디어 중심, 발산적 사고' },
-  { id: 'sharp',     label: '🎯 간간함',  desc: '핵심만, 짧고 명확하게' },
+  { id: 'sharp',     label: '🎯 간결함',  desc: '핵심만, 짧고 명확하게' },
 ];
 
 export default function ModelModal({ onClose, globalModel, onGlobalModelChange }: Props) {

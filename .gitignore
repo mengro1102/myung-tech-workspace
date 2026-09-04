@@ -21,6 +21,10 @@ logs/
 shared_memory/evt-*.json
 shared_memory/tasks/
 
+# ── 에이전트 워크스페이스 (런타임 생성) ────────────
+# 터미널 작업 디렉터리이자 SFT 데이터셋·Colab 노트북 출력 위치다.
+workspace/
+
 # ── Node.js ──────────────────────────────────────
 node_modules/
 npm-debug.log*

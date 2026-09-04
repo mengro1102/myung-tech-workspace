@@ -4,6 +4,9 @@ interface Props {
   onClose: () => void;
   agentCount: number;
   globalModel: string;
+  /** '팀 열기' 를 누르면 팀 화면으로 넘긴다. 예전에는 onClose 만 불러서
+   *  창이 닫히기만 하고 아무 데도 가지 않았다. */
+  onOpenTeam: () => void;
 }
 
 const TABS = ['대시보드', '내 서비스', '연동', 'MCP'] as const;
@@ -105,7 +108,7 @@ function IntegCard({ icon, title, desc, connected, children, onSave, onHelp, ext
 }
 
 /* ══════════════════════════════════════════════════════ */
-export default function ManageModal({ onClose, agentCount, globalModel }: Props) {
+export default function ManageModal({ onClose, agentCount, globalModel, onOpenTeam }: Props) {
   const [tab,         setTab]         = useState<Tab>('대시보드');
   const [toast,       setToast]       = useState('');
   const [connKeys,    setConnKeys]    = useState<Record<string, boolean>>({});
@@ -165,6 +168,45 @@ export default function ManageModal({ onClose, agentCount, globalModel }: Props)
   }, []);
 
   /* 비즈니스 아이디어 생성 */
+  /* 결과 파싱.
+   *
+   * 서버가 "### 아이디어 N" + "키: 값" 형식을 요구하므로 그것을 먼저 본다.
+   * 모델이 형식을 안 지키는 일은 늘 있으므로, 못 쪼개면 통째로 한 장 보여
+   * 준다 — 답을 받아 놓고 빈 화면을 보여 주는 것보다 낫다. */
+  const parseIdeas = (raw: string): Idea[] => {
+    const strip = (v: string) => v.replace(/\*\*/g, '').replace(/^[-•\s]+/, '').trim();
+    const field = (block: string, keys: string[]) => {
+      for (const k of keys) {
+        const m = block.match(new RegExp(`^\\s*\\**${k}\\**\\s*[:：]\\s*(.+)$`, 'm'));
+        if (m) return strip(m[1]);
+      }
+      return '';
+    };
+    const blocks = raw
+      .split(/^\s*#{1,4}\s*아이디어\s*\d*\s*$/gm)
+      .map(b => b.trim())
+      .filter(Boolean);
+    const parsed = blocks
+      .map(b => ({
+        title:      field(b, ['제목', '아이디어 제목']),
+        value:      field(b, ['가치', '핵심 가치 제안', '핵심 가치']),
+        difficulty: field(b, ['난이도', '실행 난이도']) || '보통',
+        revenue:    field(b, ['수익', '예상 수익 모델', '수익 모델']),
+        step:       field(b, ['첫걸음', '첫 번째 실행 단계', '실행 단계']),
+      }))
+      .filter(i => i.title);
+    if (parsed.length) return parsed.slice(0, 3);
+
+    const lines = raw.split('\n').map(strip).filter(Boolean);
+    return [{
+      title:      lines[0]?.replace(/^[#\d.)\s]+/, '') || '아이디어',
+      value:      lines.slice(1, 5).join(' '),
+      difficulty: field(raw, ['난이도', '실행 난이도']) || '보통',
+      revenue:    field(raw, ['수익', '예상 수익 모델', '수익 모델']),
+      step:       field(raw, ['첫걸음', '첫 번째 실행 단계', '실행 단계']),
+    }];
+  };
+
   const generateIdeas = async () => {
     setIdeaLoading(true);
     setIdeas([]);
@@ -174,38 +216,39 @@ export default function ManageModal({ onClose, agentCount, globalModel }: Props)
         body: JSON.stringify({ context: ideaCtx || '명테크 멀티-에이전트 워크스페이스, YouTube 채널, PayPal 결제' }),
       });
       const d = await r.json();
-      // 태스크 결과 폴링 (최대 90초)
-      if (d.task_id) {
-        const deadline = Date.now() + 90000;
-        const poll = async () => {
-          if (Date.now() > deadline) { setIdeaLoading(false); return; }
-          const tr = await fetch(`/api/tasks/${d.task_id}`).catch(() => null);
-          if (!tr) { setTimeout(poll, 3000); return; }
-          const td = await tr.json();
-          if (td.status === 'done' && td.result) {
-            // 간단 파싱: 번호/아이디어 구분
-            const raw = td.result as string;
-            const blocks = raw.split(/(?=\d[\.\)]\s)/g).filter(Boolean).slice(0, 3);
-            setIdeas(blocks.map(b => {
-              const lines = b.split('\n').map(l => l.trim()).filter(Boolean);
-              return {
-                title: lines[0]?.replace(/^\d[\.\)]\s*/, '') || '아이디어',
-                value: lines[1] || '',
-                difficulty: lines.find(l => l.includes('난이도'))?.replace(/.*난이도[:\s]*/,'') || '보통',
-                revenue: lines.find(l => l.includes('수익'))?.replace(/.*수익[모델:\s]*/,'') || '',
-                step: lines.find(l => l.includes('실행') || l.includes('단계'))?.replace(/.*[실행단계:\s]*/,'') || '',
-              };
-            }));
-            setIdeaLoading(false);
-          } else if (td.status === 'failed') {
-            showToast('❌ 아이디어 생성 실패');
-            setIdeaLoading(false);
-          } else {
-            setTimeout(poll, 3000);
-          }
-        };
-        poll();
+      if (!d.task_id) {
+        setIdeaLoading(false);
+        showToast(`❌ 아이디어 생성 요청 실패${d.error ? ` — ${d.error}` : ''}`);
+        return;
       }
+      // 태스크 결과 폴링 (최대 90초).
+      // GET /api/tasks/:id 는 { task, events } 를 돌려준다. 예전에는 td.status /
+      // td.result 를 최상위에서 읽어서 영원히 undefined 였다 — 태스크가 done 이
+      // 되어도 버튼은 90초 동안 돌다가 아무 말 없이 멈췄다.
+      const deadline = Date.now() + 90000;
+      const poll = async () => {
+        if (Date.now() > deadline) {
+          setIdeaLoading(false);
+          showToast('❌ 아이디어 생성 시간 초과 (90초)');
+          return;
+        }
+        const tr = await fetch(`/api/tasks/${d.task_id}`).catch(() => null);
+        if (!tr) { setTimeout(poll, 3000); return; }
+        const body = await tr.json().catch(() => null);
+        const td = body?.task ?? body;
+        if (!td) { setTimeout(poll, 3000); return; }
+
+        if (td.status === 'done' && td.result) {
+          setIdeas(parseIdeas(td.result as string));
+          setIdeaLoading(false);
+        } else if (td.status === 'failed') {
+          showToast(`❌ 아이디어 생성 실패${td.result ? ` — ${String(td.result).slice(0, 80)}` : ''}`);
+          setIdeaLoading(false);
+        } else {
+          setTimeout(poll, 3000);
+        }
+      };
+      poll();
     } catch { setIdeaLoading(false); showToast('❌ 서버 미연결'); }
   };
 
@@ -350,7 +393,9 @@ export default function ManageModal({ onClose, agentCount, globalModel }: Props)
                 { icon: '🏢', label: '명테크', sub: '워크스페이스' },
                 { icon: '🤖', label: String(agentCount || 0), sub: '에이전트' },
                 { icon: '📋', label: String(tasks.filter(t=>!t.done).length), sub: '열린 할 일' },
-                { icon: '🧠', label: connKeys.GITHUB_TOKEN ? '연결됨' : '0', sub: '지식 노트' },
+                // 미연결일 때 '0' 을 띄우면 지식이 0건이라는 뜻으로 읽힌다. 실제로는
+                //  GraphRAG 에 82 노드가 있다. 다른 카드처럼 연결 여부만 말한다.
+                { icon: '🧠', label: connKeys.GITHUB_TOKEN ? '연결됨' : '미연결', sub: '지식 노트' },
                 { icon: '📦', label: String(services.length), sub: '등록 서비스' },
                 { icon: '💳', label: connKeys.PAYPAL_CLIENT_ID ? '연결됨' : '미연결', sub: 'PayPal' },
                 { icon: '📱', label: connKeys.TELEGRAM_BOT_TOKEN ? '연결됨' : '미연결', sub: '텔레그램' },
@@ -374,7 +419,7 @@ export default function ManageModal({ onClose, agentCount, globalModel }: Props)
                 marginLeft: 'auto', padding: '4px 12px',
                 background: 'var(--green)', color: '#000',
                 border: 'none', borderRadius: 6, fontSize: 11, fontWeight: 700, cursor: 'pointer',
-              }} onClick={() => onClose()}>팀 열기</button>
+              }} onClick={onOpenTeam}>팀 열기</button>
             </div>
 
             {/* 태스크 보드 */}
@@ -444,7 +489,7 @@ export default function ManageModal({ onClose, agentCount, globalModel }: Props)
 
             <Field label="서비스 이름 (예: 내 랜딩 페이지)" value={svcName} onChange={setSvcName} />
             <Field label="웹사이트 주소" placeholder="https://..." value={svcUrl} onChange={setSvcUrl} />
-            <Field label="깃헙 레포 owner/repo (선택 — 코드까지 고지개)" placeholder="myname/myrepo" value={svcGithub} onChange={setSvcGithub} />
+            <Field label="깃헙 레포 owner/repo (선택 — 코드까지 읽게)" placeholder="myname/myrepo" value={svcGithub} onChange={setSvcGithub} />
             <Field label="한 줄 설명 (선택)" value={svcDesc} onChange={setSvcDesc} />
 
             <button className="hm-save-btn" style={{ width: '100%', marginTop: 14 }} onClick={addService}>+ 등록</button>

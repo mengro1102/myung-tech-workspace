@@ -53,11 +53,22 @@ export interface KnowledgeStatus {
 
 export interface KnowledgeHit { node: string; line: string; }
 
+/* null 은 "서버에 닿지 못했다"는 뜻으로만 쓴다.
+ *
+ * 예전에는 2xx 가 아니면 무조건 null 을 돌려줬다. 그래서 서버가 이유를 적어
+ * 보낸 응답(400 "empty command", 403 "터미널 실행 비활성화 — 켜려면 …")이
+ * 통째로 버려지고, 화면에는 "백엔드 미연결"이 떴다. 고칠 수 있는 문제를
+ * 고칠 수 없는 문제로 바꿔 보여 준 셈이다.
+ *
+ * 그래서 error 를 담아 보낸 응답은 그대로 넘긴다. 호출부는 이미 r.error 를
+ * 확인하도록 되어 있다. */
 async function safeJson<T>(p: Promise<Response>): Promise<T | null> {
   try {
     const r = await p;
-    if (!r.ok) return null;
-    return (await r.json()) as T;
+    if (r.ok) return (await r.json()) as T;
+    const body = await r.json().catch(() => null);
+    if (body && typeof body === 'object' && 'error' in body) return body as T;
+    return null;
   } catch {
     return null;
   }
