@@ -1297,6 +1297,23 @@ body {
   min-height: 300px;
 }
 .pixel-office-canvas { display: block; width: 100%; height: 100%; image-rendering: pixelated; image-rendering: crisp-edges; }
+
+/* 스프라이트를 못 읽으면 캔버스는 검은 사각형으로 남는다. 무엇이 잘못됐는지
+   말해 주는 편이 낫다. */
+.pixel-office-fallback {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  padding: 24px;
+  text-align: center;
+  font-size: 12px;
+  line-height: 1.6;
+  color: rgba(248, 113, 113, 0.9);
+  background: rgba(127, 29, 29, 0.12);
+  border: 1px solid rgba(248, 113, 113, 0.28);
+  border-radius: 8px;
+}
 .office-canvas-resize-handle {
   position: absolute; bottom: 0; left: 0; right: 0;
   height: 6px; cursor: row-resize;
