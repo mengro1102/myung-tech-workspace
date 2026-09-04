@@ -21,6 +21,10 @@ logs/
 shared_memory/evt-*.json
 shared_memory/tasks/
 
+# ── 런타임 설정 (이 PC 의 선택) ────────────────────
+# UI 에서 고른 공통 두뇌. 설치된 Ollama 모델에 따라 달라지므로 PC 마다 다르다.
+runtime_config.json
+
 # ── 에이전트 워크스페이스 (런타임 생성) ────────────
 # 터미널 작업 디렉터리이자 SFT 데이터셋·Colab 노트북 출력 위치다.
 workspace/

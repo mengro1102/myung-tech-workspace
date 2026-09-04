@@ -40,6 +40,48 @@ DEPARTMENTS_DIR  = ROOT / "departments"
 SHARED_MEMORY_DIR = ROOT / "shared_memory"
 ENV_FILE         = ROOT / ".env"
 
+# 런타임 설정. UI 에서 고른 '공통 두뇌'가 여기 적히고, 디스패처가 이 파일을
+# 읽는다. 예전에는 UI 의 React state 에만 있어서 새로고침하면 사라졌고 추론에는
+# 아무 영향이 없었다 — 고를 수는 있는데 아무 데도 반영되지 않는 장식이었다.
+RUNTIME_CONFIG = ROOT / "runtime_config.json"
+DEFAULT_GLOBAL_MODEL = "qwen2.5:7b"
+
+
+def _ollama_models() -> list[dict]:
+    """Ollama 에 실제로 설치된 모델 목록. 실패하면 빈 목록."""
+    try:
+        import urllib.request
+        with urllib.request.urlopen(f"{OLLAMA_HOST}/api/tags", timeout=5) as r:
+            return json.loads(r.read().decode()).get("models", [])
+    except Exception:
+        return []
+
+
+def _runtime_config() -> dict:
+    try:
+        return json.loads(RUNTIME_CONFIG.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+
+def _save_runtime_config(patch: dict) -> dict:
+    cfg = _runtime_config()
+    cfg.update(patch)
+    RUNTIME_CONFIG.write_text(
+        json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
+    return cfg
+
+
+# UI 연동 탭에서 저장할 수 있는 키. 여기 없는 이름은 거부한다.
+ALLOWED_ENV_KEYS = {
+    "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID",
+    "YOUTUBE_API_KEY", "YOUTUBE_CHANNEL_ID",
+    "YOUTUBE_OAUTH_CLIENT_ID", "YOUTUBE_OAUTH_CLIENT_SECRET",
+    "PAYPAL_CLIENT_ID", "PAYPAL_CLIENT_SECRET",
+    "TOSS_SECRET_KEY",
+    "GITHUB_TOKEN", "HUGGINGFACE_TOKEN",
+}
+
 sys.path.insert(0, str(ROOT / "shared_memory"))
 sys.path.insert(0, str(ROOT / "bridge"))
 sys.path.insert(0, str(ROOT / "orchestrator"))
@@ -91,6 +133,13 @@ def _detect_ollama_host() -> str:
 OLLAMA_HOST = _detect_ollama_host()
 
 PORT = int(os.environ.get("API_PORT", 9000))
+
+# 이 서버에는 인증이 없다. 태스크 큐, 워크스페이스 파일 쓰기·삭제, .env 저장까지
+# 전부 무인증으로 열려 있는데 0.0.0.0 에 바인드하고 있었다 — 같은 네트워크에
+# 있는 누구나 손댈 수 있었다는 뜻이다. 기본은 루프백으로 내린다.
+# 폰에서 열어 보는 식으로 LAN 노출이 필요하면 MYUNGTECH_LAN=1 로 켠다.
+LAN_EXPOSED = os.environ.get("MYUNGTECH_LAN", "") in ("1", "true", "True")
+BIND_HOST = "0.0.0.0" if LAN_EXPOSED else "127.0.0.1"
 
 # ── Ollama 상태 프로브 캐시 ───────────────────────────────────
 # Ollama가 내려가 있으면 연결 시도가 TCP 타임아웃까지 수 초 블로킹된다. /api/health는
@@ -164,18 +213,30 @@ def _kb_status_payload() -> dict:
 
 
 def _kb_sync(message: str = "brain inject"):
-    """Auto-Git-Sync: add → commit → pull(-X ours) → push. 단계별 결과 리스트 반환.
-    (Connect AI _safeGitAutoSync 벤치마크. 충돌 시 로컬 우선.)"""
+    """위키 백업: add → commit → pull → push. 단계별 결과 리스트를 돌려준다.
+
+    예전에는 pull 에 `-X ours` 가 붙어 있었다. 충돌이 나면 원격 쪽 변경을 말없이
+    버린다는 뜻이다. 위키는 PC2 와 수집 크론도 커밋하는 저장소라, 다른 데서 쓴
+    글이 이 버튼 한 번에 조용히 사라질 수 있었다. 충돌은 조용히 이기는 것보다
+    시끄럽게 멈추는 편이 낫다 — 그냥 pull 하고, 충돌하면 그 단계에서 실패로
+    보고한다(로컬 커밋은 이미 되어 있으니 잃는 것은 없다).
+    """
     steps = []
     plan = [
         ["add", "-A"],
         ["commit", "-m", message],
-        ["pull", "--no-edit", "-X", "ours", "origin", "main"],
+        ["pull", "--no-rebase", "--no-edit", "origin", "main"],
         ["push", "origin", "HEAD"],
     ]
     for args in plan:
         ok, out = _kb_git(*args, timeout=120)
         steps.append({"cmd": "git " + " ".join(args), "ok": ok, "out": out[:300]})
+        # pull 이 충돌로 멈췄으면 push 로 넘어가지 않는다. 반쯤 병합된 상태를
+        # 원격에 밀어 넣는 것이 가장 나쁘다.
+        if not ok and args[0] == "pull" and "CONFLICT" in out.upper():
+            steps.append({"cmd": "git push origin HEAD", "ok": False,
+                          "out": "충돌 때문에 건너뜀 — 저장소에서 직접 해결하세요."})
+            break
     return steps
 
 
@@ -183,7 +244,12 @@ def _kb_sync(message: str = "brain inject"):
 # 모든 파일·명령은 이 루트로 제한(경로 이탈 방지). 터미널 실행은 옵트인.
 WORKSPACE_ROOT = (ROOT / "workspace").resolve()
 WORKSPACE_ROOT.mkdir(parents=True, exist_ok=True)
-ALLOW_EXEC = os.environ.get("MYUNGTECH_ALLOW_EXEC", "") in ("1", "true", "True")
+# 터미널은 shell=True 로 임의 명령을 돌린다. cwd 를 workspace 로 두긴 하지만
+# cwd 는 격리가 아니다 — `cd ..` 한 줄이면 벗어난다. 그래서 옵트인이고,
+# 거기에 더해 LAN 에 노출된 상태에서는 켤 수 없게 한다. 둘이 겹치면 그건
+# 무인증 원격 코드 실행이다.
+_EXEC_OPT_IN = os.environ.get("MYUNGTECH_ALLOW_EXEC", "") in ("1", "true", "True")
+ALLOW_EXEC = _EXEC_OPT_IN and not LAN_EXPOSED
 
 
 def _safe_ws(rel: str) -> Path:
@@ -484,20 +550,30 @@ class Handler(BaseHTTPRequestHandler):
                 "total":       len(all_tasks),
             })
 
+        # ── GET /api/config/model  (공통 두뇌 — 디스패처와 공유하는 단일 출처)
+        elif path == "/api/config/model":
+            cfg = _runtime_config()
+            _json_resp(self, 200, {
+                "global_model": cfg.get("global_model", DEFAULT_GLOBAL_MODEL),
+                "default": DEFAULT_GLOBAL_MODEL,
+            })
+
+        # ── GET /api/config/load  (저장된 키 이름 목록 반환 — 값은 마스킹)
+        elif path == "/api/config/load":
+            keys: dict[str, bool] = {}
+            if ENV_FILE.exists():
+                for line in ENV_FILE.read_text(encoding="utf-8").splitlines():
+                    if "=" in line and not line.startswith("#"):
+                        k = line.split("=")[0].strip()
+                        v = line.split("=", 1)[1].strip().strip('"')
+                        keys[k] = bool(v)
+            _json_resp(self, 200, {"keys": keys})
+
         # ── GET /api/models  (Ollama 설치 모델 목록)
         elif path == "/api/models":
-            try:
-                import urllib.request
-                url = f"{OLLAMA_HOST}/api/tags"
-                with urllib.request.urlopen(url, timeout=5) as r:
-                    data = json.loads(r.read().decode())
-                models = [
-                    {"id": m["name"], "size": m.get("size", 0)}
-                    for m in data.get("models", [])
-                ]
-                _json_resp(self, 200, {"models": models})
-            except Exception as e:
-                _json_resp(self, 200, {"models": [], "error": str(e)})
+            models = [{"id": m["name"], "size": m.get("size", 0)}
+                      for m in _ollama_models()]
+            _json_resp(self, 200, {"models": models})
 
         # ── GET /api/knowledge/status  (단기기억 = GraphRAG 참조 상태)
         elif path == "/api/knowledge/status":
@@ -568,12 +644,29 @@ class Handler(BaseHTTPRequestHandler):
             _json_resp(self, 404, {"error": "Not found"})
 
     def do_DELETE(self):
+        # do_DELETE 가 클래스 안에 두 번 정의돼 있었다. 파이썬은 뒤엣것으로
+        # 덮어쓰므로 에이전트 삭제만 살아 있고 태스크 삭제는 죽어 있었다 —
+        # UI 의 태스크 삭제 버튼이 조용히 아무 일도 하지 않은 이유다. 합친다.
         parsed = urlparse(self.path)
         path = parsed.path.rstrip("/")
+
         if path.startswith("/api/tasks/"):
             task_id = path.split("/api/tasks/")[1]
             ok = task_queue.delete_task(task_id) if hasattr(task_queue, "delete_task") else False
             _json_resp(self, 200, {"ok": ok, "task_id": task_id})
+
+        elif path.startswith("/api/agents/"):
+            agent_id = path.split("/api/agents/")[1]
+            agent = _get_agent(agent_id)
+            if not agent:
+                _json_resp(self, 404, {"error": "Agent not found"})
+                return
+            try:
+                Path(agent["_file"]).unlink()
+                _json_resp(self, 200, {"ok": True, "deleted": agent_id})
+            except Exception as e:  # noqa: BLE001
+                _json_resp(self, 500, {"error": str(e)})
+
         else:
             _json_resp(self, 404, {"error": "Not found"})
 
@@ -660,20 +753,38 @@ class Handler(BaseHTTPRequestHandler):
                 created.append({"task_id": task["task_id"], "department": t.get("department")})
             _json_resp(self, 200, {"ok": True, "tasks": created, "count": len(created)})
 
-        # ── GET /api/config/load  (저장된 키 이름 목록 반환 — 값은 마스킹)
-        elif path == "/api/config/load":
-            keys: dict[str, bool] = {}
-            if ENV_FILE.exists():
-                for line in ENV_FILE.read_text(encoding="utf-8").splitlines():
-                    if "=" in line and not line.startswith("#"):
-                        k = line.split("=")[0].strip()
-                        v = line.split("=", 1)[1].strip().strip('"')
-                        keys[k] = bool(v)
-            _json_resp(self, 200, {"keys": keys})
+        # ── POST /api/config/model  {model}
+        elif path == "/api/config/model":
+            body = self._read_body()
+            model = (body.get("model") or "").strip()
+            if not model:
+                _json_resp(self, 400, {"ok": False, "error": "model 필요"})
+                return
+            # 설치돼 있지 않은 모델을 고르면 첫 추론에서야 404 로 터진다.
+            # 고르는 자리에서 막는 편이 낫다.
+            installed = [m.get("name") for m in _ollama_models()]
+            if installed and model not in installed:
+                _json_resp(self, 400, {
+                    "ok": False,
+                    "error": f"Ollama 에 설치되지 않은 모델입니다: {model}",
+                })
+                return
+            cfg = _save_runtime_config({"global_model": model})
+            _json_resp(self, 200, {"ok": True, "global_model": cfg["global_model"]})
 
-        # ── POST /api/config/save  (.env 저장)
+        # ── POST /api/config/save  (.env 저장 — 허용된 키만)
         elif path == "/api/config/save":
             body = self._read_body()
+            # 예전에는 받은 키를 그대로 .env 에 썼다. .env 는 게이트웨이와
+            # 디스패처가 읽으므로, 임의 키를 넣을 수 있다는 것은 남의 API 키를
+            # 덮어쓰거나 MYUNGTECH_ALLOW_EXEC=1 을 심을 수 있다는 뜻이다.
+            unknown = [k for k in body if k not in ALLOWED_ENV_KEYS]
+            if unknown:
+                _json_resp(self, 400, {
+                    "ok": False,
+                    "error": f"허용되지 않은 설정 키: {', '.join(sorted(unknown))}",
+                })
+                return
             lines: list[str] = []
             if ENV_FILE.exists():
                 existing = ENV_FILE.read_text(encoding="utf-8").splitlines()
@@ -837,10 +948,13 @@ class Handler(BaseHTTPRequestHandler):
         # ── POST /api/term/run  {cmd}  (터미널 실행 — 옵트인 MYUNGTECH_ALLOW_EXEC=1)
         elif path == "/api/term/run":
             if not ALLOW_EXEC:
-                _json_resp(self, 403, {
-                    "ok": False,
-                    "error": "터미널 실행 비활성화. 켜려면 MYUNGTECH_ALLOW_EXEC=1 설정 후 server.py 재시작.",
-                })
+                reason = (
+                    "LAN 노출(MYUNGTECH_LAN=1) 중에는 터미널을 켤 수 없습니다. "
+                    "이 서버에는 인증이 없어 무인증 원격 실행이 됩니다."
+                    if _EXEC_OPT_IN else
+                    "터미널 실행 비활성화. 켜려면 MYUNGTECH_ALLOW_EXEC=1 설정 후 server.py 재시작."
+                )
+                _json_resp(self, 403, {"ok": False, "error": reason})
                 return
             body = self._read_body()
             cmd = (body.get("cmd") or "").strip()
@@ -900,29 +1014,14 @@ class Handler(BaseHTTPRequestHandler):
         else:
             _json_resp(self, 404, {"error": "Not found"})
 
-    def do_DELETE(self):
-        parsed = urlparse(self.path)
-        path = parsed.path.rstrip("/")
-        if path.startswith("/api/agents/"):
-            agent_id = path.split("/api/agents/")[1]
-            agent = _get_agent(agent_id)
-            if not agent:
-                _json_resp(self, 404, {"error": "Agent not found"})
-                return
-            try:
-                Path(agent["_file"]).unlink()
-                _json_resp(self, 200, {"ok": True, "deleted": agent_id})
-            except Exception as e:
-                _json_resp(self, 500, {"error": str(e)})
-        else:
-            _json_resp(self, 404, {"error": "Not found"})
-
-
 # ── 진입점 ────────────────────────────────────────────────────
 
 if __name__ == "__main__":
-    server = ThreadingHTTPServer(("0.0.0.0", PORT), Handler)
+    server = ThreadingHTTPServer((BIND_HOST, PORT), Handler)
     print(f"[server] 명테크 API 서버 시작 → http://localhost:{PORT}/api/health")
+    print(f"[server] 바인드 {BIND_HOST}:{PORT}"
+          + ("  ⚠ LAN 노출 (인증 없음)" if LAN_EXPOSED else "  (이 PC 전용)"))
+    print(f"[server] 터미널 실행 {'ON' if ALLOW_EXEC else 'OFF'}")
     print(f"[server] 에이전트 {len(_load_all_agents())}명 로드됨")
     try:
         server.serve_forever()
