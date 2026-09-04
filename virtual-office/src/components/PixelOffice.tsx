@@ -94,6 +94,33 @@ function roomCenter(dept: string): { x: number; y: number } {
 }
 
 // ── 픽셀 그리기 헬퍼 (2x 스프라이트) ─────────────────────
+/** 색을 조금 어둡게/밝게 — 음영용. */
+function shade(hex: string, amt: number): string {
+  const h = hex.replace('#', '');
+  const n = parseInt(h.length === 3 ? h.split('').map(c => c + c).join('') : h, 16);
+  const cl = (v: number) => Math.max(0, Math.min(255, Math.round(v)));
+  const r = cl(((n >> 16) & 255) * (1 + amt));
+  const g = cl(((n >> 8) & 255) * (1 + amt));
+  const b = cl((n & 255) * (1 + amt));
+  return `rgb(${r},${g},${b})`;
+}
+
+/* 에이전트 아바타.
+ *
+ * 좌표는 발밑 중앙(px, py) 기준의 **정수 격자**로 정의하고 단위(U)를 정수배로만
+ * 곱한다. 반픽셀이 생길 수 없으므로 조각 사이에 금이 가지 않는다.
+ *
+ * 격자: 가로 -6..+6, 세로 -14(머리끝)..+1(발). U=3 이면 대략 36x48px.
+ *
+ * 캐릭터처럼 보이게 하는 것은 디테일이 아니라 **실루엣**이다. 그래서 두 가지를
+ * 지킨다.
+ *
+ *  - 머리와 어깨의 네 귀퉁이를 한 칸씩 깎는다. 직각 상자는 아무리 얼굴을 그려도
+ *    상자로 읽힌다.
+ *  - 모든 조각을 모아 한 칸 바깥으로 확장해 어두운 색으로 먼저 칠하고, 그 위에
+ *    본 색을 덮는다. 결과적으로 실루엣 둘레에만 1칸 외곽선이 남는다. 밝은 바닥
+ *    위에서도 인물이 배경에서 떨어져 보인다.
+ */
 function drawPixelAgent(
   ctx: CanvasRenderingContext2D,
   x: number, y: number,
@@ -105,53 +132,101 @@ function drawPixelAgent(
 ) {
   const px = Math.round(x);
   const py = Math.round(y);
-  // 3x. 2x 에서는 인물이 16x27px 이라 표정도 옷도 구분되지 않았다 — 참고한
-  // 화면에서 인물은 공간의 초점인데 여기서는 점에 가까웠다. 방이 255px 폭이라
-  // 3x(24x40px)로 키워도 서너 명이 넉넉히 들어간다.
-  const S = 3;
-  const U = S / 2;                      // 아래 좌표들이 쓰는 단위
+  const U = 3;                                   // 단위 픽셀 (정수여야 한다)
+
+  const hair    = shade(skinTone, -0.66);
+  const skinSh  = shade(skinTone, -0.20);
+  const shirtSh = shade(shirtColor, -0.30);
+  const shirtHi = shade(shirtColor, 0.18);
+  const pants   = '#39415a';
+  const pantsSh = '#2a3145';
+  const shoe    = '#1c2030';
+  const OUTLINE = 'rgba(18,20,32,0.92)';
+
+  // 조각을 바로 칠하지 않고 모은다. 외곽선을 한 번에 두르기 위해서다.
+  const parts: Array<[number, number, number, number, string]> = [];
+  const r = (gx: number, gy: number, gw: number, gh: number, color: string) => {
+    parts.push([gx, gy, gw, gh, color]);
+  };
 
   // 발밑 그림자 — 인물이 바닥에 '있는' 느낌의 대부분은 그림자가 만든다.
-  softShadow(ctx, px, py + 8 * U, 5.5 * S, 2 * S, 0.34);
+  softShadow(ctx, px, py + U, 5 * U, 1.8 * U, 0.36);
 
-  // 어두운 실루엣 — 방 바닥이 어두워 인물이 묻히던 것을 분리해 준다.
-  ctx.fillStyle = 'rgba(0,0,0,0.55)';
-  ctx.fillRect(px - 5.5 * S, py - 8 * S, 11 * S, 9.5 * S);
+  const step  = busy ? 0 : (frame % 4 < 2 ? 0 : 1);
+  const swing = busy ? 0 : (frame % 4 < 2 ? 0 : 1);
 
-  // 머리 (16×14px)
-  ctx.fillStyle = skinTone;
-  ctx.fillRect(px - 8*S/2, py - 14*S/2, 8*S/2, 7*S/2);
-
-  // 눈
-  ctx.fillStyle = '#1a1a2e';
-  ctx.fillRect(px + (dir > 0 ? 2 : -6)*S/2, py - 12*S/2, 2*S/2, 2*S/2);
-
-  // 귀
-  ctx.fillStyle = skinTone;
-  ctx.fillRect(px - 10*S/2, py - 12*S/2, 2*S/2, 4*S/2);
-  ctx.fillRect(px + 8*S/2,  py - 12*S/2, 2*S/2, 4*S/2);
-
-  // 몸 (셔츠)
-  ctx.fillStyle = shirtColor;
-  ctx.fillRect(px - 8*S/2, py - 7*S/2, 8*S/2, 7*S/2);
-
-  // 다리 애니메이션
-  ctx.fillStyle = '#374151';
-  if (!busy) {
-    const legOff = frame % 2 === 0 ? 0 : 4;
-    ctx.fillRect(px - 6*S/2, py, 3*S/2, 5*S/2 + legOff);
-    ctx.fillRect(px + 2*S/2, py, 3*S/2, 5*S/2 - legOff + 4);
+  // ── 다리 ── 앉으면 짧게 접는다
+  if (busy) {
+    r(-3, -2, 2, 2, pantsSh);
+    r(1, -2, 2, 2, pantsSh);
   } else {
-    // 앉아서 작업 중
-    ctx.fillRect(px - 6*S/2, py - 2, 3*S/2, 4*S/2);
-    ctx.fillRect(px + 2*S/2, py - 2, 3*S/2, 4*S/2);
-    // 팔 (타이핑 모션)
-    ctx.fillStyle = skinTone;
-    const armOff = (frame % 3) * 2;
-    ctx.fillRect(px - 14*S/2 + armOff, py - 5*S/2, 3*S/2, 2*S/2);
-    ctx.fillRect(px + 10*S/2 - armOff, py - 5*S/2, 3*S/2, 2*S/2);
+    r(-3, -2 + step, 2, 3 - step, pants);
+    r(1, -2 - step, 2, 3 + step, pants);
+    r(-4, 1 - step, 3, 1, shoe);                 // 신발 — 발끝이 조금 나온다
+    r(1, 1 + step, 3, 1, shoe);
+  }
+
+  // ── 몸통 ── 어깨 귀퉁이를 깎아 사다리꼴로 만든다
+  r(-3, -7, 6, 1, shirtHi);                      // 어깨(좁음) + 하이라이트
+  r(-4, -6, 8, 3, shirtColor);
+  r(-4, -3, 8, 1, shirtSh);                      // 밑단 그림자
+  r(-4, -6, 1, 4, shirtSh);                      // 옆구리 음영 — 팔과 몸을 갈라 준다
+  r(3, -6, 1, 4, shirtSh);
+
+  // ── 팔 ──
+  if (busy) {
+    const t = (frame % 3) - 1;                   // 타이핑
+    r(-6, -6 + t, 2, 2, shirtColor);
+    r(4, -6 - t, 2, 2, shirtColor);
+    r(-6, -4 + t, 2, 1, skinTone);
+    r(4, -4 - t, 2, 1, skinTone);
+  } else {
+    r(-6, -6 + swing, 2, 3, shirtColor);
+    r(4, -6 - swing, 2, 3, shirtColor);
+    r(-6, -3 + swing, 2, 1, skinTone);           // 손
+    r(4, -3 - swing, 2, 1, skinTone);
+  }
+
+  // ── 목 ──
+  r(-1, -8, 2, 1, skinSh);
+
+  // ── 머리 ── 위아래 귀퉁이를 깎는다
+  r(-3, -14, 6, 1, hair);                        // 정수리(좁음)
+  r(-4, -13, 8, 2, hair);                        // 머리 윗면
+  r(-4, -11, 8, 2, skinTone);                    // 얼굴
+  r(-3, -9, 6, 1, skinTone);                     // 턱(좁음)
+  r(-4, -11, 1, 1, hair);                        // 옆머리 — 얼굴을 좁혀 준다
+  r(3, -11, 1, 1, hair);
+  r(-5, -11, 1, 2, skinSh);                      // 귀 (머리에 붙어 있다)
+  r(4, -11, 1, 2, skinSh);
+  r(dir > 0 ? 1 : -3, -12, 2, 1, hair);          // 앞머리 — 보는 쪽으로 흘러내린다
+
+  // 눈·입 — 보는 쪽으로 몰아 방향이 읽히게
+  const eyeX = dir > 0 ? 0 : -3;
+  r(eyeX, -11, 1, 1, '#2b3244');
+  r(eyeX + 2, -11, 1, 1, '#2b3244');
+  r(dir > 0 ? 1 : -2, -10, 1, 1, shade(skinTone, -0.42));   // 입
+
+  // 외곽선 → 본 색. 순서가 중요하다.
+  ctx.fillStyle = OUTLINE;
+  for (const [gx, gy, gw, gh] of parts) {
+    ctx.fillRect(px + (gx - 1) * U, py + (gy - 1) * U, (gw + 2) * U, (gh + 2) * U);
+  }
+  for (const [gx, gy, gw, gh, color] of parts) {
+    ctx.fillStyle = color;
+    ctx.fillRect(px + gx * U, py + gy * U, gw * U, gh * U);
+  }
+
+  // 작업 중 표시 — 머리 위 점 세 개. 외곽선을 두르지 않는다.
+  if (busy) {
+    const lit = frame % 3;
+    for (let i = 0; i < 3; i++) {
+      ctx.fillStyle = i === lit ? '#7dd3fc' : 'rgba(125,211,252,0.28)';
+      ctx.fillRect(px + (-2 + i * 2) * U, py - 17 * U, U, U);
+    }
   }
 }
+
 
 function drawSpeechBubble(
   ctx: CanvasRenderingContext2D,
