@@ -112,7 +112,6 @@ function MainScreen() {
   const [showMemory,  setShowMemory]  = useState(false);
   const [showModel,   setShowModel]   = useState(false);
   const [showManage,  setShowManage]  = useState(false);
-  const [showTerminal,setShowTerminal]= useState(false);
   const [activeTab,   setActiveTab]   = useState<'main' | 'office' | 'ceo' | 'agents'>('main');
   const [overrideTask, setOverrideTask] = useState<TaskItem | null>(null);
   const [showGridMenu, setShowGridMenu] = useState(false);
@@ -135,11 +134,6 @@ function MainScreen() {
     }
     pushNotif('info', `공통 두뇌를 ${model} 로 바꿨습니다`);
   }, [globalModel]);
-  const [termInput,   setTermInput]   = useState('');
-  const [termLines,   setTermLines]   = useState<string[]>([
-    '[명테크 Agent Studio] 터미널 준비됨',
-    '$ 명령어 입력 후 Enter',
-  ]);
   const [time,        setTime]        = useState(nowStr());
   const [sidebarW,    setSidebarW]    = useState(220);   // 사이드바 너비 (px)
   const [isMobile,    setIsMobile]    = useState(() => window.innerWidth < 768);
@@ -376,20 +370,6 @@ function MainScreen() {
     send(chip.label, chip.dept);
   };
 
-  const handleTermEnter = async (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key !== 'Enter' || !termInput.trim()) return;
-    const cmd = termInput.trim();
-    setTermInput('');
-    setTermLines(prev => [...prev, `$ ${cmd}`, '실행 중…']);
-    const r = await api.termRun(cmd);
-    setTermLines(prev => {
-      const base = prev.slice(0, -1); // '실행 중…' 제거
-      if (!r) return [...base, '[오류] 백엔드 미연결 (server.py :9000)'];
-      if (r.error) return [...base, `[차단/오류] ${r.error}`];
-      return [...base, (r.output ?? '').trimEnd() || `[완료 · code ${r.code ?? 0}]`];
-    });
-  };
-
   const activeAgents = agents.filter(a => a.status !== 'Idle').length;
 
   return (
@@ -497,11 +477,6 @@ function MainScreen() {
                     icon: '📊', label: '시스템 현황판', active: showSidebar,
                     bg: 'rgba(139,92,246,0.15)', color: '#8B5CF6',
                     action: () => setShowSidebar(v => !v),
-                  },
-                  {
-                    icon: '🖥', label: '터미널', active: showTerminal,
-                    bg: 'rgba(45,212,191,0.15)', color: '#2DD4BF',
-                    action: () => setShowTerminal(v => !v),
                   },
                   {
                     icon: '🧬', label: '지식 네트워크', active: false,
@@ -884,32 +859,6 @@ function MainScreen() {
             ))}
           </div>
 
-
-          {/* Terminal panel */}
-          {showTerminal && (
-            <div className="hs-terminal">
-              <div className="hs-terminal-header">
-                <span>■</span> 터미널
-                <button
-                  onClick={() => setShowTerminal(false)}
-                  style={{ marginLeft: 'auto', background: 'none', border: 'none', color: '#64748b', cursor: 'pointer' }}
-                >✕</button>
-              </div>
-              <div className="hs-terminal-body">
-                {termLines.map((l, i) => <div key={i}>{l}</div>)}
-              </div>
-              <div className="hs-terminal-input-wrap">
-                <span className="hs-terminal-prompt">$</span>
-                <input
-                  className="hs-terminal-input"
-                  value={termInput}
-                  onChange={e => setTermInput(e.target.value)}
-                  onKeyDown={handleTermEnter}
-                  placeholder="명령어 입력 후 Enter (예: ls · npm install)"
-                />
-              </div>
-            </div>
-          )}
 
           {/* Chat input */}
           <div className="hs-input-bar">

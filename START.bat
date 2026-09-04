@@ -66,20 +66,22 @@ echo  [5/5] Waiting for services...
 timeout /t 8 /nobreak > nul
 
 echo.
+REM  API and UI bind IPv4 loopback only. On Windows "localhost" can resolve
+REM  to ::1 first, so checks against it report 000 even when both are up.
 echo  --- health check ---
-curl -s -o nul -w "  API    (9000) : HTTP %%{http_code}\n" http://localhost:9000/api/health
-curl -s -o nul -w "  UI     (5174) : HTTP %%{http_code}\n" http://localhost:5174/
+curl -s -o nul -w "  API    (9000) : HTTP %%{http_code}\n" http://127.0.0.1:9000/api/health
+curl -s -o nul -w "  UI     (5174) : HTTP %%{http_code}\n" http://127.0.0.1:5174/
 curl -s -o nul -w "  Ollama (11434): HTTP %%{http_code}\n" http://localhost:11434/api/version
 curl -s -o nul -w "  Router (3001) : HTTP %%{http_code}\n" http://127.0.0.1:3001/
 
 echo.
 echo  Opening browser...
-start "" "http://localhost:5174"
+start "" "http://127.0.0.1:5174"
 
 echo.
 echo  ==========================================
-echo   UI   : http://localhost:5174
-echo   API  : http://localhost:9000
+echo   UI   : http://127.0.0.1:5174
+echo   API  : http://127.0.0.1:9000  (this PC only - no auth)
 echo   Stop : run STOP.bat
 echo  ==========================================
 echo.

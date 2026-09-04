@@ -710,48 +710,6 @@ body {
 .hs-send-btn:disabled { opacity: 0.3; cursor: not-allowed; box-shadow: none; }
 
 /* ── Terminal panel ── */
-.hs-terminal {
-  background: rgba(0,0,0,0.85);
-  border-top: 1px solid var(--border);
-  height: 200px;
-  flex-shrink: 0;
-  display: flex;
-  flex-direction: column;
-  position: relative; z-index: 2;
-  backdrop-filter: blur(8px);
-}
-.hs-terminal-header {
-  display: flex; align-items: center; gap: 6px;
-  padding: 6px 12px;
-  border-bottom: 1px solid rgba(255,255,255,0.07);
-  font-size: 11px; color: var(--muted);
-  font-family: 'JetBrains Mono', monospace;
-}
-.hs-terminal-body {
-  flex: 1;
-  overflow-y: auto;
-  padding: 8px 14px;
-  font-family: 'JetBrains Mono', 'Consolas', monospace;
-  font-size: 11px;
-  color: var(--secondary);
-  line-height: 1.6;
-}
-.hs-terminal-body::-webkit-scrollbar { width: 3px; }
-.hs-terminal-body::-webkit-scrollbar-thumb { background: #333; }
-.hs-terminal-input-wrap {
-  display: flex; align-items: center; gap: 4px;
-  padding: 4px 14px;
-  border-top: 1px solid rgba(255,255,255,0.05);
-}
-.hs-terminal-prompt { color: var(--primary); font-size: 11px; font-family: 'JetBrains Mono', monospace; }
-.hs-terminal-input {
-  flex: 1;
-  background: transparent;
-  border: none; outline: none;
-  color: var(--text);
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 11px;
-}
 
 /* ══════════════════════════════════════════════════════
    Modal shared styles
@@ -1038,6 +996,7 @@ body {
 .af-compact-status-label { font-size: 11px; font-weight: 600; letter-spacing: .04em; }
 .af-compact-status-count { font-size: 11px; color: var(--muted2); margin-left: auto; }
 .af-compact-list { display: flex; flex-direction: column; gap: 1px; max-height: 100%; overflow-y: auto; }
+.af-compact-row { flex: 0 0 auto; }   /* 위와 같은 이유 — 눌리지 않게 */
 .af-compact-empty { font-size: 12px; color: var(--muted2); padding: 8px 2px; }
 .af-compact-row {
   display: flex; align-items: baseline; gap: 6px;
@@ -2260,20 +2219,28 @@ body {
   font-style: italic;
 }
 .am-log-row {
+  /* flex 세로 컨테이너의 자식은 기본이 flex-shrink:1 이다. 로그가 쌓여
+     max-height 를 넘으면 컨테이너가 스크롤되는 대신 행들이 세로로 눌린다 —
+     26px 짜리 행이 몇 px 로 찌그러지고 overflow:hidden 이 글자를 잘라내
+     겹쳐 보였다. 줄어들지 않게 못 박는다. */
+  flex: 0 0 auto;
   display: flex;
+  align-items: baseline;
   gap: 8px;
   padding: 3px 4px;
   font-size: 12.5px;
   font-family: 'JetBrains Mono', monospace;
   line-height: 1.75;
-  overflow: hidden;
   border-radius: 3px;
 }
 .am-log-row:hover { background: rgba(255, 255, 255, .03); }
 .am-log-time  { color: var(--muted2); flex-shrink: 0; }
 .am-log-text  { font-weight: 600; flex-shrink: 0; }
 .am-log-arrow { color: var(--muted2); flex-shrink: 0; }
-.am-log-msg   { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* flex 아이템의 기본 min-width 는 auto 라 내용보다 작아지지 않는다.
+   0 으로 낮춰야 말줄임(…)이 실제로 걸린다. */
+.am-log-msg   { flex: 1 1 auto; min-width: 0; color: var(--muted);
+                overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* 성능 패널 */
 .am-perf-panel {

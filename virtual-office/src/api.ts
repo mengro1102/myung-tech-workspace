@@ -174,14 +174,6 @@ export const api = {
       })
     ),
 
-  termRun: (cmd: string) =>
-    safeJson<{ ok: boolean; code?: number; output?: string; error?: string }>(
-      fetch(`${API_BASE}/term/run`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ cmd }),
-      })
-    ),
-
   /* ── Phase 5: 장기기억 FT (SFT 데이터셋 + Colab 노트북) ── */
   longtermBuildDataset: (mode = 'sft') =>
     safeJson<{ ok: boolean; count?: number; rel?: string; error?: string }>(

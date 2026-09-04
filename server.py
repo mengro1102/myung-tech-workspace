@@ -135,11 +135,10 @@ OLLAMA_HOST = _detect_ollama_host()
 PORT = int(os.environ.get("API_PORT", 9000))
 
 # 이 서버에는 인증이 없다. 태스크 큐, 워크스페이스 파일 쓰기·삭제, .env 저장까지
-# 전부 무인증으로 열려 있는데 0.0.0.0 에 바인드하고 있었다 — 같은 네트워크에
-# 있는 누구나 손댈 수 있었다는 뜻이다. 기본은 루프백으로 내린다.
-# 폰에서 열어 보는 식으로 LAN 노출이 필요하면 MYUNGTECH_LAN=1 로 켠다.
-LAN_EXPOSED = os.environ.get("MYUNGTECH_LAN", "") in ("1", "true", "True")
-BIND_HOST = "0.0.0.0" if LAN_EXPOSED else "127.0.0.1"
+# 전부 무인증인데 0.0.0.0 에 바인드하고 있었다 — 같은 네트워크의 누구나 손댈 수
+# 있었다는 뜻이다. 이 PC 에서만 쓰므로 루프백에 고정한다. 바깥에 열어야 할 일이
+# 생기면 그때는 바인드만 바꿀 게 아니라 인증부터 붙여야 한다.
+BIND_HOST = "127.0.0.1"
 
 # ── Ollama 상태 프로브 캐시 ───────────────────────────────────
 # Ollama가 내려가 있으면 연결 시도가 TCP 타임아웃까지 수 초 블로킹된다. /api/health는
@@ -241,17 +240,9 @@ def _kb_sync(message: str = "brain inject"):
 
 
 # ── Phase 4: 에이전트 워크스페이스 (FS/터미널) ────────────────
-# 모든 파일·명령은 이 루트로 제한(경로 이탈 방지). 터미널 실행은 옵트인.
+# 에이전트 산출물(SFT 데이터셋 등)과 파일 API 가 쓰는 루트. 경로 이탈은 막는다.
 WORKSPACE_ROOT = (ROOT / "workspace").resolve()
 WORKSPACE_ROOT.mkdir(parents=True, exist_ok=True)
-# 터미널은 shell=True 로 임의 명령을 돌린다. cwd 를 workspace 로 두긴 하지만
-# cwd 는 격리가 아니다 — `cd ..` 한 줄이면 벗어난다. 그래서 옵트인이고,
-# 거기에 더해 LAN 에 노출된 상태에서는 켤 수 없게 한다. 둘이 겹치면 그건
-# 무인증 원격 코드 실행이다.
-_EXEC_OPT_IN = os.environ.get("MYUNGTECH_ALLOW_EXEC", "") in ("1", "true", "True")
-ALLOW_EXEC = _EXEC_OPT_IN and not LAN_EXPOSED
-
-
 def _safe_ws(rel: str) -> Path:
     """workspace 루트 기준 안전 경로 해석. 이탈 시 ValueError."""
     rel = (rel or "").lstrip("/\\")
@@ -777,7 +768,7 @@ class Handler(BaseHTTPRequestHandler):
             body = self._read_body()
             # 예전에는 받은 키를 그대로 .env 에 썼다. .env 는 게이트웨이와
             # 디스패처가 읽으므로, 임의 키를 넣을 수 있다는 것은 남의 API 키를
-            # 덮어쓰거나 MYUNGTECH_ALLOW_EXEC=1 을 심을 수 있다는 뜻이다.
+            # 덮어쓰거나 다른 프로세스의 동작을 바꿀 수 있다는 뜻이다.
             unknown = [k for k in body if k not in ALLOWED_ENV_KEYS]
             if unknown:
                 _json_resp(self, 400, {
@@ -945,34 +936,6 @@ class Handler(BaseHTTPRequestHandler):
             except Exception as e:
                 _json_resp(self, 400, {"ok": False, "error": str(e)})
 
-        # ── POST /api/term/run  {cmd}  (터미널 실행 — 옵트인 MYUNGTECH_ALLOW_EXEC=1)
-        elif path == "/api/term/run":
-            if not ALLOW_EXEC:
-                reason = (
-                    "LAN 노출(MYUNGTECH_LAN=1) 중에는 터미널을 켤 수 없습니다. "
-                    "이 서버에는 인증이 없어 무인증 원격 실행이 됩니다."
-                    if _EXEC_OPT_IN else
-                    "터미널 실행 비활성화. 켜려면 MYUNGTECH_ALLOW_EXEC=1 설정 후 server.py 재시작."
-                )
-                _json_resp(self, 403, {"ok": False, "error": reason})
-                return
-            body = self._read_body()
-            cmd = (body.get("cmd") or "").strip()
-            if not cmd:
-                _json_resp(self, 400, {"ok": False, "error": "empty command"})
-                return
-            try:
-                r = subprocess.run(
-                    cmd, shell=True, cwd=str(WORKSPACE_ROOT),
-                    capture_output=True, text=True, timeout=int(body.get("timeout", 60)),
-                )
-                out = (r.stdout or "") + (("\n" + r.stderr) if r.stderr else "")
-                _json_resp(self, 200, {"ok": r.returncode == 0, "code": r.returncode,
-                                       "output": out[-8000:]})
-            except subprocess.TimeoutExpired:
-                _json_resp(self, 200, {"ok": False, "error": "timeout"})
-            except Exception as e:
-                _json_resp(self, 200, {"ok": False, "error": str(e)})
 
         # ── POST /api/longterm/build-dataset  (장기기억: GraphRAG→SFT JSONL)
         elif path == "/api/longterm/build-dataset":
@@ -1019,9 +982,7 @@ class Handler(BaseHTTPRequestHandler):
 if __name__ == "__main__":
     server = ThreadingHTTPServer((BIND_HOST, PORT), Handler)
     print(f"[server] 명테크 API 서버 시작 → http://localhost:{PORT}/api/health")
-    print(f"[server] 바인드 {BIND_HOST}:{PORT}"
-          + ("  ⚠ LAN 노출 (인증 없음)" if LAN_EXPOSED else "  (이 PC 전용)"))
-    print(f"[server] 터미널 실행 {'ON' if ALLOW_EXEC else 'OFF'}")
+    print(f"[server] 바인드 {BIND_HOST}:{PORT} (이 PC 전용)")
     print(f"[server] 에이전트 {len(_load_all_agents())}명 로드됨")
     try:
         server.serve_forever()
