@@ -20,7 +20,7 @@ netstat -ano 2>nul | findstr ":5174 " | findstr "LISTENING" > nul && echo       
 
 echo.
 echo  [ Service health ]
-powershell -NoProfile -Command "try{$h=Invoke-RestMethod 'http://localhost:9000/api/health' -TimeoutSec 10; ('        server   : {0}' -f $h.server.ok); ('        AI model : {0}  {1}' -f $h.vllm.ok, $h.vllm.host); ('        KB       : {0}  {1}' -f $h.knowledge_base.ok, $h.knowledge_base.path); ('        tasks    : pending {0} / running {1} / done {2} / failed {3}' -f $h.tasks.pending, $h.tasks.in_progress, $h.tasks.done, $h.tasks.failed)}catch{'        API no response'}" 2>nul
+powershell -NoProfile -Command "try{$h=Invoke-RestMethod 'http://127.0.0.1:9000/api/health' -TimeoutSec 10; ('        server   : {0}' -f $h.server.ok); ('        AI model : {0}  {1}' -f $h.vllm.ok, $h.vllm.host); ('        KB       : {0}  {1}' -f $h.knowledge_base.ok, $h.knowledge_base.path); ('        tasks    : pending {0} / running {1} / done {2} / failed {3}' -f $h.tasks.pending, $h.tasks.in_progress, $h.tasks.done, $h.tasks.failed)}catch{'        API no response'}" 2>nul
 
 echo.
 echo  [ Last 5 log lines ]
