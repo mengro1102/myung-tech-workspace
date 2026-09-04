@@ -168,45 +168,6 @@ export const api = {
     ),
 
   /* ── Phase 4: 에이전트 워크스페이스 (FS/터미널) ── */
-  fsList: (path = '') =>
-    safeJson<{ path: string; entries: FsEntry[] }>(
-      fetch(`${API_BASE}/fs/list?path=${encodeURIComponent(path)}`)
-    ),
-  fsRead: (path: string) =>
-    safeJson<{ path: string; content: string }>(
-      fetch(`${API_BASE}/fs/read?path=${encodeURIComponent(path)}`)
-    ),
-  fsWrite: (path: string, content: string) =>
-    safeJson<{ ok: boolean; path?: string; error?: string }>(
-      fetch(`${API_BASE}/fs/write`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ path, content }),
-      })
-    ),
-  /* 할 일 · 등록 서비스 · 승인 큐.
-   * 브라우저에만 있던 것들이라 에이전트가 읽을 수 없었다. 서버로 올렸고,
-   * 디스패처가 같은 파일을 읽고 쓴다. */
-  storeList: <T = StoreItem>(collection: StoreCollection) =>
-    safeJson<{ items: T[] }>(fetch(`${API_BASE}/store/${collection}`)),
-  storeAdd: <T = StoreItem>(collection: StoreCollection, item: Record<string, unknown>) =>
-    safeJson<{ ok: boolean; item: T; error?: string }>(
-      fetch(`${API_BASE}/store/${collection}`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(item),
-      })
-    ),
-  storeUpdate: <T = StoreItem>(collection: StoreCollection, id: string, patch: Record<string, unknown>) =>
-    safeJson<{ ok: boolean; item: T; error?: string }>(
-      fetch(`${API_BASE}/store/${collection}/${id}`, {
-        method: 'PUT', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(patch),
-      })
-    ),
-  storeRemove: (collection: StoreCollection, id: string) =>
-    safeJson<{ ok: boolean }>(
-      fetch(`${API_BASE}/store/${collection}/${id}`, { method: 'DELETE' })
-    ),
-
   listModels: () =>
     safeJson<{ models: { id: string; size: number }[]; error?: string }>(
       fetch(`${API_BASE}/models`)

@@ -241,18 +241,9 @@ def _kb_sync(message: str = "brain inject"):
 
 
 # ── Phase 4: 에이전트 워크스페이스 (FS/터미널) ────────────────
-# 에이전트 산출물(SFT 데이터셋 등)과 파일 API 가 쓰는 루트. 경로 이탈은 막는다.
+# 에이전트 산출물(SFT 데이터셋·Colab 노트북)이 떨어지는 곳.
 WORKSPACE_ROOT = (ROOT / "workspace").resolve()
 WORKSPACE_ROOT.mkdir(parents=True, exist_ok=True)
-def _safe_ws(rel: str) -> Path:
-    """workspace 루트 기준 안전 경로 해석. 이탈 시 ValueError."""
-    rel = (rel or "").lstrip("/\\")
-    p = (WORKSPACE_ROOT / rel).resolve()
-    if p != WORKSPACE_ROOT and WORKSPACE_ROOT not in p.parents:
-        raise ValueError("path escapes workspace")
-    return p
-
-
 # ── 에이전트 데이터 로드 ──────────────────────────────────────
 
 def _load_all_agents() -> list[dict]:
@@ -489,7 +480,10 @@ class Handler(BaseHTTPRequestHandler):
             if HAS_PSUTIL:
                 cpu = _psutil.cpu_percent(interval=0.1)
                 mem = _psutil.virtual_memory()
-                disk = _psutil.disk_usage("/")
+                # "/" 는 윈도우에서 현재 작업 디렉터리의 드라이브 루트로 풀린다 —
+                # 어디서 띄우느냐에 따라 C: 가 되기도 D: 가 되기도 한다. 이 시스템이
+                # 사는 드라이브를 명시한다.
+                disk = _psutil.disk_usage(str(ROOT.anchor))
                 net = _psutil.net_io_counters()
                 _json_resp(self, 200, {
                     "cpu_percent": cpu,
@@ -497,6 +491,7 @@ class Handler(BaseHTTPRequestHandler):
                     "mem_used_gb": round(mem.used / 1024**3, 2),
                     "mem_total_gb": round(mem.total / 1024**3, 2),
                     "disk_percent": disk.percent,
+                    "disk_mount": ROOT.anchor,
                     "disk_used_gb": round(disk.used / 1024**3, 2),
                     "disk_total_gb": round(disk.total / 1024**3, 2),
                     "net_sent_mb": round(net.bytes_sent / 1024**2, 2),
@@ -607,40 +602,7 @@ class Handler(BaseHTTPRequestHandler):
             except Exception as e:
                 _json_resp(self, 404, {"error": str(e)})
 
-        # ── GET /api/fs/list?path=  (워크스페이스 디렉터리 목록)
-        elif path == "/api/fs/list":
-            rel = (parse_qs(parsed.query).get("path") or [""])[0]
-            try:
-                d = _safe_ws(rel)
-                if not d.is_dir():
-                    _json_resp(self, 404, {"error": "not a directory"})
-                    return
-                entries = []
-                for p in sorted(d.iterdir(), key=lambda x: (x.is_file(), x.name.lower())):
-                    entries.append({
-                        "name": p.name,
-                        "is_dir": p.is_dir(),
-                        "size": (p.stat().st_size if p.is_file() else 0),
-                        "path": str(p.relative_to(WORKSPACE_ROOT)).replace("\\", "/"),
-                    })
-                _json_resp(self, 200, {"path": rel, "entries": entries})
-            except Exception as e:
-                _json_resp(self, 400, {"error": str(e)})
 
-        # ── GET /api/fs/read?path=  (파일 읽기)
-        elif path == "/api/fs/read":
-            rel = (parse_qs(parsed.query).get("path") or [""])[0]
-            try:
-                f = _safe_ws(rel)
-                if not f.is_file():
-                    _json_resp(self, 404, {"error": "not a file"})
-                    return
-                if f.stat().st_size > 512 * 1024:
-                    _json_resp(self, 413, {"error": "file too large (>512KB)"})
-                    return
-                _json_resp(self, 200, {"path": rel, "content": f.read_text(encoding="utf-8", errors="replace")})
-            except Exception as e:
-                _json_resp(self, 400, {"error": str(e)})
 
         else:
             _json_resp(self, 404, {"error": "Not found"})
@@ -955,33 +917,6 @@ class Handler(BaseHTTPRequestHandler):
             _json_resp(self, 200, {"ok": all(s["ok"] for s in steps[2:]),
                                    "steps": steps, "status": _kb_status_payload()})
 
-        # ── POST /api/fs/write  {path, content}  (파일 생성/수정)
-        elif path == "/api/fs/write":
-            body = self._read_body()
-            try:
-                f = _safe_ws(body.get("path", ""))
-                f.parent.mkdir(parents=True, exist_ok=True)
-                f.write_text(body.get("content", ""), encoding="utf-8")
-                _json_resp(self, 200, {"ok": True,
-                                       "path": str(f.relative_to(WORKSPACE_ROOT)).replace("\\", "/")})
-            except Exception as e:
-                _json_resp(self, 400, {"ok": False, "error": str(e)})
-
-        # ── POST /api/fs/delete  {path}
-        elif path == "/api/fs/delete":
-            body = self._read_body()
-            try:
-                f = _safe_ws(body.get("path", ""))
-                if f == WORKSPACE_ROOT:
-                    raise ValueError("cannot delete workspace root")
-                if f.is_dir():
-                    import shutil
-                    shutil.rmtree(f)
-                elif f.exists():
-                    f.unlink()
-                _json_resp(self, 200, {"ok": True})
-            except Exception as e:
-                _json_resp(self, 400, {"ok": False, "error": str(e)})
 
 
         # ── POST /api/longterm/build-dataset  (장기기억: GraphRAG→SFT JSONL)

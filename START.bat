@@ -9,7 +9,7 @@ REM  (wsl bash /mnt/d/.../scripts/svc.sh start). From WSL it cannot reach the
 REM  Windows-side Ollama (localhost:11434) or the FreeLLMAPI router
 REM  (127.0.0.1:3001), so every task failed with Errno 111 - that is exactly
 REM  what the 14 failed tasks were. Now everything runs natively on Windows.
-REM  The old WSL launcher is kept as START.bat.wsl-bak.
+REM  START.bat.bak is a copy of this file, kept as a rollback point.
 
 echo.
 echo  ==========================================

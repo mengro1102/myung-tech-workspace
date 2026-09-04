@@ -3,7 +3,7 @@ setlocal
 title myung-tech Agent Studio - STOP
 
 REM  Windows-native counterpart of START.bat. The WSL version is kept as
-REM  STOP.bat.wsl-bak. Ollama is NOT stopped here - it is shared with
+REM  STOP.bat.bak. Ollama is NOT stopped here - it is shared with
 REM  Mengbiseo; use the Mengbiseo desktop folder to release VRAM.
 
 echo.

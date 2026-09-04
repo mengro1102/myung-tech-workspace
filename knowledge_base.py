@@ -344,7 +344,10 @@ def inject(title: str, content: str, *, source_url: str = "", subdir: str = "art
     import datetime
     _require()
     title = (title or "untitled").strip()
-    slug = re.sub(r"[^a-z0-9\-]+", "-", title.lower()).strip("-")[:60] or "note"
+    # `[^a-z0-9-]` 로 걸러내면 한글이 통째로 사라져 제목이 무엇이든 "note" 가
+    # 된다. 파일명이 곧 문서의 이름인 위키에서 note, note-2, note-3 은 이름이
+    # 아니다. \w 는 유니코드를 포함하므로 한글이 살아남는다.
+    slug = re.sub(r"[^\w-]+", "-", title, flags=re.UNICODE).strip("-_")[:60].lower() or "note"
     dest_dir = KB_PATH / "raw" / subdir
     dest_dir.mkdir(parents=True, exist_ok=True)
     path = dest_dir / f"{slug}.md"
