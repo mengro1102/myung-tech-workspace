@@ -180,7 +180,8 @@ export const api = {
       })
     ),
   storeUpdate: <T = StoreItem>(collection: StoreCollection, id: string, patch: Record<string, unknown>) =>
-    safeJson<{ ok: boolean; item: T; error?: string }>(
+    safeJson<{ ok: boolean; item: T; error?: string;
+               followup?: { queued: boolean; task_id?: string; department?: string; reason?: string } }>(
       fetch(`${API_BASE}/store/${collection}/${id}`, {
         method: 'PUT', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(patch),

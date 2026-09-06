@@ -130,6 +130,44 @@ def _yt_exchange(code: str, client_id: str, client_secret: str) -> dict:
         return json.loads(r.read().decode("utf-8"))
 
 
+def _approval_followup(row: dict) -> dict:
+    """승인/거절의 결과를 원래 부서에게 돌려준다.
+
+    승인이면 태스크를 새로 만들어 큐에 넣는다 — 결재를 올린 그 부서가, 자기가
+    올렸던 안건을 이번에는 '허락받았다'는 전제로 다시 받는다. 거절이면 태스크는
+    만들지 않고 이벤트만 남긴다(같은 일을 다시 시도하지 않도록).
+    """
+    dept = row.get("department") or "orchestration_dept"
+    label = str(row.get("label") or "").strip()
+    approved = row.get("status") == "approved"
+    verdict = "승인" if approved else "거절"
+
+    try:
+        message_broker.publish_event(
+            sender="studio_ui", target=dept,
+            payload=f"결재 {verdict} — {label[:160]}")
+    except Exception:  # noqa: BLE001
+        pass
+
+    if not approved:
+        return {"queued": False, "reason": "거절 — 후속 태스크를 만들지 않습니다"}
+
+    detail = str(row.get("detail") or "").strip()
+    instruction = (
+        f"[결재 승인됨] 아래 안건이 사장님 승인을 받았습니다. 이제 실행 단계를 진행하세요.\n\n"
+        f"승인된 안건: {label}\n"
+        + (f"원래 요청 맥락: {detail}\n" if detail else "")
+        + "\n승인 범위를 넘는 새 지출이나 공개가 필요하면 다시 결재를 올리세요."
+    )
+    try:
+        task = task_queue.enqueue(sender="studio_ui", target_dept=dept,
+                                  instruction=instruction, priority=9)
+        workspace_store.update("approvals", row["id"], {"task_id": task["task_id"]})
+        return {"queued": True, "task_id": task["task_id"], "department": dept}
+    except Exception as e:  # noqa: BLE001
+        return {"queued": False, "reason": str(e)}
+
+
 def _ollama_models() -> list[dict]:
     """Ollama 에 실제로 설치된 모델 목록. 실패하면 빈 목록."""
     try:
@@ -712,11 +750,17 @@ class Handler(BaseHTTPRequestHandler):
             if len(rest) != 2 or rest[0] not in workspace_store.COLLECTIONS:
                 _json_resp(self, 404, {"error": "Not found"})
                 return
-            row = workspace_store.update(rest[0], rest[1], self._read_body())
+            patch = self._read_body()
+            row = workspace_store.update(rest[0], rest[1], patch)
             if row is None:
                 _json_resp(self, 404, {"ok": False, "error": "항목이 없습니다"})
-            else:
-                _json_resp(self, 200, {"ok": True, "item": row})
+                return
+            out = {"ok": True, "item": row}
+            # 결재는 상태만 바뀌고 끝나면 결재가 아니다. 승인하면 올린 부서에게
+            # "허락받았으니 진행하라"고 되돌려 준다.
+            if rest[0] == "approvals" and patch.get("status") in ("approved", "rejected"):
+                out["followup"] = _approval_followup(row)
+            _json_resp(self, 200, out)
         else:
             _json_resp(self, 404, {"error": "Not found"})
 

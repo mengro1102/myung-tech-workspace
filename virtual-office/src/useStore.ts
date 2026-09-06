@@ -39,11 +39,13 @@ export function useStore<T extends StoreItem>(
     return r?.ok ?? false;
   }, [collection, refresh]);
 
+  /* 서버가 후속 조치를 했으면(승인 → 태스크 재투입) 그것도 돌려준다.
+   * 화면이 "승인했다"까지만 말하고 끝나면 무엇이 일어났는지 알 수 없다. */
   const update = useCallback(async (id: string, patch: Record<string, unknown>) => {
     setItems(prev => prev.map(x => (x.id === id ? { ...x, ...patch } as T : x)));
     const r = await api.storeUpdate<T>(collection, id, patch);
     if (!r?.ok) refresh();
-    return r?.ok ?? false;
+    return r ?? null;
   }, [collection, refresh]);
 
   const remove = useCallback(async (id: string) => {

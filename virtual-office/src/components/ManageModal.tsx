@@ -558,10 +558,17 @@ export default function ManageModal({ onClose, agentCount, globalModel, onOpenTe
                     </span>
                     {!done && (
                       <>
-                        <button className="hm-approve-btn ok"
-                          onClick={() => approvalStore.update(a.id, { status: 'approved' })}>승인</button>
-                        <button className="hm-approve-btn no"
-                          onClick={() => approvalStore.update(a.id, { status: 'rejected' })}>거절</button>
+                        <button className="hm-approve-btn ok" onClick={async () => {
+                          const r = await approvalStore.update(a.id, { status: 'approved' });
+                          showToast(r?.followup?.queued
+                            ? `✅ 승인 — ${deptLabels[r.followup.department ?? ''] ?? '해당 부서'}에 실행 지시를 보냈습니다`
+                            : '✅ 승인했습니다');
+                          taskStore.refresh();
+                        }}>승인</button>
+                        <button className="hm-approve-btn no" onClick={async () => {
+                          await approvalStore.update(a.id, { status: 'rejected' });
+                          showToast('거절했습니다 — 후속 작업은 만들지 않습니다');
+                        }}>거절</button>
                       </>
                     )}
                     <button
