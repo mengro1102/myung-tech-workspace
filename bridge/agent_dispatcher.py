@@ -326,9 +326,66 @@ TODO_MARK = "[할일]"
 APPROVAL_MARK = "[결재요청]"
 
 
-def _system_prompt(dept_name: str, has_kb: bool) -> str:
+def dept_roster(dept_id: str, budget: int = 900) -> str:
+    """부서에 속한 에이전트들의 역할과 지침.
+
+    departments/<dept>/agents/*.json 에는 persona 와 base_prompt 가 잘 적혀
+    있는데 아무도 읽지 않았다. 박코드 사원에게는 "항상 실행 가능한 완전한
+    코드만, 코드 블록으로 감싸서 제출" 이라는 지침이 있었지만 프롬프트에
+    들어간 적이 없다 — 팀 모달에서 페르소나를 고쳐도 아무 일도 일어나지
+    않았다는 뜻이다. preferred_model 과 같은 종류의 방치였다.
+    """
+    agents_dir = MYUNG_TECH_WORKSPACE / "departments" / dept_id / "agents"
+    blocks: list[str] = []
+    try:
+        for f in sorted(agents_dir.glob("*.json")):
+            a = json.loads(f.read_text(encoding="utf-8-sig"))
+            name = (a.get("character_name") or "").strip()
+            role = (a.get("role") or "").strip()
+            if not name:
+                continue
+            head = f"- {name}" + (f" ({role})" if role else "")
+            for key in ("persona", "base_prompt"):
+                v = " ".join(str(a.get(key) or "").split())
+                if v:
+                    head += f"\n    {v[:260]}"
+            blocks.append(head)
+    except Exception:
+        return ""
+    if not blocks:
+        return ""
+    out = "\n".join(blocks)
+    return out[:budget]
+
+
+def _system_prompt(dept_name: str, has_kb: bool, dept_id: str = "") -> str:
     base = (f"당신은 명테크의 {dept_name} 소속 AI 에이전트입니다. "
             "주어진 지시를 한국어로 간결하고 구조적으로 수행하세요.")
+
+    # 할 수 있는 일의 경계를 먼저 못 박는다.
+    #
+    # "workspace 에 hello_agent.py 를 실제로 만들어라" 라고 시켰더니 "파일을
+    # 생성했습니다" 라고 답했다. 파일은 어디에도 없었고 태스크는 done 으로
+    # 기록됐다. 만들지 않은 것보다 만들었다고 보고하는 쪽이 나쁘다 — 화면의
+    # '완료'를 믿을 수 없게 되기 때문이다.
+    #
+    # 구조상 이 에이전트는 LLM 호출 한 번이 전부다. 그 사실을 모델에게 알려
+    # 준다.
+    base += (
+        "\n\n[할 수 있는 일의 경계]\n"
+        "당신은 글만 씁니다. 파일을 만들거나 고칠 수 없고, 명령·스크립트를 실행할 수 없으며, "
+        "git·웹·외부 API 를 호출할 수 없습니다. 당신의 답변은 텍스트로 저장될 뿐입니다.\n"
+        "- 코드나 설정, 문서를 요청받으면 **본문에 코드 블록으로 전부 적으세요.** "
+        "사람이 그대로 가져다 씁니다.\n"
+        "- '생성했습니다', '실행했습니다', '커밋했습니다' 처럼 **하지 않은 일을 했다고 쓰지 마세요.** "
+        "대신 '아래 내용으로 만드시면 됩니다' 처럼 적으세요.\n"
+        "- 파일 경로를 적을 때는 '이 경로에 저장하십시오' 라고 제안으로 쓰세요."
+    )
+
+    roster = dept_roster(dept_id) if dept_id else ""
+    if roster:
+        base += ("\n\n[이 부서의 구성원과 각자의 원칙]\n" + roster +
+                 "\n이 원칙들을 답변에 반영하세요.")
 
     services = workspace_store.services_brief()
     if services:
@@ -394,7 +451,7 @@ def _dispatch_task(task: dict) -> None:
             emit(dept_id, "knowledge_base",
                  f"지식베이스 조회 — {len(paths)}건 참조: " + ", ".join(paths[:3]))
 
-        messages = [{"role": "system", "content": _system_prompt(dept_name, bool(block))}]
+        messages = [{"role": "system", "content": _system_prompt(dept_name, bool(block), dept_id)}]
         if block:
             messages.append({"role": "system", "content": block})
         messages.append({"role": "user", "content": task["instruction"]})

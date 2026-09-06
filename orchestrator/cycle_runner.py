@@ -47,15 +47,19 @@ STRATEGY_PROMPT_TPL = """\
 
 검토 결과를 명확히 제시하세요."""
 
+# "실행 사이클"이라고 불렀지만 이 단계가 하는 일은 각 부서에 텍스트 태스크를
+# 하나씩 넣는 것뿐이다. 부서는 글을 쓰고, 그 글이 결과로 저장된다. 이름과 문구가
+# 실제보다 크면 화면의 '완료'를 잘못 읽게 된다.
 EXEC_PROMPT_TPL = """\
-[자동 실행 사이클 - {dept_label}] 오늘의 부서 작업을 수행하세요.
+[일일 부서 과제 - {dept_label}] 오늘의 산출물을 작성하세요.
 
 === 오늘의 전략 ===
 {strategy}
 ==================
 
-위 전략에서 {dept_label} 관련 항목을 파악하고,
-담당 부서로서 구체적인 산출물을 작성하세요."""
+위 전략에서 {dept_label} 관련 항목을 파악하고, 담당 부서로서 구체적인 산출물을
+글로 작성하세요. 코드나 설정이 필요하면 본문에 코드 블록으로 전부 적으세요.
+직접 파일을 만들거나 명령을 실행할 수는 없습니다."""
 
 DEPT_LABELS = {
     "research_dept": "학술연구부",
@@ -144,7 +148,7 @@ class CycleRunner:
         return result
 
     def _phase_execution(self, strategy: str):
-        self._log("━━ [3/3] 실행 단계")
+        self._log("━━ [3/3] 부서 과제 배분")
         self.status = "executing"
         for dept, label in DEPT_LABELS.items():
             prompt = EXEC_PROMPT_TPL.format(
@@ -152,11 +156,11 @@ class CycleRunner:
                 strategy=strategy[:600],
             )
             tid = self._enqueue(dept, prompt, priority=8)
-            self._log(f"  → {label} 태스크 배분 ({tid})")
-            self._emit("orchestration_dept", dept, f"{label}: 작전에 따라 실행 태스크를 진행해 주세요.")
+            self._log(f"  → {label} 과제 배분 ({tid})")
+            self._emit("orchestration_dept", dept, f"{label}: 작전에 따라 오늘의 산출물을 작성해 주세요.")
         # 실행 태스크는 디스패처가 처리하므로 대기하지 않음
-        self._emit("orchestration_dept", "studio_ui", "전 부서에 실행 태스크 배분 완료. 진행 상황을 추적합니다.")
-        self._log("  ✅ 모든 부서에 실행 태스크 배분 완료")
+        self._emit("orchestration_dept", "studio_ui", "전 부서에 오늘의 과제를 배분했습니다. 진행 상황을 추적합니다.")
+        self._log("  ✅ 모든 부서에 과제 배분 완료")
 
     # ── 사이클 1회 ────────────────────────────────────────────
     def _one_cycle(self):
