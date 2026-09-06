@@ -50,6 +50,7 @@ sys.path.insert(0, str(MYUNG_TECH_WORKSPACE))
 import task_queue
 import message_broker
 import workspace_store
+import file_proposals
 
 try:
     import knowledge_base as kb
@@ -324,6 +325,7 @@ def kb_context(instruction: str) -> tuple[str, list[str]]:
 # 대신 출력 약속을 준다 — 줄 맨 앞에 표시를 달면 그 줄만 꺼내 쓴다.
 TODO_MARK = "[할일]"
 APPROVAL_MARK = "[결재요청]"
+FILE_MARK = file_proposals.FILE_MARK      # "[파일]"
 
 
 def dept_roster(dept_id: str, budget: int = 900) -> str:
@@ -393,12 +395,21 @@ def _system_prompt(dept_name: str, has_kb: bool, dept_id: str = "") -> str:
                  "\n답변이 이 서비스들과 관련될 때는 이름을 그대로 쓰세요.")
 
     base += (
-        f"\n\n답변 맨 아래에, 필요할 때만 다음 줄을 덧붙일 수 있습니다.\n"
+        f"\n\n답변에 필요할 때만 다음 표시를 쓸 수 있습니다.\n"
         f"- 후속으로 사람이 처리해야 할 일이 생기면: `{TODO_MARK} 할 일 한 줄`\n"
         f"- 돈을 쓰거나, 외부에 공개하거나, 되돌리기 어려운 일을 하려면 먼저: "
         f"`{APPROVAL_MARK} 무엇을 왜 하려는지 한 줄`\n"
-        "각각 한 줄씩, 필요 없으면 쓰지 마세요. 이 줄들은 사장님 화면의 "
-        "태스크 보드와 승인 큐에 그대로 올라갑니다.")
+        f"- 파일로 저장할 산출물이 있으면: `{FILE_MARK} workspace 기준 상대경로` 한 줄을 쓰고 "
+        f"**바로 다음 줄부터 코드 블록**에 파일 전체 내용을 적으세요.\n"
+        f"  예)\n"
+        f"  {FILE_MARK} scripts/collect.py\n"
+        f"  ```python\n"
+        f"  (파일 전체 내용)\n"
+        f"  ```\n"
+        f"  이 제안은 사장님이 승인해야 실제로 저장됩니다. 승인 전에는 아무것도 쓰이지 "
+        f"않으니, 저장했다고 쓰지 마세요.\n"
+        "필요 없으면 쓰지 마세요. 이 표시들은 사장님 화면의 태스크 보드와 승인 큐에 "
+        "그대로 올라갑니다.")
     if has_kb:
         base += (
             "\n\n아래 '지식베이스 검색 결과'는 우리 조직의 위키에서 가져온 실제 문서입니다. "
@@ -464,6 +475,23 @@ def _dispatch_task(task: dict) -> None:
         if paths:
             footer = "\n\n---\n참조: " + ", ".join(f"`{p}`" for p in paths[:5])
         task_queue.update_status(task_id, "done", result=result + footer)
+
+        # 파일 제안은 결재 큐로 올린다. 승인하는 순간에만 디스크에 쓴다 —
+        # 파일이 실제로 생기거나 큐에 남아 있거나, 둘 중 하나뿐이다.
+        for prop in file_proposals.harvest(result):
+            try:
+                row = workspace_store.request_approval(
+                    f"파일 저장: workspace/{prop['path']}",
+                    department=dept_id,
+                    detail=task["instruction"][:300])
+                workspace_store.update("approvals", row["id"], {
+                    "kind": "file",
+                    "file_path": prop["path"],
+                    "file_content": prop["content"],
+                })
+                emit(dept_id, "studio_ui", f"파일 제안 — workspace/{prop['path']}")
+            except Exception as exc:  # noqa: BLE001
+                print(f"[dispatcher] 파일 제안 기록 실패(무시): {exc}", file=sys.stderr)
 
         for kind, text in _harvest_marks(result):
             try:

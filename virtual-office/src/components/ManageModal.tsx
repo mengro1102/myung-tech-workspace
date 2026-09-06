@@ -555,6 +555,9 @@ export default function ManageModal({ onClose, agentCount, globalModel, onOpenTe
                     opacity: done ? 0.55 : 1,
                   }}>
                     <span style={{ flex: 1 }}>
+                      {a.kind === 'file' && (
+                        <span style={{ color: 'var(--secondary)', marginRight: 6 }}>📄</span>
+                      )}
                       {a.department && (
                         <span style={{ color: deptColors[a.department] ?? 'var(--secondary)', marginRight: 6 }}>
                           [{deptLabels[a.department] ?? a.department}]
@@ -564,13 +567,29 @@ export default function ManageModal({ onClose, agentCount, globalModel, onOpenTe
                       {done && <span style={{ marginLeft: 6, color: 'var(--muted2)' }}>
                         — {a.status === 'approved' ? '승인함' : '거절함'}
                       </span>}
+                      {a.kind === 'file' && !done && a.file_content && (
+                        <details style={{ marginTop: 6 }}>
+                          <summary style={{ cursor: 'pointer', fontSize: 11, color: 'var(--muted)' }}>
+                            내용 보기 ({a.file_content.split('\n').length}줄)
+                          </summary>
+                          <pre style={{
+                            margin: '6px 0 0', padding: 8, maxHeight: 200, overflow: 'auto',
+                            background: 'var(--bg2)', border: '1px solid var(--border)',
+                            borderRadius: 6, fontSize: 11, lineHeight: 1.5,
+                            fontFamily: 'JetBrains Mono, monospace', whiteSpace: 'pre',
+                          }}>{a.file_content}</pre>
+                        </details>
+                      )}
                     </span>
                     {!done && (
                       <>
                         <button className="hm-approve-btn ok" onClick={async () => {
                           const r = await approvalStore.update(a.id, { status: 'approved' });
-                          showToast(r?.followup?.queued
-                            ? `✅ 승인 — ${deptLabels[r.followup.department ?? ''] ?? '해당 부서'}에 실행 지시를 보냈습니다`
+                          const f = r?.followup;
+                          showToast(
+                            f?.wrote ? `✅ 저장했습니다 — ${f.wrote}`
+                            : f?.queued ? `✅ 승인 — ${deptLabels[f.department ?? ''] ?? '해당 부서'}에 실행 지시를 보냈습니다`
+                            : f?.reason ? `⚠️ ${f.reason}`
                             : '✅ 승인했습니다');
                           taskStore.refresh();
                         }}>승인</button>

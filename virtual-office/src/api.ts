@@ -100,6 +100,10 @@ export interface ApprovalRow extends StoreItem {
   department?: string;
   detail?: string;
   status?: 'pending' | 'approved' | 'rejected';
+  /** 'file' 이면 승인하는 순간 workspace 에 파일이 쓰인다. */
+  kind?: 'file';
+  file_path?: string;
+  file_content?: string;
 }
 
 export const api = {
@@ -181,7 +185,8 @@ export const api = {
     ),
   storeUpdate: <T = StoreItem>(collection: StoreCollection, id: string, patch: Record<string, unknown>) =>
     safeJson<{ ok: boolean; item: T; error?: string;
-               followup?: { queued: boolean; task_id?: string; department?: string; reason?: string } }>(
+               followup?: { queued: boolean; task_id?: string; department?: string;
+                            reason?: string; wrote?: string } }>(
       fetch(`${API_BASE}/store/${collection}/${id}`, {
         method: 'PUT', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(patch),

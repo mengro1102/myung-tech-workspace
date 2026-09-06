@@ -142,6 +142,24 @@ def _approval_followup(row: dict) -> dict:
     approved = row.get("status") == "approved"
     verdict = "승인" if approved else "거절"
 
+    # 파일 제안은 승인 순간에 디스크로 간다. 후속 태스크를 만들지는 않는다 —
+    # 파일이 생긴 것으로 그 안건은 끝이다.
+    if row.get("kind") == "file":
+        if not approved:
+            return {"queued": False, "reason": "거절 — 파일을 쓰지 않았습니다"}
+        try:
+            written = file_proposals.write(row.get("file_path", ""),
+                                           row.get("file_content", ""))
+        except Exception as e:  # noqa: BLE001
+            return {"queued": False, "reason": f"파일 저장 실패: {e}"}
+        try:
+            message_broker.publish_event(
+                sender="studio_ui", target=dept,
+                payload=f"파일 저장됨 — workspace/{written}")
+        except Exception:  # noqa: BLE001
+            pass
+        return {"queued": False, "wrote": f"workspace/{written}"}
+
     try:
         message_broker.publish_event(
             sender="studio_ui", target=dept,
@@ -212,6 +230,7 @@ sys.path.insert(0, str(ROOT / "orchestrator"))
 import task_queue
 import message_broker
 import workspace_store
+import file_proposals
 from cycle_runner import runner as cycle_runner
 
 # 단기기억 = GraphRAG 지식베이스 참조 (knowledge_base.py, repo 루트). import 실패해도 서버는 떠야 하므로 guard.
