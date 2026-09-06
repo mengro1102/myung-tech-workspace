@@ -33,7 +33,25 @@ curl -s -o nul --max-time 3 http://localhost:11434/api/version && (
 )
 
 echo.
-echo  [2/5] API server (port 9000)...
+echo  [2/6] FreeLLMAPI router (port 3001)...
+REM  Cloud-tier departments go through this router; without it every task
+REM  falls back to local Ollama. It is shared with Mengbiseo (Hermes) but
+REM  nothing here started it - so one-click Myung-Tech quietly ran on the
+REM  slower path whenever Mengbiseo was not up. Start just the router; the
+REM  Telegram/Discord gateway stays Mengbiseo's business.
+curl -s -o nul --max-time 3 http://127.0.0.1:3001/ && (
+    echo         already running - skipped.
+) || (
+    if exist "D:\AI_Workspacereellmapi\server\dist\index.js" (
+        start "mt-router" /min cmd /c "cd /d D:\AI_Workspacereellmapi && node server\dist\index.js"
+        echo         launched.
+    ) else (
+        echo         router build missing - departments will use local Ollama.
+    )
+)
+
+echo.
+echo  [3/6] API server (port 9000)...
 netstat -ano | findstr ":9000 " | findstr LISTENING > nul && (
     echo         already running - skipped.
 ) || (
@@ -42,7 +60,7 @@ netstat -ano | findstr ":9000 " | findstr LISTENING > nul && (
 )
 
 echo.
-echo  [3/5] Agent dispatcher (daemon)...
+echo  [4/6] Agent dispatcher (daemon)...
 REM  Without this nobody drains the task queue, so the 2D office and the live
 REM  feed stay empty. Running it as a daemon is what makes the screen move.
 tasklist /FI "WINDOWTITLE eq mt-dispatch*" 2>nul | findstr "cmd.exe" > nul && (
@@ -53,7 +71,7 @@ tasklist /FI "WINDOWTITLE eq mt-dispatch*" 2>nul | findstr "cmd.exe" > nul && (
 )
 
 echo.
-echo  [4/5] UI dev server (port 5174)...
+echo  [5/6] UI dev server (port 5174)...
 netstat -ano | findstr ":5174 " | findstr LISTENING > nul && (
     echo         already running - skipped.
 ) || (
@@ -62,7 +80,7 @@ netstat -ano | findstr ":5174 " | findstr LISTENING > nul && (
 )
 
 echo.
-echo  [5/5] Waiting for services...
+echo  [6/6] Waiting for services...
 timeout /t 8 /nobreak > nul
 
 echo.
@@ -85,7 +103,7 @@ echo   API  : http://127.0.0.1:9000  (this PC only - no auth)
 echo   Stop : run STOP.bat
 echo  ==========================================
 echo.
-echo  Router (3001) is shared with Mengbiseo. If it is down, departments
-echo  fall back to local Ollama automatically.
+echo  Router (3001) is shared with Mengbiseo. Started here too, so
+echo  Myung-Tech alone still gets the cloud path.
 echo.
 pause
