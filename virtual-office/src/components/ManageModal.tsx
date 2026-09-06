@@ -11,7 +11,16 @@ interface Props {
   onOpenTeam: () => void;
 }
 
-const TABS = ['대시보드', '내 서비스', '연동', 'MCP'] as const;
+/* MCP 탭을 뺐다.
+ *
+ * 명테크에 MCP 를 붙이려면 맹비서(Hermes)가 이미 가진 것을 통째로 다시 만들어야
+ * 한다 — MCP 클라이언트, 도구 스키마 변환, 그리고 무엇보다 도구 호출 루프.
+ * 명테크 디스패처는 단발 LLM 호출 하나가 전부다. 절반만 지은 MCP 는 없는 것보다
+ * 나쁘다(눌러도 아무 일이 없는 버튼이 정확히 그 결과였다).
+ *
+ * 도구가 필요한 일은 맹비서에게 시킨다. 명테크는 부서 단위의 사고와 산출에
+ * 집중한다. */
+const TABS = ['대시보드', '내 서비스', '연동'] as const;
 type Tab = typeof TABS[number];
 
 interface Idea { title: string; value: string; difficulty: string; revenue: string; step: string; }
@@ -385,7 +394,7 @@ export default function ManageModal({ onClose, agentCount, globalModel, onOpenTe
         <div className="mem-tabs" style={{ paddingTop: 8, position: 'sticky', top: 44, background: 'var(--bg2)', zIndex: 9 }}>
           {TABS.map(t => (
             <button key={t} className={`mem-tab ${tab === t ? 'active' : ''}`} onClick={() => setTab(t)}>
-              {t === '대시보드' ? '📊 대시보드' : t === '내 서비스' ? '📦 내 서비스' : t === '연동' ? '🔗 연동' : '🔌 MCP'}
+              {t === '대시보드' ? '📊 대시보드' : t === '내 서비스' ? '📦 내 서비스' : '🔗 연동'}
             </button>
           ))}
         </div>
@@ -773,29 +782,6 @@ export default function ManageModal({ onClose, agentCount, globalModel, onOpenTe
           </div>
         )}
 
-        {/* ══ MCP ══ */}
-        {tab === 'MCP' && (
-          <div className="mem-content">
-            <p className="mem-hint">MCP(Model Context Protocol) 서버를 연결하면 에이전트가 외부 도구를 직접 사용할 수 있습니다.</p>
-            <div style={{
-              background: 'var(--bg3)', border: '1px solid var(--border)',
-              borderRadius: 12, padding: 14, marginBottom: 12,
-            }}>
-              <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)', marginBottom: 6 }}>연결된 MCP 서버</div>
-              <div className="mem-beta-note" style={{ margin: 0 }}>연결된 MCP 서버가 없습니다.</div>
-            </div>
-            <div style={{
-              background: 'var(--bg3)', border: '1px dashed var(--border)',
-              borderRadius: 12, padding: 14,
-            }}>
-              <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 8 }}>+ 새 MCP 서버 추가</div>
-              <Field label="서버 이름" placeholder="my-mcp-server" value="" onChange={() => {}} />
-              <Field label="Command" placeholder="npx @modelcontextprotocol/server-filesystem /path" value="" onChange={() => {}} />
-              <button className="hm-save-btn" style={{ marginTop: 10 }} disabled
-                      title="MCP 서버를 띄우고 관리하는 백엔드가 아직 없습니다">연결</button>
-            </div>
-          </div>
-        )}
 
       </div>
     </div>
