@@ -44,7 +44,7 @@ for _s in (sys.stdout, sys.stderr):
         pass
 
 import agent_dispatcher as dispatcher          # noqa: E402
-from shared_memory import notify, projects, workspace_store  # noqa: E402
+from shared_memory import experience, notify, projects, workspace_store  # noqa: E402
 
 ORCHESTRATOR = "orchestration_dept"
 KNOWN_DEPTS = ("research_dept", "dev_dept", "content_dept",
@@ -453,12 +453,24 @@ def _finish(p: dict) -> dict:
         except Exception as exc:  # noqa: BLE001
             print(f"[project] 파일 제안 실패(무시): {exc}", file=sys.stderr)
 
+    # 검토를 통과한 것만 위키에 쌓는다. 그 순간부터 다음 질문에서 근거로
+    # 딸려 나온다 — 에이전트가 매번 백지에서 시작하지 않게 하는 유일한 장치다.
+    archived: list[str] = []
+    try:
+        archived = experience.archive(projects.get(pid) or p)
+    except Exception as exc:  # noqa: BLE001
+        print(f"[project] 경험 축적 실패(무시): {exc}", file=sys.stderr)
+    if archived:
+        _emit(pid, ORCHESTRATOR, f"위키에 축적 — {len(archived)}건")
+
     notify.send(
         f"✅ [명테크] 프로젝트 완료\n\n"
         f"{plan.get('title', p['title'])}\n"
         f"산출물 {len(projects.deliverables(p))}개 · {len(p.get('steps') or [])}스텝\n\n"
         f"각 산출물이 부서 1차·오케스트레이터 2차 검토를 모두 통과했습니다.\n"
-        f"결재함에 파일 저장 제안으로 올려 뒀습니다.")
+        f"결재함에 파일 저장 제안으로 올려 뒀습니다."
+        + (f"\n위키에 {len(archived)}건을 쌓았습니다 — 다음 질문부터 검색됩니다."
+           if archived else ""))
     _emit(pid, ORCHESTRATOR, "프로젝트 완료")
     return projects.get(pid) or p
 

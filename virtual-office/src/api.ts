@@ -311,6 +311,11 @@ export const api = {
       })
     ),
 
+  /* 축적된 경험 — 검토를 통과한 프로젝트가 위키에 쌓인 수 */
+  experienceStats: () =>
+    safeJson<{ available: boolean; count: number; latest?: string; path?: string }>(
+      fetch(`${API_BASE}/experience`)),
+
   /* ── 연동 ── */
   listIntegrations: () =>
     safeJson<{ integrations: IntegrationStatus[]; error?: string }>(

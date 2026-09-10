@@ -761,6 +761,14 @@ class Handler(BaseHTTPRequestHandler):
             except OSError as e:
                 _json_resp(self, 404, {"error": f"문서를 읽지 못했습니다: {e}"})
 
+        # 축적된 경험 — 검토를 통과한 프로젝트가 위키에 몇 건 쌓였는가.
+        elif path == "/api/experience":
+            try:
+                from shared_memory import experience
+                _json_resp(self, 200, experience.stats())
+            except Exception as e:  # noqa: BLE001
+                _json_resp(self, 200, {"available": False, "count": 0, "error": str(e)})
+
         elif path == "/api/integrations":
             # 각 연동을 **실제로 한 번 호출해 본다.** 키가 저장돼 있다는 것과
             # 그 키로 호출이 되더라는 것은 다르다 — 예전 화면은 전자를

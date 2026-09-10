@@ -63,7 +63,16 @@ def _resolve_kb_path() -> Path:
 KB_PATH = _resolve_kb_path()
 
 # 그래프의 주요 진입점(노드 카테고리 + 스키마/인덱스/로그).
+# 사람이 정리한 노드. 위키의 본체다.
 NODE_DIRS = ("concepts", "entities", "comparisons")
+
+# 명테크가 쌓은 것. 검토를 통과한 프로젝트의 기록과 산출물이 여기 들어간다
+# (shared_memory/experience.py). 큐레이션된 노드와 섞지 않고 따로 두되,
+# **검색에는 함께 넣는다** — 넣지 않으면 쌓아도 아무도 못 읽는다.
+EXPERIENCE_DIRS = ("raw/projects",)
+
+# 검색·검색씨앗이 훑는 범위.
+SEARCH_DIRS = NODE_DIRS + EXPERIENCE_DIRS
 GRAPH_PATH = KB_PATH / "graph" / "graph.json"
 SCHEMA_PATH = KB_PATH / "SCHEMA.md"
 INDEX_PATH = KB_PATH / "index.md"
@@ -83,10 +92,14 @@ def _require() -> None:
         )
 
 
-def list_nodes(category: str | None = None) -> list[str]:
-    """노드 slug 목록 (예: 'concepts/transformer'). category로 한 종류만 조회 가능."""
+def list_nodes(category: str | None = None, *, experience: bool = True) -> list[str]:
+    """노드 slug 목록 (예: 'concepts/transformer'). category로 한 종류만 조회 가능.
+
+    experience=False 면 사람이 정리한 노드만. 위키 자체의 통계를 낼 때처럼
+    "큐레이션된 것" 과 "쌓인 것" 을 구분해야 하는 자리에서 쓴다.
+    """
     _require()
-    cats = (category,) if category else NODE_DIRS
+    cats = (category,) if category else (SEARCH_DIRS if experience else NODE_DIRS)
     out: list[str] = []
     for cat in cats:
         d = KB_PATH / cat
@@ -113,7 +126,7 @@ def search(pattern: str, *, limit: int = 50) -> list[tuple[str, str]]:
     _require()
     needle = pattern.lower()
     hits: list[tuple[str, str]] = []
-    for cat in NODE_DIRS:
+    for cat in SEARCH_DIRS:
         for p in (KB_PATH / cat).glob("*.md"):
             try:
                 for line in p.read_text(encoding="utf-8").splitlines():
@@ -215,35 +228,88 @@ def neighbors(slug: str, *, hops: int = 1) -> dict[str, tuple[int, str]]:
     return seen
 
 
+_EXP_CACHE: dict[str, dict] | None = None
+_EXP_MTIME: float | None = None
+
+
+def _experience_nodes() -> dict[str, dict]:
+    """축적본을 graph.json 노드와 같은 모양으로. {slug: {title, path, type}}
+
+    그래프 파일에는 넣지 않는다. graph.json 은 위키 파이프라인의 산출물이라
+    다음 재생성 때 우리가 끼워 넣은 것이 사라진다. 여기서만 들고 있는다.
+    """
+    global _EXP_CACHE, _EXP_MTIME
+    dirs = [KB_PATH / d for d in EXPERIENCE_DIRS]
+    mtime = 0.0
+    for d in dirs:
+        try:
+            mtime = max(mtime, d.stat().st_mtime)
+        except OSError:
+            continue
+    if _EXP_CACHE is not None and _EXP_MTIME == mtime:
+        return _EXP_CACHE
+
+    out: dict[str, dict] = {}
+    for cat, d in zip(EXPERIENCE_DIRS, dirs):
+        if not d.is_dir():
+            continue
+        for p in sorted(d.glob("*.md")):
+            title = p.stem.replace("-", " ")
+            try:
+                head = p.read_text(encoding="utf-8")[:400]
+                for line in head.splitlines():
+                    if line.startswith("title:"):
+                        title = line.split(":", 1)[1].strip() or title
+                        break
+            except OSError:
+                pass
+            out[p.stem] = {"title": title, "path": f"{cat}/{p.name}",
+                           "type": "experience", "tags": ["축적", "프로젝트"]}
+    _EXP_CACHE, _EXP_MTIME = out, mtime
+    return out
+
+
+def _score_meta(terms: list[str], slug: str, meta: dict) -> float:
+    """slug·제목·태그 매칭 점수. 그래프 노드와 축적본에 같은 자를 댄다."""
+    title = str(meta.get("title") or slug).lower()
+    tags = " ".join(str(t) for t in (meta.get("tags") or [])).lower()
+    slug_l = slug.lower()
+    s = 0.0
+    for t in terms:
+        if t in slug_l:
+            s += 3.0
+        if t in title:
+            s += 2.5
+        if t in tags:
+            s += 1.5
+    return s
+
+
 def _seed_scores(query: str, *, max_seeds: int = 6) -> dict[str, float]:
     """어휘 매칭으로 씨앗 노드와 점수를 뽑는다.
 
     slug·제목 매치를 태그보다 높게 본다 — 저자가 그 문서의 주제라고 선언한 것이라서다.
     제목·태그로 아무것도 못 찾을 때만 본문까지 훑는다(느리므로 폴백).
     """
-    nodes = load_graph().get("nodes") or {}
     terms = [t for t in _tokenize(query) if len(t) >= 2]
     if not terms:
         return {}
     scores: dict[str, float] = {}
-    for slug, meta in nodes.items():
-        title = str(meta.get("title") or slug).lower()
-        tags = " ".join(str(t) for t in (meta.get("tags") or [])).lower()
-        slug_l = slug.lower()
-        s = 0.0
-        for t in terms:
-            if t in slug_l:
-                s += 3.0
-            if t in title:
-                s += 2.5
-            if t in tags:
-                s += 1.5
-        if s:
-            scores[slug] = s
+
+    # 사람이 정리한 노드 + 우리가 쌓은 경험. 같은 자로 잰다.
+    for pool in (load_graph().get("nodes") or {}, _experience_nodes()):
+        for slug, meta in pool.items():
+            s = _score_meta(terms, slug, meta)
+            if s:
+                scores[slug] = max(scores.get(slug, 0.0), s)
+
     if not scores:
-        for relpath, _line in search(query, limit=30):
-            key = relpath.split("/")[-1]
-            scores[key] = scores.get(key, 0.0) + 1.0
+        # 제목·태그로 못 찾으면 본문까지 훑는다. search() 는 구절을 통째로
+        # 찾으므로 여러 단어짜리 질의는 늘 0건이 된다 — 낱말로 나눠 던진다.
+        for t in terms:
+            for relpath, _line in search(t, limit=12):
+                key = relpath.split("/")[-1]
+                scores[key] = scores.get(key, 0.0) + 1.0
     return dict(sorted(scores.items(), key=lambda kv: -kv[1])[:max_seeds])
 
 
@@ -266,7 +332,10 @@ def retrieve(
     if not seeds:
         return []
 
-    nodes = load_graph().get("nodes") or {}
+    nodes = dict(load_graph().get("nodes") or {})
+    # 축적본은 그래프에 없으므로 여기서 합쳐 둔다. 엣지가 없어 늘 0홉이다.
+    for slug, meta in _experience_nodes().items():
+        nodes.setdefault(slug, meta)
     scored: dict[str, dict] = {
         slug: {"score": base, "hop": 0, "why": "질의어 직접 매치"}
         for slug, base in seeds.items()
@@ -289,6 +358,14 @@ def retrieve(
     for slug, info in sorted(scored.items(), key=lambda kv: -kv[1]["score"])[:limit]:
         meta = nodes.get(slug) or {}
         rel = meta.get("path") or ""
+        if not rel:
+            # 본문 폴백으로 잡힌 씨앗은 slug 만 있고 경로가 없다. 그대로 두면
+            # 제목만 있고 내용이 빈 문서가 프롬프트에 들어간다.
+            for cat in SEARCH_DIRS:
+                cand = KB_PATH / cat / f"{slug}.md"
+                if cand.exists():
+                    rel = f"{cat}/{slug}.md"
+                    break
         doc = {
             "slug": slug,
             "path": rel,

@@ -66,6 +66,8 @@ export default function MemoryModal({ onClose }: Props) {
       setLive((r?.integrations ?? []).filter(i => i.ok).map(i => ({ label: i.label })));
     });
   }, []);
+  const [exp, setExp] = useState<{ available: boolean; count: number; latest?: string } | null>(null);
+  useEffect(() => { api.experienceStats().then(d => d && setExp(d)); }, []);
   const liveCount = live.length;
   const liveNames = live.map(l => l.label).join(', ');
 
@@ -315,15 +317,20 @@ export default function MemoryModal({ onClose }: Props) {
                 </div>
               </div>
 
-              <div className="mem-synth-row off">
+              <div className={`mem-synth-row ${exp?.count ? 'on' : 'off'}`}>
                 <span className="mem-synth-dot" aria-hidden="true" />
                 <div className="mem-synth-body">
                   <div className="mem-synth-name">🧠 장기 — 축적된 경험</div>
                   <div className="mem-synth-desc">
-                    아직 없습니다. 대화와 프로젝트 결과를 위키에 쌓아 검색되게 하는 것이
-                    다음 단계입니다. 파인튜닝(장기 기억 탭)은 그렇게 모인 데이터가
-                    수천 건이 된 뒤에 의미가 있습니다
-                    {kb?.total_nodes ? ` — 지금 ${kb.total_nodes}개로는 RAG 가 더 정확합니다.` : '.'}
+                    {exp?.count
+                      ? <>켜짐 · <strong>{exp.count}건</strong> 쌓임 (raw/projects).
+                          부서 1차·오케스트레이터 2차 검토를 <strong>모두 통과한</strong> 프로젝트만
+                          들어갑니다 — 반려된 초안까지 쌓으면 검색 품질이 떨어져
+                          쌓지 않느니만 못하기 때문입니다.</>
+                      : <>아직 없습니다. 프로젝트가 완료되면 그 산출물과 검토 지적이
+                          위키에 쌓여 다음 질문부터 검색됩니다.</>}
+                    {' '}파인튜닝(장기 기억 탭)은 이렇게 모인 데이터가 수천 건이 된
+                    뒤에 의미가 있습니다{kb?.total_nodes ? ` — 지금 ${kb.total_nodes}개로는 RAG 가 더 정확합니다.` : '.'}
                   </div>
                 </div>
               </div>
