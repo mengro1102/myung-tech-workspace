@@ -103,8 +103,14 @@ export interface ApprovalRow extends StoreItem {
   /** 'file' 이면 승인하는 순간 workspace 에 파일이 쓰인다.
    *  'project' 면 승인하는 순간 자율 실행이 시작된다 — 그 뒤로는
    *  결과가 나올 때까지 다시 묻지 않는다. */
-  kind?: 'file' | 'project';
+  kind?: 'file' | 'project' | 'action';
   project_id?: string;
+  /** kind==='action' — 승인하는 순간 바깥으로 나가는 호출이 일어난다 */
+  integration?: string;
+  action?: string;
+  action_args?: Record<string, unknown>;
+  /** 실행 결과(또는 실패 사유). 승인 뒤에 채워진다 */
+  result?: string;
   file_path?: string;
   file_content?: string;
 }
@@ -152,6 +158,30 @@ export interface ProjectRow {
   budget_left: number;
   created_at: number;
   updated_at?: number;
+}
+
+/* ── 연동 ───────────────────────────────────────────────────────────────────
+   state 가 세 가지인 것이 핵심이다. 예전 화면은 "키가 .env 에 비어 있지 않음"
+   을 그대로 "연결됨" 이라고 불렀다 — 저장과 연결은 다르다. 'ok' 는 서버가
+   그 키로 **실제 호출을 한 번 해 보고** 성공했을 때만 온다. */
+export type IntegrationState = 'ok' | 'unset' | 'error';
+
+export interface IntegrationStatus {
+  name: string;
+  label: string;
+  icon: string;
+  state: IntegrationState;
+  ok: boolean;
+  /** 사람이 읽을 한 줄. 성공이면 실제 수치, 실패면 이유 */
+  detail: string;
+  /** 비어 있는 필수 키 이름들 */
+  missing: string[];
+  required: string[];
+  optional: string[];
+  /** 결재를 거쳐 실행할 수 있는 동작 id 들 */
+  actions: string[];
+  /** Guidance 문서의 앵커 */
+  docs: string;
 }
 
 export const api = {
@@ -234,6 +264,8 @@ export const api = {
   storeUpdate: <T = StoreItem>(collection: StoreCollection, id: string, patch: Record<string, unknown>) =>
     safeJson<{ ok: boolean; item: T; error?: string;
                followup?: { queued: boolean; task_id?: string; department?: string;
+                            /** kind==='action' 이 승인돼 실제로 실행된 결과 한 줄 */
+                            ran?: string; project_id?: string; autonomous?: boolean;
                             reason?: string; wrote?: string } }>(
       fetch(`${API_BASE}/store/${collection}/${id}`, {
         method: 'PUT', headers: { 'Content-Type': 'application/json' },
@@ -278,6 +310,14 @@ export const api = {
         body: JSON.stringify({ model }),
       })
     ),
+
+  /* ── 연동 ── */
+  listIntegrations: () =>
+    safeJson<{ integrations: IntegrationStatus[]; error?: string }>(
+      fetch(`${API_BASE}/integrations`)),
+  probeIntegration: (name: string) =>
+    safeJson<{ ok: boolean; status: IntegrationStatus; error?: string }>(
+      fetch(`${API_BASE}/integrations/${name}/probe`, { method: 'POST' })),
 
   /* ── 자율 프로젝트 ── */
   listProjects: () =>

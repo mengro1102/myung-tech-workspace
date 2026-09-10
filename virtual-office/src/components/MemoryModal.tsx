@@ -59,6 +59,16 @@ export default function MemoryModal({ onClose }: Props) {
     setSyncMsg(r?.ok ? '✅ GitHub 백업(push) 완료' : '⚠️ 백업 일부 실패 — 로그 확인');
   };
 
+  /* 합성 탭이 보여 줄 '실시간' 채널 — 실제로 연결 확인된 연동만 센다. */
+  const [live, setLive] = useState<{ label: string }[]>([]);
+  useEffect(() => {
+    api.listIntegrations().then(r => {
+      setLive((r?.integrations ?? []).filter(i => i.ok).map(i => ({ label: i.label })));
+    });
+  }, []);
+  const liveCount = live.length;
+  const liveNames = live.map(l => l.label).join(', ');
+
   /* ── 장기기억 FT (Phase 5) ── */
   const [ltBase,   setLtBase]   = useState('unsloth/Qwen2.5-3B-Instruct');
   const [ltRepo,   setLtRepo]   = useState('username/my-brain-v1');
@@ -104,15 +114,9 @@ export default function MemoryModal({ onClose }: Props) {
     );
   };
 
-  /* 장기/합성 탭 (HuggingFace) — 현재 스텁 (Phase 2) */
-  const handleSync = () => {
-    setSyncing(true);
-    setSyncMsg('');
-    setTimeout(() => {
-      setSyncing(false);
-      setSyncMsg('✅ 연결 (장기기억 SFT/DPO 파이프라인은 Phase 2)');
-    }, 1200);
-  };
+  /* 여기 handleSync 라는 함수가 있었다. setTimeout 1.2초 뒤에 "✅ 연결"
+     이라고 표시하고 실제로는 아무것도 하지 않았다. 호출하는 곳이 없어
+     화면에 뜬 적은 없지만, 남겨 두면 언젠가 누가 연결한다. 지웠다. */
 
   return (
     <div className="hm-backdrop" onClick={onClose}>
@@ -131,7 +135,7 @@ export default function MemoryModal({ onClose }: Props) {
               className={`mem-tab ${tab === t ? 'active' : ''}`}
               onClick={() => setTab(t)}
             >
-              {t === 'short' ? '⚡ 단기 기억' : t === 'long' ? '🧠 장기 기억 BETA' : '🔗 AI 합성 BETA'}
+              {t === 'short' ? '⚡ 단기 기억' : t === 'long' ? '🧠 장기 기억 BETA' : '🔗 기억 합성'}
             </button>
           ))}
         </div>
@@ -282,10 +286,48 @@ export default function MemoryModal({ onClose }: Props) {
         {tab === 'synthesis' && (
           <div className="mem-content">
             <p className="mem-hint">
-              단기(GitHub) + 장기(HuggingFace) 기억을 결합하여 에이전트의 컨텍스트를 강화합니다.
-              두 채널이 모두 연결되어야 활성화됩니다.
+              에이전트가 답할 때 <strong>무엇을 함께 보는가</strong>입니다.
+              합성이란 이 채널들을 한 프롬프트에 얹는 일입니다.
             </p>
-            <div className="mem-beta-note">⚠️ BETA — 두 기억 채널 연결 후 사용 가능합니다.</div>
+
+            <div className="mem-synth-list">
+              <div className={`mem-synth-row ${kb?.available ? 'on' : 'off'}`}>
+                <span className="mem-synth-dot" aria-hidden="true" />
+                <div className="mem-synth-body">
+                  <div className="mem-synth-name">⚡ 단기 — 위키 지식베이스</div>
+                  <div className="mem-synth-desc">
+                    {kb?.available
+                      ? `켜짐 · ${kb.total_nodes}개 노드에서 질문과 관련된 문서를 찾아 근거로 붙입니다.`
+                      : '꺼짐 · GRAPHRAG_KB_PATH 를 찾지 못했습니다.'}
+                  </div>
+                </div>
+              </div>
+
+              <div className={`mem-synth-row ${liveCount > 0 ? 'on' : 'off'}`}>
+                <span className="mem-synth-dot" aria-hidden="true" />
+                <div className="mem-synth-body">
+                  <div className="mem-synth-name">📡 실시간 — 연동에서 온 실제 수치</div>
+                  <div className="mem-synth-desc">
+                    {liveCount > 0
+                      ? `켜짐 · ${liveNames} — 질문에 관련 단어가 나오면 조회해서 붙입니다.`
+                      : '꺼짐 · 연결 확인된 연동이 없습니다. 관리 → 연동에서 키를 넣으세요.'}
+                  </div>
+                </div>
+              </div>
+
+              <div className="mem-synth-row off">
+                <span className="mem-synth-dot" aria-hidden="true" />
+                <div className="mem-synth-body">
+                  <div className="mem-synth-name">🧠 장기 — 축적된 경험</div>
+                  <div className="mem-synth-desc">
+                    아직 없습니다. 대화와 프로젝트 결과를 위키에 쌓아 검색되게 하는 것이
+                    다음 단계입니다. 파인튜닝(장기 기억 탭)은 그렇게 모인 데이터가
+                    수천 건이 된 뒤에 의미가 있습니다
+                    {kb?.total_nodes ? ` — 지금 ${kb.total_nodes}개로는 RAG 가 더 정확합니다.` : '.'}
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
         )}
       </div>

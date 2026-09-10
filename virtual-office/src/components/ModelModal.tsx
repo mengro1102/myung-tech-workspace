@@ -138,22 +138,12 @@ export default function ModelModal({ onClose, globalModel, onGlobalModelChange }
               </div>
             )}
 
-            {/* AI 합성소 */}
-            <div style={{
-              marginTop: 14,
-              padding: '12px 14px',
-              background: 'var(--bg3)',
-              border: '1px solid var(--border)',
-              borderRadius: 10,
-              display: 'flex', alignItems: 'center', gap: 12, cursor: 'pointer',
-            }}>
-              <span style={{ fontSize: 22 }}>🧬</span>
-              <div style={{ flex: 1 }}>
-                <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>AI 합성소</div>
-                <div style={{ fontSize: 11, color: 'var(--muted)' }}>두 두뇌를 하나로 — 합치기</div>
-              </div>
-              <span style={{ color: 'var(--muted)', fontSize: 16 }}>→</span>
-            </div>
+            {/* 'AI 합성소' 카드가 여기 있었다. cursor:pointer 와 → 화살표까지
+                붙어 눌리는 것처럼 보였지만 onClick 이 없어 아무 일도 일어나지
+                않았다. 누를 수 있어 보이는데 반응이 없는 것은, 없는 것보다
+                나쁘다 — 사용자는 자기가 뭘 잘못했는지 찾게 된다.
+                기억을 어떻게 합쳐 쓰는지는 🧬 지식 네트워크 → 합성 탭에서
+                실제 상태로 보여 준다. */}
           </div>
         )}
 

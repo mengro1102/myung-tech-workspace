@@ -142,6 +142,29 @@ def _approval_followup(row: dict) -> dict:
     approved = row.get("status") == "approved"
     verdict = "승인" if approved else "거절"
 
+    # 바깥으로 나가는 행위(업로드·PR·수정). 여기가 실제 호출이 일어나는
+    # 유일한 자리다 — 에이전트는 제안만 했고, 이 승인이 방아쇠다.
+    if row.get("kind") == "action":
+        if not approved:
+            return {"queued": False, "reason": "거절 — 실행하지 않았습니다"}
+        if integrations is None:
+            return {"queued": False, "reason": "연동 모듈을 불러오지 못했습니다"}
+        try:
+            out = integrations.run_action(row.get("integration", ""),
+                                          row.get("action", ""),
+                                          row.get("action_args") or {})
+        except Exception as e:  # noqa: BLE001
+            # 실패를 조용히 삼키면 '승인했는데 아무 일도 안 일어남' 이 된다.
+            workspace_store.update("approvals", row["id"], {"result": f"실패: {e}"})
+            return {"queued": False, "reason": f"실행 실패: {e}"}
+        workspace_store.update("approvals", row["id"], {"result": out})
+        try:
+            message_broker.publish_event(sender="studio_ui", target=dept,
+                                         payload=f"실행 완료 — {out[:160]}")
+        except Exception:  # noqa: BLE001
+            pass
+        return {"queued": False, "ran": out}
+
     # 프로젝트 착수 승인. 이 승인 하나로 자율 실행이 시작되고, 그 뒤로는
     # 결과가 나올 때까지 사람을 다시 부르지 않는다 — 진전이 멈출 때만 부른다.
     if row.get("kind") == "project":
@@ -231,7 +254,9 @@ ALLOWED_ENV_KEYS = {
     "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID",
     "YOUTUBE_API_KEY", "YOUTUBE_CHANNEL_ID",
     "YOUTUBE_OAUTH_CLIENT_ID", "YOUTUBE_OAUTH_CLIENT_SECRET",
-    "PAYPAL_CLIENT_ID", "PAYPAL_CLIENT_SECRET",
+    # PAYPAL_MODE 가 빠져 있었다. UI 는 이 셋을 함께 보내므로 PayPal 저장이
+    # 통째로 400 으로 거부되고 있었다 — 화면에는 저장 실패 이유가 안 보였다.
+    "PAYPAL_CLIENT_ID", "PAYPAL_CLIENT_SECRET", "PAYPAL_MODE",
     "TOSS_SECRET_KEY",
     "GITHUB_TOKEN", "HUGGINGFACE_TOKEN",
     # OAuth 왕복으로 받은 refresh_token. 서버가 직접 쓴다.
@@ -247,6 +272,11 @@ import message_broker
 import workspace_store
 import file_proposals
 import projects
+try:
+    import integrations
+except Exception as _integ_exc:  # noqa: BLE001
+    integrations = None
+    print(f'[server] 연동 모듈 로드 실패: {_integ_exc}', file=sys.stderr)
 from cycle_runner import runner as cycle_runner
 
 # 단기기억 = GraphRAG 지식베이스 참조 (knowledge_base.py, repo 루트). import 실패해도 서버는 떠야 하므로 guard.
@@ -722,6 +752,25 @@ class Handler(BaseHTTPRequestHandler):
         # ── GET /api/store/<collection>  (할 일 · 등록 서비스 · 승인 큐)
         #    브라우저에만 있던 것들을 서버로 올렸다. 에이전트도 같은 파일을 읽고
         #    쓴다 — 그래야 "에이전트가 할 일을 쌓는다"가 말이 된다.
+        # 가이드 원문. 화면에서 바로 열 수 있어야 한다 — 문서가 있어도
+        # 찾지 못하면 "물어보고 등록하는 절차" 가 그대로 남는다.
+        elif path == "/api/docs/integrations":
+            doc = ROOT / "docs" / "INTEGRATIONS.md"
+            try:
+                _json_resp(self, 200, {"markdown": doc.read_text(encoding="utf-8")})
+            except OSError as e:
+                _json_resp(self, 404, {"error": f"문서를 읽지 못했습니다: {e}"})
+
+        elif path == "/api/integrations":
+            # 각 연동을 **실제로 한 번 호출해 본다.** 키가 저장돼 있다는 것과
+            # 그 키로 호출이 되더라는 것은 다르다 — 예전 화면은 전자를
+            # "연결됨" 이라고 불렀다.
+            if integrations is None:
+                _json_resp(self, 200, {"integrations": [],
+                                       "error": "연동 모듈을 불러오지 못했습니다"})
+            else:
+                _json_resp(self, 200, {"integrations": integrations.status_all()})
+
         elif path == "/api/projects":
             rows = []
             for p in projects.load():
@@ -966,6 +1015,14 @@ class Handler(BaseHTTPRequestHandler):
             _json_resp(self, 200, {"ok": True, "tasks": created, "count": len(created)})
 
         # ── POST /api/store/<collection>  {…}  (항목 추가)
+        elif path.startswith("/api/integrations/") and path.endswith("/probe"):
+            name = path.split("/api/integrations/")[1].rsplit("/probe", 1)[0]
+            integ = integrations.get(name) if integrations else None
+            if integ is None:
+                _json_resp(self, 404, {"error": f"알 수 없는 연동: {name}"})
+                return
+            _json_resp(self, 200, {"ok": True, "status": integ.status()})
+
         elif path == "/api/projects":
             body = self._read_body()
             idea = str(body.get("idea") or "").strip()

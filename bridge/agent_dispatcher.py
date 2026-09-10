@@ -332,6 +332,12 @@ def kb_context(instruction: str) -> tuple[str, list[str]]:
 # 키워드로 결과 문장을 훑어 "결제 같아 보이면 결재를 올린다" 식으로 하려다
 # 말았다. 산문을 추측하는 방식은 조용히 틀리고, 틀린 것을 알아채기 어렵다.
 # 대신 출력 약속을 준다 — 줄 맨 앞에 표시를 달면 그 줄만 꺼내 쓴다.
+try:
+    import integrations
+except Exception as _exc:  # noqa: BLE001
+    integrations = None
+    print(f"[dispatcher] 연동 모듈을 불러오지 못했습니다(무시): {_exc}", file=sys.stderr)
+
 TODO_MARK = "[할일]"
 APPROVAL_MARK = "[결재요청]"
 FILE_MARK = file_proposals.FILE_MARK      # "[파일]"
@@ -403,6 +409,22 @@ def _system_prompt(dept_name: str, has_kb: bool, dept_id: str = "") -> str:
         base += ("\n\n" + services +
                  "\n답변이 이 서비스들과 관련될 때는 이름을 그대로 쓰세요.")
 
+    # 지금 실제로 연결된 연동만 알려 준다. 못 쓰는 것을 알려 주면 에이전트가
+    # 그것을 제안하고, 사장님은 승인해도 실행되지 않는 결재를 보게 된다.
+    catalog = integrations.action_catalog() if integrations else ""
+    if catalog:
+        base += (
+            "\n\n[바깥으로 나가는 행위]\n"
+            "아래는 지금 **실제로 실행 가능한** 동작입니다. 필요하면 표시 한 줄과 "
+            "바로 다음 줄의 JSON 코드 블록으로 제안하세요. 제안일 뿐이고, "
+            "사장님이 결재에서 승인해야 실제로 실행됩니다 — 실행했다고 쓰지 마세요.\n"
+            + catalog + "\n"
+            "예)\n"
+            f"  {integrations.ACTION_MARK} youtube_oauth.upload\n"
+            "  ```json\n"
+            '  {"file": "videos/ep1.mp4", "title": "1화", "privacy": "private"}\n'
+            "  ```")
+
     base += (
         f"\n\n답변에 필요할 때만 다음 표시를 쓸 수 있습니다.\n"
         f"- 후속으로 사람이 처리해야 할 일이 생기면: `{TODO_MARK} 할 일 한 줄`\n"
@@ -450,6 +472,21 @@ def _harvest_marks(result: str) -> list[tuple[str, str]]:
     return found
 
 
+def _action_brief(args: dict) -> str:
+    """결재 한 줄에 들어갈 요약. 사장님이 승인 버튼을 누르기 전에 **무엇이**
+    나가는지 보여야 한다. 특히 공개 범위는 반드시 보여야 하는 값이다."""
+    bits = []
+    for key in ("title", "repo", "file", "video_id"):
+        v = args.get(key)
+        if v:
+            bits.append(str(v)[:60])
+    if args.get("privacy"):
+        bits.append(f"공개범위 {args['privacy']}")
+    if isinstance(args.get("files"), list):
+        bits.append(f"파일 {len(args['files'])}개")
+    return " · ".join(bits) or "(상세는 결재 내용 참고)"
+
+
 # ── 작업 수행 ───────────────────────────────────────────────────────────────
 def _dispatch_task(task: dict) -> None:
     task_id = task["task_id"]
@@ -471,9 +508,25 @@ def _dispatch_task(task: dict) -> None:
             emit(dept_id, "knowledge_base",
                  f"지식베이스 조회 — {len(paths)}건 참조: " + ", ".join(paths[:3]))
 
+        # 연동에서 온 **실제 데이터**. 이게 없으면 "채널 분석" 은 채널을 본 적
+        # 없는 모델의 추측이 된다 — 예전 "YouTube+PayPal 분석" 버튼이 그랬다.
+        live, sources = ("", [])
+        if integrations is not None:
+            try:
+                live, sources = integrations.context_block(task["instruction"])
+            except Exception as exc:  # noqa: BLE001
+                print(f"[dispatcher] 연동 조회 실패(무시): {exc}", file=sys.stderr)
+        if sources:
+            emit(dept_id, "integrations",
+                 f"실데이터 조회 — {', '.join(sources)}")
+
         messages = [{"role": "system", "content": _system_prompt(dept_name, bool(block), dept_id)}]
         if block:
             messages.append({"role": "system", "content": block})
+        if live:
+            messages.append({"role": "system", "content":
+                             "아래는 우리 계정에서 방금 가져온 실제 수치입니다. "
+                             "추측하지 말고 이 값을 근거로 답하세요.\n\n" + live})
         messages.append({"role": "user", "content": task["instruction"]})
 
         emit(dept_id, requester, f"추론 시작 — {model} ({backend})")
@@ -501,6 +554,24 @@ def _dispatch_task(task: dict) -> None:
                 emit(dept_id, "studio_ui", f"파일 제안 — workspace/{prop['path']}")
             except Exception as exc:  # noqa: BLE001
                 print(f"[dispatcher] 파일 제안 기록 실패(무시): {exc}", file=sys.stderr)
+
+        # 바깥 행위 제안 → 결재 큐. 승인하는 순간에만 실제 호출이 일어난다.
+        if integrations is not None:
+            for prop in integrations.harvest(result):
+                try:
+                    row = workspace_store.request_approval(
+                        f"{prop['label']} — {_action_brief(prop['args'])}",
+                        department=dept_id,
+                        detail=task["instruction"][:300])
+                    workspace_store.update("approvals", row["id"], {
+                        "kind": "action",
+                        "integration": prop["integration"],
+                        "action": prop["action"],
+                        "action_args": prop["args"],
+                    })
+                    emit(dept_id, "studio_ui", f"실행 제안 — {prop['label']}")
+                except Exception as exc:  # noqa: BLE001
+                    print(f"[dispatcher] 실행 제안 기록 실패(무시): {exc}", file=sys.stderr)
 
         for kind, text in _harvest_marks(result):
             try:

@@ -1,6 +1,7 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, lazy, Suspense } from 'react';
 import { useStore } from '../useStore';
-import { api, deptColors, deptLabels, type ApprovalRow, type ServiceRow, type TaskRow } from '../api';
+const GuideModal = lazy(() => import('./GuideModal'));
+import { api, deptColors, deptLabels, type ApprovalRow, type IntegrationStatus, type ServiceRow, type TaskRow } from '../api';
 
 interface Props {
   onClose: () => void;
@@ -39,14 +40,25 @@ async function saveCredentials(service: string, payload: Record<string, string>)
 }
 
 /* ── 상태 배지 ── */
-function StatusBadge({ connected }: { connected: boolean }) {
+/* 저장과 연결은 다르다.
+ *
+ * 예전에는 "키가 .env 에 비어 있지 않음" 을 그대로 '연결됨' 이라고 불렀다.
+ * 그래서 오타가 난 키도, 권한이 없는 토큰도, 만료된 자격증명도 전부 초록색
+ * 이었다. 실제로 한 번 불러 본 결과만 '연결 확인됨' 이 된다. */
+const BADGE = {
+  ok:    { text: '연결 확인됨', fg: '#0ffd6a', bg: 'rgba(15,253,106,0.1)',  bd: 'rgba(15,253,106,0.3)' },
+  saved: { text: '저장됨',      fg: '#fbbf24', bg: 'rgba(251,191,36,0.1)',  bd: 'rgba(251,191,36,0.3)' },
+  error: { text: '연결 실패',   fg: '#ef4444', bg: 'rgba(239,68,68,0.1)',   bd: 'rgba(239,68,68,0.3)' },
+  unset: { text: '미설정',      fg: 'var(--muted)', bg: 'transparent',      bd: 'var(--border)' },
+} as const;
+
+function StatusBadge({ kind }: { kind: keyof typeof BADGE }) {
+  const b = BADGE[kind];
   return (
     <span style={{
-      fontSize: 10, padding: '2px 8px', borderRadius: 8,
-      background: connected ? 'rgba(15,253,106,0.1)' : 'rgba(239,68,68,0.1)',
-      border: `1px solid ${connected ? 'rgba(15,253,106,0.3)' : 'rgba(239,68,68,0.3)'}`,
-      color: connected ? '#0ffd6a' : '#ef4444',
-    }}>{connected ? '연결됨' : '미설정'}</span>
+      fontSize: 10, padding: '2px 8px', borderRadius: 8, whiteSpace: 'nowrap',
+      background: b.bg, border: `1px solid ${b.bd}`, color: b.fg,
+    }}>{b.text}</span>
   );
 }
 
@@ -81,15 +93,29 @@ function Field({ label, hint, placeholder, value, onChange, secret }: {
 }
 
 /* ── 연동 카드 ── */
-function IntegCard({ icon, title, desc, connected, children, onSave, onHelp, extraActions }: {
-  icon: string; title: string; desc: string; connected: boolean;
+function IntegCard({ icon, title, desc, status, saved, children, onSave, onHelp,
+                    onProbe, probing, onGuide, extraActions }: {
+  icon: string; title: string; desc: string;
+  /** 서버가 실제로 호출해 본 결과. 없으면 아직 배선되지 않은 카드다 */
+  status?: IntegrationStatus;
+  /** 키가 .env 에 있는가 — status 가 없는 카드의 최선 */
+  saved: boolean;
   children: React.ReactNode;
   onSave?: () => void; onHelp?: string;
+  onProbe?: () => void; probing?: boolean;
+  /** 이 카드의 가이드 절을 연다 */
+  onGuide?: () => void;
   extraActions?: React.ReactNode;
 }) {
+  const kind: keyof typeof BADGE =
+    status ? (status.state === 'ok' ? 'ok' : status.state === 'error' ? 'error' : 'unset')
+           : (saved ? 'saved' : 'unset');
+  const ok = kind === 'ok';
   return (
     <div style={{
-      background: 'var(--bg3)', border: `1px solid ${connected ? 'rgba(15,253,106,0.25)' : 'var(--border)'}`,
+      background: 'var(--bg3)',
+      border: `1px solid ${ok ? 'rgba(15,253,106,0.25)'
+                : kind === 'error' ? 'rgba(239,68,68,0.25)' : 'var(--border)'}`,
       borderRadius: 12, padding: 16, marginBottom: 12,
     }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
@@ -98,20 +124,62 @@ function IntegCard({ icon, title, desc, connected, children, onSave, onHelp, ext
           <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text)' }}>{title}</div>
           <div style={{ fontSize: 11, color: 'var(--muted)' }}>{desc}</div>
         </div>
-        <StatusBadge connected={connected} />
+        <StatusBadge kind={kind} />
       </div>
+
+      {/* 진단 한 줄. 성공이면 실제 수치가, 실패면 이유가 그대로 나온다 —
+          "연결 실패" 만 보고 무엇을 고쳐야 할지 알 수는 없다. */}
+      {status && status.detail && (
+        <div style={{
+          fontSize: 11, lineHeight: 1.6, marginBottom: 10, padding: '7px 10px',
+          borderRadius: 6,
+          background: ok ? 'rgba(15,253,106,0.06)'
+                    : status.state === 'error' ? 'rgba(239,68,68,0.06)' : 'var(--bg2)',
+          color: ok ? 'var(--green, #0ffd6a)'
+               : status.state === 'error' ? '#fca5a5' : 'var(--muted)',
+        }}>{status.detail}</div>
+      )}
+      {!status && saved && (
+        <div style={{
+          fontSize: 11, lineHeight: 1.6, marginBottom: 10, padding: '7px 10px',
+          borderRadius: 6, background: 'var(--bg2)', color: 'var(--muted)',
+        }}>키는 저장돼 있습니다. 이 항목을 실제로 사용하는 기능은 아직 없습니다.</div>
+      )}
       {children}
       <div style={{ display: 'flex', gap: 8, marginTop: 12, flexWrap: 'wrap' }}>
         {onSave && (
           <button className="hm-save-btn" style={{ margin: 0 }} onClick={onSave}>💾 저장</button>
         )}
+        {onProbe && (
+          <button
+            onClick={onProbe}
+            disabled={probing}
+            title="저장된 키로 실제 호출을 한 번 해 봅니다"
+            style={{
+              padding: '8px 14px', background: 'transparent',
+              border: '1px solid var(--border)', borderRadius: 8,
+              color: 'var(--muted)', fontSize: 13,
+              cursor: probing ? 'wait' : 'pointer',
+            }}>{probing ? '확인 중…' : '🔌 연결 확인'}</button>
+        )}
         {extraActions}
+        {onGuide && (
+          <button
+            title="발급 절차 · 필요한 권한 · 확인 방법"
+            style={{
+              padding: '8px 14px', background: 'var(--primary-dk)',
+              border: '1px solid rgba(139,92,246,0.35)', borderRadius: 8,
+              color: 'var(--primary)', fontSize: 13, cursor: 'pointer',
+            }} onClick={onGuide}>📖 가이드</button>
+        )}
         {onHelp && (
-          <button style={{
-            padding: '8px 14px', background: 'transparent',
-            border: '1px solid var(--border)', borderRadius: 8,
-            color: 'var(--muted)', fontSize: 13, cursor: 'pointer',
-          }} onClick={() => window.open(onHelp, '_blank')}>📖 도움말</button>
+          <button
+            title="발급처(외부 사이트)를 새 탭으로"
+            style={{
+              padding: '8px 14px', background: 'transparent',
+              border: '1px solid var(--border)', borderRadius: 8,
+              color: 'var(--muted)', fontSize: 13, cursor: 'pointer',
+            }} onClick={() => window.open(onHelp, '_blank')}>↗ 발급처</button>
         )}
       </div>
     </div>
@@ -125,6 +193,32 @@ export default function ManageModal({ onClose, agentCount, globalModel, onOpenTe
   const [connKeys,    setConnKeys]    = useState<Record<string, boolean>>({});
   const [ytOauth,     setYtOauth]     = useState<{ connected: boolean; has_client: boolean } | null>(null);
   const [ytBusy,      setYtBusy]      = useState(false);
+
+  /* 연동의 **실제** 상태. 서버가 저장된 키로 한 번 호출해 본 결과다.
+   * connKeys(=.env 에 값이 있는가)와 구분해서 쓴다 — 저장과 연결은 다르다. */
+  const [integStatus, setIntegStatus] = useState<Record<string, IntegrationStatus>>({});
+  const [probing,     setProbing]     = useState('');
+  /* 가이드를 열 절. '' 면 닫힘. 카드마다 자기 절로 바로 연다 — 문서 전체를
+     열어 주고 찾으라고 하면 결국 다시 물어보게 된다. */
+  const [guide,       setGuide]       = useState('');
+
+  const refreshIntegrations = useCallback(async () => {
+    const r = await api.listIntegrations();
+    if (!r?.integrations) return;
+    setIntegStatus(Object.fromEntries(r.integrations.map(i => [i.name, i])));
+  }, []);
+
+  const probeOne = useCallback(async (name: string) => {
+    setProbing(name);
+    const r = await api.probeIntegration(name);
+    setProbing('');
+    if (r?.status) {
+      setIntegStatus(prev => ({ ...prev, [name]: r.status }));
+      showToast(r.status.ok ? `✅ ${r.status.detail}` : `⚠️ ${r.status.detail}`);
+    } else {
+      showToast('⚠️ 확인하지 못했습니다 — 서버가 떠 있는지 보세요');
+    }
+  }, []);
 
   // 비즈니스 아이디어
   const [ideas,       setIdeas]       = useState<Idea[]>([]);
@@ -176,7 +270,8 @@ export default function ManageModal({ onClose, agentCount, globalModel, onOpenTe
   useEffect(() => {
     fetch('/api/config/load').then(r => r.json()).then(d => setConnKeys(d.keys ?? {})).catch(() => {});
     api.ytOauthStatus().then(d => d && setYtOauth(d));
-  }, []);
+    void refreshIntegrations();
+  }, [refreshIntegrations]);
 
   /* YouTube Analytics 연결.
    *
@@ -217,7 +312,8 @@ export default function ManageModal({ onClose, agentCount, globalModel, onOpenTe
     const msg = await saveCredentials(service, payload);
     showToast(msg);
     fetch('/api/config/load').then(r => r.json()).then(d => setConnKeys(d.keys ?? {})).catch(() => {});
-  }, []);
+    void refreshIntegrations();
+  }, [refreshIntegrations]);
 
   /* 비즈니스 아이디어 생성 */
   /* 결과 파싱.
@@ -389,6 +485,11 @@ export default function ManageModal({ onClose, agentCount, globalModel, onOpenTe
         </div>
 
         {toast && <div className="hm-toast">{toast}</div>}
+      {guide && (
+        <Suspense fallback={null}>
+          <GuideModal anchor={guide} onClose={() => setGuide('')} />
+        </Suspense>
+      )}
 
         {/* 탭 */}
         <div className="mem-tabs" style={{ paddingTop: 8, position: 'sticky', top: 44, background: 'var(--bg2)', zIndex: 9 }}>
@@ -567,6 +668,26 @@ export default function ManageModal({ onClose, agentCount, globalModel, onOpenTe
                       {done && <span style={{ marginLeft: 6, color: 'var(--muted2)' }}>
                         — {a.status === 'approved' ? '승인함' : '거절함'}
                       </span>}
+                      {/* 바깥으로 나가는 행위. 파일 저장과 달리 되돌릴 수
+                          없으므로, 승인 전에 무엇이 어디로 나가는지 전부
+                          보인다 — 특히 공개 범위. */}
+                      {a.kind === 'action' && (
+                        <div className="appr-action">
+                          <b>{a.integration}.{a.action}</b> — 승인하면 즉시 실행됩니다.
+                          {a.action_args?.privacy != null && (
+                            <> 공개 범위 <b>{String(a.action_args.privacy)}</b>.</>
+                          )}
+                          <details>
+                            <summary style={{ cursor: 'pointer', marginTop: 4 }}>보낼 내용</summary>
+                            <pre>{JSON.stringify(a.action_args ?? {}, null, 2)}</pre>
+                          </details>
+                        </div>
+                      )}
+                      {a.result && (
+                        <div className={`appr-result ${a.result.startsWith('실패') ? 'fail' : 'ok'}`}>
+                          {a.result}
+                        </div>
+                      )}
                       {a.kind === 'file' && !done && a.file_content && (
                         <details style={{ marginTop: 6 }}>
                           <summary style={{ cursor: 'pointer', fontSize: 11, color: 'var(--muted)' }}>
@@ -587,7 +708,8 @@ export default function ManageModal({ onClose, agentCount, globalModel, onOpenTe
                           const r = await approvalStore.update(a.id, { status: 'approved' });
                           const f = r?.followup;
                           showToast(
-                            f?.wrote ? `✅ 저장했습니다 — ${f.wrote}`
+                            f?.ran ? `✅ ${f.ran}`
+                            : f?.wrote ? `✅ 저장했습니다 — ${f.wrote}`
                             : f?.queued ? `✅ 승인 — ${deptLabels[f.department ?? ''] ?? '해당 부서'}에 실행 지시를 보냈습니다`
                             : f?.reason ? `⚠️ ${f.reason}`
                             : '✅ 승인했습니다');
@@ -651,7 +773,19 @@ export default function ManageModal({ onClose, agentCount, globalModel, onOpenTe
         {/* ══ 연동 ══ */}
         {tab === '연동' && (
           <div className="mem-content">
-            <p className="mem-hint" style={{ marginBottom: 4 }}>모든 외부 연결을 한 곳에서 — 자격증명 입력 후 각 카드의 저장을 누르세요.</p>
+            <p className="mem-hint" style={{ marginBottom: 10 }}>
+              모든 외부 연결을 한 곳에서. <strong>저장</strong>은 값을 넣는 것이고,
+              <strong> 연결 확인</strong>은 그 값으로 실제 호출을 해 보는 것입니다 —
+              배지가 <em>연결 확인됨</em>이 되어야 에이전트가 그 데이터를 씁니다.
+            </p>
+            <button
+              onClick={() => setGuide('common')}
+              style={{
+                marginBottom: 14, padding: '9px 14px', width: '100%',
+                background: 'var(--primary-dk)', border: '1px solid rgba(139,92,246,0.35)',
+                borderRadius: 8, color: 'var(--primary)', fontSize: 12.5,
+                fontWeight: 600, cursor: 'pointer',
+              }}>📖 연동 가이드 열기 — 발급 절차 · 권한 · 확인 방법</button>
 
             {/* ⚡ YouTube + PayPal 동시 연결 */}
             <div style={{
@@ -659,10 +793,17 @@ export default function ManageModal({ onClose, agentCount, globalModel, onOpenTe
               borderRadius: 12, padding: 14, marginBottom: 16,
             }}>
               <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--green)', marginBottom: 6 }}>
-                ⚡ YouTube + PayPal 동시 연결
+                ⚡ 자격증명 저장 + 분석 지시
               </div>
-              <p style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 10 }}>
-                두 서비스를 한 번에 연결하고, AI 에이전트가 병렬로 채널 분석 + 수익 전략을 즉시 수립합니다.
+              {/* 예전 문구는 "동시 연결하고 분석을 수립합니다" 였다. 실제로는
+                  키를 저장하고 LLM 에게 텍스트로 "분석해줘" 라고 시킬 뿐이었고,
+                  YouTube API 를 부르지 않아 그 분석은 추측이었다. 이제 연결이
+                  확인된 연동은 서버가 먼저 조회해서 실제 수치를 프롬프트에
+                  넣는다 — 그러니 '무엇을 근거로 분석하는지'를 그대로 적는다. */}
+              <p style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 10, lineHeight: 1.6 }}>
+                아래 입력한 키를 저장하고, 연구부와 금융부에 분석을 지시합니다.
+                <strong style={{ color: 'var(--text)' }}> 연결 확인된 연동만</strong> 실제 수치가
+                근거로 들어갑니다 — 확인되지 않은 것은 추측이 됩니다.
               </p>
               <button
                 onClick={connectBatch}
@@ -675,7 +816,7 @@ export default function ManageModal({ onClose, agentCount, globalModel, onOpenTe
                   fontSize: 13, fontWeight: 700, cursor: batchRunning ? 'wait' : 'pointer',
                 }}
               >
-                {batchRunning ? '⏳ 에이전트 작업 중...' : '🚀 YouTube + PayPal 동시 연결 & 분석 시작'}
+                {batchRunning ? '⏳ 에이전트 작업 중...' : '💾 저장하고 분석 지시'}
               </button>
               {batchStatus.length > 0 && (
                 <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 4 }}>
@@ -688,7 +829,8 @@ export default function ManageModal({ onClose, agentCount, globalModel, onOpenTe
 
             {/* 텔레그램 봇 */}
             <IntegCard icon="✈️" title="텔레그램 봇" desc="비서가 텔레그램으로 양방향 명령을 받고 보고합니다. 폰 어디서든 회사를 운영하세요."
-              connected={!!connKeys.TELEGRAM_BOT_TOKEN}
+              saved={!!connKeys.TELEGRAM_BOT_TOKEN}
+              onGuide={() => setGuide('telegram')}
               onSave={() => save('텔레그램 봇', { TELEGRAM_BOT_TOKEN: tgToken, TELEGRAM_CHAT_ID: tgChatId })}
               onHelp="https://core.telegram.org/bots#how-do-i-create-a-bot"
             >
@@ -700,7 +842,10 @@ export default function ManageModal({ onClose, agentCount, globalModel, onOpenTe
 
             {/* YouTube Data API */}
             <IntegCard icon="📺" title="YouTube Data API" desc="내 채널 + 경쟁 채널 분석, 댓글 답장 큐. 비공개 데이터는 OAuth 별도."
-              connected={!!connKeys.YOUTUBE_API_KEY}
+              status={integStatus.youtube_data} saved={!!connKeys.YOUTUBE_API_KEY}
+              onGuide={() => setGuide('youtube-data')}
+              onProbe={() => void probeOne('youtube_data')}
+              probing={probing === 'youtube_data'}
               onSave={() => save('YouTube API', { YOUTUBE_API_KEY: ytKey, YOUTUBE_CHANNEL_ID: ytChannel })}
               onHelp="https://console.cloud.google.com/"
             >
@@ -711,7 +856,10 @@ export default function ManageModal({ onClose, agentCount, globalModel, onOpenTe
 
             {/* YouTube Analytics OAuth */}
             <IntegCard icon="📊" title="YouTube Analytics (OAuth)" desc="시청 지속률·트래픽·구독 증감. 저장 후 '⚡ 자동 연결'로 구글 로그인."
-              connected={!!ytOauth?.connected}
+              status={integStatus.youtube_oauth} saved={!!ytOauth?.connected}
+              onGuide={() => setGuide('youtube-oauth')}
+              onProbe={() => void probeOne('youtube_oauth')}
+              probing={probing === 'youtube_oauth'}
               onSave={() => save('YouTube OAuth', { YOUTUBE_OAUTH_CLIENT_ID: ytOauthId, YOUTUBE_OAUTH_CLIENT_SECRET: ytOauthSec })}
               extraActions={
                 <button
@@ -752,7 +900,10 @@ export default function ManageModal({ onClose, agentCount, globalModel, onOpenTe
 
             {/* PayPal */}
             <IntegCard icon="💰" title="PayPal (매출 분석)" desc="결제 거래 분석. 💰 매출 대시보드 + 새 결제 알림에 사용."
-              connected={!!connKeys.PAYPAL_CLIENT_ID}
+              status={integStatus.paypal} saved={!!connKeys.PAYPAL_CLIENT_ID}
+              onGuide={() => setGuide('paypal')}
+              onProbe={() => void probeOne('paypal')}
+              probing={probing === 'paypal'}
               onSave={() => save('PayPal', { PAYPAL_CLIENT_ID: ppClientId, PAYPAL_CLIENT_SECRET: ppClientSec, PAYPAL_MODE: ppMode })}
               onHelp="https://developer.paypal.com/"
             >
@@ -770,7 +921,8 @@ export default function ManageModal({ onClose, agentCount, globalModel, onOpenTe
 
             {/* 토스페이먼츠 */}
             <IntegCard icon="🏦" title="토스페이먼츠 (매출 분석)" desc="토스 결제 거래(KRW)를 분석. 💰 매출 대시보드 + 자신분석에 PayPal과 합쳐서 보여줍니다."
-              connected={!!connKeys.TOSS_SECRET_KEY}
+              saved={!!connKeys.TOSS_SECRET_KEY}
+              onGuide={() => setGuide('toss')}
               onSave={() => save('토스페이먼츠', { TOSS_SECRET_KEY: tossKey })}
               onHelp="https://docs.tosspayments.com/"
             >
@@ -780,7 +932,10 @@ export default function ManageModal({ onClose, agentCount, globalModel, onOpenTe
 
             {/* GitHub */}
             <IntegCard icon="🐙" title="GitHub — ⚡ 단기 기억" desc="지식 네트워크(단기 기억)를 GitHub 레포에 버전관리로 동기화. 어디서든 불러오고 사람이 직접 편집도."
-              connected={!!connKeys.GITHUB_TOKEN}
+              status={integStatus.github} saved={!!connKeys.GITHUB_TOKEN}
+              onGuide={() => setGuide('github')}
+              onProbe={() => void probeOne('github')}
+              probing={probing === 'github'}
               onSave={() => save('GitHub', { GITHUB_TOKEN: ghToken, GITHUB_REPO: ghRepo })}
               onHelp="https://github.com/settings/tokens"
             >
@@ -791,7 +946,8 @@ export default function ManageModal({ onClose, agentCount, globalModel, onOpenTe
 
             {/* HuggingFace */}
             <IntegCard icon="🤗" title="HuggingFace — 🎯 장기 기억" desc="파인튜닝 모델 & 데이터셋을 HuggingFace Hub에 업로드·로드합니다."
-              connected={!!connKeys.HUGGINGFACE_TOKEN}
+              saved={!!connKeys.HUGGINGFACE_TOKEN}
+              onGuide={() => setGuide('huggingface')}
               onSave={() => save('HuggingFace', { HUGGINGFACE_TOKEN: hfToken })}
               onHelp="https://huggingface.co/settings/tokens"
             >
