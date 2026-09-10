@@ -15,6 +15,7 @@ import AgentManageTab  from './components/AgentManageTab';
 import CeoOverrideModal from './components/CeoOverrideModal';
 import NotificationBell, { Notification } from './components/NotificationBell';
 const VirtualOffice = lazy(() => import('./pages/VirtualOffice'));
+const ProjectsTab = lazy(() => import('./components/ProjectsTab'));
 import { api, AgentSummary, deptLabels } from './api';
 import './styles/hermes.css';
 
@@ -112,7 +113,7 @@ function MainScreen() {
   const [showMemory,  setShowMemory]  = useState(false);
   const [showModel,   setShowModel]   = useState(false);
   const [showManage,  setShowManage]  = useState(false);
-  const [activeTab,   setActiveTab]   = useState<'main' | 'office' | 'ceo' | 'agents'>('main');
+  const [activeTab,   setActiveTab]   = useState<'main' | 'office' | 'ceo' | 'agents' | 'projects'>('main');
   const [overrideTask, setOverrideTask] = useState<TaskItem | null>(null);
   const [showGridMenu, setShowGridMenu] = useState(false);
   const gridMenuRef = useRef<HTMLDivElement>(null);
@@ -535,10 +536,22 @@ function MainScreen() {
         <button className={`hs-tab ${activeTab === 'agents' ? 'active' : ''}`} onClick={() => setActiveTab('agents')}>
           🤖 에이전트
         </button>
+        <button className={`hs-tab ${activeTab === 'projects' ? 'active' : ''}`} onClick={() => setActiveTab('projects')}>
+          🚀 프로젝트
+        </button>
         <button className={`hs-tab ${activeTab === 'ceo' ? 'active' : ''}`} onClick={() => setActiveTab('ceo')}>
           👔 CEO 룸
         </button>
       </div>
+
+      {/* ── Projects Tab ── */}
+      {activeTab === 'projects' && (
+        <Suspense fallback={<div className="hs-lazy-fallback">
+          <div className="hs-lazy-spinner" /> 프로젝트 불러오는 중…
+        </div>}>
+          <ProjectsTab />
+        </Suspense>
+      )}
 
       {/* ── Office Tab ── */}
       {activeTab === 'office' && (

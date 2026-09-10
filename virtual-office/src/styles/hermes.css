@@ -3,6 +3,9 @@
 ══════════════════════════════════════════════════════ */
 
 :root {
+  /* 전환할 속성. `transition: all` 을 대신한다 — hover 규칙이 실제로
+     바꾸는 것은 이 여섯뿐이고, all 은 나머지까지 딸려 움직이게 한다. */
+  --t-ui: background-color, border-color, color, box-shadow, transform, opacity;
   --bg:          #0F172A;
   --bg2:         #0D1B2E;
   --bg3:         #1E293B;
@@ -132,7 +135,7 @@ body {
   cursor: pointer;
   display: flex; align-items: center; justify-content: center;
   font-size: 16px;
-  transition: all 0.15s;
+  transition-property: var(--t-ui); transition-duration: 0.15s;
 }
 .hs-icon-btn:hover, .hs-icon-btn.active {
   background: var(--primary-dim);
@@ -149,7 +152,7 @@ body {
   border: 1px solid var(--glass-border);
   cursor: pointer;
   display: flex; align-items: center; justify-content: center;
-  transition: all 0.15s;
+  transition-property: var(--t-ui); transition-duration: 0.15s;
   position: relative;
 }
 .hs-grid-menu-btn:hover, .hs-grid-menu-btn.open {
@@ -213,7 +216,7 @@ body {
   border: 1px solid transparent;
   background: var(--glass-bg);
   cursor: pointer;
-  transition: all 0.15s;
+  transition-property: var(--t-ui); transition-duration: 0.15s;
   color: var(--muted);
 }
 .hs-grid-item:hover {
@@ -340,7 +343,7 @@ body {
 .hs-task-stat-btn {
   border: 1px solid transparent;
   cursor: pointer;
-  transition: all 0.15s;
+  transition-property: var(--t-ui); transition-duration: 0.15s;
   color: inherit;
 }
 .hs-task-stat-btn:hover {
@@ -378,7 +381,7 @@ body {
   color: var(--muted);
   font-size: 11px;
   cursor: pointer;
-  transition: all 0.15s;
+  transition-property: var(--t-ui); transition-duration: 0.15s;
   text-align: left;
   width: 100%;
 }
@@ -461,7 +464,7 @@ body {
   background: var(--glass-bg);
   backdrop-filter: blur(8px);
   cursor: pointer;
-  transition: all 0.2s;
+  transition-property: var(--t-ui); transition-duration: 0.2s;
   z-index: 2;
 }
 .ops-node:hover {
@@ -640,7 +643,7 @@ body {
   color: #c4b5fd;
   font-size: 12px;
   cursor: pointer;
-  transition: all 0.15s;
+  transition-property: var(--t-ui); transition-duration: 0.15s;
   white-space: nowrap;
 }
 .hs-chip:hover {
@@ -759,7 +762,7 @@ body {
   color: var(--muted); font-size: 14px;
   cursor: pointer; padding: 4px 8px;
   border-radius: 8px;
-  transition: all 0.1s;
+  transition-property: var(--t-ui); transition-duration: 0.1s;
 }
 .hm-close:hover { color: var(--text); background: var(--glass-hi); }
 
@@ -818,7 +821,7 @@ body {
   border-radius: 12px;
   padding: 10px 12px;
   cursor: pointer;
-  transition: all 0.15s;
+  transition-property: var(--t-ui); transition-duration: 0.15s;
   text-align: left;
 }
 .hm-agent-card:hover { border-color: rgba(139,92,246,0.4); }
@@ -908,7 +911,7 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
   border-bottom: 2px solid transparent;
   color: var(--muted);
   cursor: pointer;
-  transition: all 0.15s;
+  transition-property: var(--t-ui); transition-duration: 0.15s;
   margin-bottom: -1px;
 }
 .mem-tab:hover { color: var(--text); }
@@ -1056,7 +1059,7 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
   background: none; border: none;
   border-bottom: 2px solid transparent;
   cursor: pointer;
-  transition: all 0.15s;
+  transition-property: var(--t-ui); transition-duration: 0.15s;
   white-space: nowrap;
 }
 .hs-tab:hover { color: var(--text); }
@@ -1174,7 +1177,7 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
   border-radius: 14px;
   padding: 12px 14px;
   cursor: pointer;
-  transition: all 0.2s;
+  transition-property: var(--t-ui); transition-duration: 0.2s;
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -1340,7 +1343,7 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 .office-agent:hover { background: var(--glass-bg); }
 .office-agent.active .office-agent-bubble { animation: agent-wiggle 2.5s ease-in-out infinite; }
 @keyframes agent-wiggle { 0%,100% { transform: translateY(0); } 25% { transform: translateY(-2px); } 75% { transform: translateY(1px); } }
-.office-agent-bubble { width: 38px; height: 38px; border-radius: 10px; border: 2px solid transparent; background: var(--glass-bg); display: flex; align-items: center; justify-content: center; position: relative; transition: all 0.2s; }
+.office-agent-bubble { width: 38px; height: 38px; border-radius: 10px; border: 2px solid transparent; background: var(--glass-bg); display: flex; align-items: center; justify-content: center; position: relative; transition-property: var(--t-ui); transition-duration: 0.2s; }
 .office-agent-initial { font-size: 16px; font-weight: 800; }
 .office-agent-pulse { position: absolute; top: -3px; right: -3px; width: 8px; height: 8px; border-radius: 50%; animation: pulse-pop 1.2s ease-out infinite; }
 @keyframes pulse-pop { 0%,100% { transform: scale(1); opacity: 1; } 50% { transform: scale(1.4); opacity: 0.6; } }
@@ -1366,7 +1369,7 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 .office-quick-section { margin-top: 10px; border-top: 1px solid var(--border); padding-top: 8px; }
 .office-quick-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; margin-top: 6px; }
 .office-quick-btn:last-child:nth-child(odd) { grid-column: span 2; flex-direction: row; gap: 6px; padding: 6px 10px; }
-.office-quick-btn { display: flex; flex-direction: column; align-items: center; gap: 3px; width: 100%; padding: 8px 4px; border: 1px solid color-mix(in srgb, var(--dept-color, #64748b) 25%, transparent); background: color-mix(in srgb, var(--dept-color, #64748b) 6%, transparent); border-radius: 8px; cursor: pointer; transition: all 0.15s; color: var(--dept-color, #94a3b8); }
+.office-quick-btn { display: flex; flex-direction: column; align-items: center; gap: 3px; width: 100%; padding: 8px 4px; border: 1px solid color-mix(in srgb, var(--dept-color, #64748b) 25%, transparent); background: color-mix(in srgb, var(--dept-color, #64748b) 6%, transparent); border-radius: 8px; cursor: pointer; transition-property: var(--t-ui); transition-duration: 0.15s; color: var(--dept-color, #94a3b8); }
 .office-quick-icon { font-size: 14px; }
 .office-quick-label { font-size: 11px; font-weight: 600; color: inherit; white-space: nowrap; }
 .office-quick-btn:hover { opacity: 0.8; background: var(--glass-bg); }
@@ -1505,7 +1508,7 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
   cursor: pointer;
   text-align: left;
   width: 100%;
-  transition: all 0.15s;
+  transition-property: var(--t-ui); transition-duration: 0.15s;
 }
 .hs-task-mini-item:hover { background: var(--glass-bg); border-color: var(--glass-border); color: var(--text); }
 .hs-task-mini-dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
@@ -1777,7 +1780,7 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
   font-size: 11px;
   font-weight: 500;
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition-property: var(--t-ui); transition-duration: 0.2s;
   backdrop-filter: blur(8px);
 }
 .ov-dept-chip:hover,
@@ -1821,7 +1824,7 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
   padding: 3px 10px;
   border-radius: 8px;
   cursor: pointer;
-  transition: all 0.2s;
+  transition-property: var(--t-ui); transition-duration: 0.2s;
 }
 .ov-feed-action-btn:hover { color: var(--text); border-color: rgba(255,255,255,0.25); }
 
@@ -1887,7 +1890,7 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
   font-size: 11px;
   font-weight: 700;
   cursor: pointer;
-  transition: all 0.2s;
+  transition-property: var(--t-ui); transition-duration: 0.2s;
 }
 .ov-critical-btn.primary {
   background: rgba(139,92,246,0.2);
@@ -1919,7 +1922,7 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
   text-transform: uppercase;
   letter-spacing: 0.04em;
   cursor: pointer;
-  transition: all 0.2s;
+  transition-property: var(--t-ui); transition-duration: 0.2s;
 }
 .ov-quick-btn.primary {
   background: var(--primary);
@@ -2025,7 +2028,7 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
   font-size: 12px;
   font-weight: 600;
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition-property: var(--t-ui); transition-duration: 0.2s;
   box-shadow: var(--primary-glow);
 }
 .am-deploy-btn:hover {
@@ -2055,7 +2058,7 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
   gap: 8px;
   text-align: center;
   backdrop-filter: blur(12px);
-  transition: all 0.3s ease;
+  transition-property: var(--t-ui); transition-duration: 0.3s;
   overflow: hidden;
   animation: float-card 6s ease-in-out infinite;
 }
@@ -2324,7 +2327,7 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
   font-size: 12px;
   font-weight: 600;
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition-property: var(--t-ui); transition-duration: 0.2s;
   text-align: center;
   margin-top: auto;
 }
@@ -2421,7 +2424,7 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
   background: transparent;
   color: var(--muted);
   cursor: pointer;
-  transition: all 0.2s;
+  transition-property: var(--t-ui); transition-duration: 0.2s;
   font-size: 12px;
 }
 .ceo-modal-close:hover {
@@ -2597,7 +2600,7 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
   font-size: 12px;
   font-weight: 600;
   cursor: pointer;
-  transition: all 0.2s;
+  transition-property: var(--t-ui); transition-duration: 0.2s;
 }
 .ceo-btn-secondary:hover { color: var(--text); border-color: var(--primary); }
 .ceo-btn-danger {
@@ -2609,7 +2612,7 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
   font-size: 12px;
   font-weight: 600;
   cursor: pointer;
-  transition: all 0.2s;
+  transition-property: var(--t-ui); transition-duration: 0.2s;
 }
 .ceo-btn-danger:hover { background: rgba(239,68,68,0.2); }
 .ceo-btn-ghost {
@@ -2621,7 +2624,7 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
   font-size: 12px;
   font-weight: 600;
   cursor: pointer;
-  transition: all 0.2s;
+  transition-property: var(--t-ui); transition-duration: 0.2s;
 }
 .ceo-btn-ghost:hover { border-color: var(--primary); color: var(--primary); }
 .ceo-btn-primary {
@@ -2633,7 +2636,7 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
   font-size: 12px;
   font-weight: 700;
   cursor: pointer;
-  transition: all 0.2s;
+  transition-property: var(--t-ui); transition-duration: 0.2s;
   box-shadow: var(--primary-glow);
 }
 .ceo-btn-primary:hover { transform: translateY(-1px); box-shadow: 0 0 20px rgba(139,92,246,0.5); }
@@ -2650,7 +2653,7 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
   font-size: 10px;
   font-weight: 600;
   cursor: pointer;
-  transition: all 0.2s;
+  transition-property: var(--t-ui); transition-duration: 0.2s;
   white-space: nowrap;
 }
 .ceo-task-override-btn:hover {
@@ -2674,7 +2677,7 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
   background: transparent;
   font-size: 11px;
   cursor: pointer;
-  transition: all 0.2s;
+  transition-property: var(--t-ui); transition-duration: 0.2s;
   line-height: 1;
 }
 .ceo-task-hide-btn { color: var(--muted2); }
@@ -2712,7 +2715,7 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
   border: 1px solid;
   background: rgba(255,255,255,0.03);
   cursor: pointer;
-  transition: all 0.2s;
+  transition-property: var(--t-ui); transition-duration: 0.2s;
   text-align: left;
   flex: 1;
   min-width: 0;
@@ -2793,7 +2796,7 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 .pem-close {
   margin-left: auto; width: 28px; height: 28px; border-radius: 8px;
   border: 1px solid var(--glass-border); background: transparent;
-  color: var(--muted); cursor: pointer; transition: all 0.2s;
+  color: var(--muted); cursor: pointer; transition-property: var(--t-ui); transition-duration: 0.2s;
   display: flex; align-items: center; justify-content: center; font-size: 12px;
 }
 .pem-close:hover { background: rgba(239,68,68,0.1); color: #ef4444; }
@@ -2831,13 +2834,13 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
   padding: 8px 16px; border-radius: 10px;
   background: transparent; border: 1px solid var(--glass-border);
   color: var(--muted); font-size: 12px; font-weight: 600; cursor: pointer;
-  transition: all 0.2s;
+  transition-property: var(--t-ui); transition-duration: 0.2s;
 }
 .pem-cancel:hover { color: var(--text); border-color: rgba(255,255,255,0.25); }
 .pem-save {
   padding: 8px 18px; border-radius: 10px;
   color: #fff; border: none; font-size: 12px; font-weight: 700;
-  cursor: pointer; transition: all 0.2s;
+  cursor: pointer; transition-property: var(--t-ui); transition-duration: 0.2s;
 }
 .pem-save:hover { opacity: 0.85; transform: translateY(-1px); }
 .pem-save:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
@@ -2881,7 +2884,7 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
   border: 1px solid var(--glass-border);
   display: flex; align-items: center; justify-content: center;
   cursor: pointer;
-  transition: all 0.2s;
+  transition-property: var(--t-ui); transition-duration: 0.2s;
   position: relative;
 }
 .nb-bell:hover { background: var(--glass-hi); border-color: var(--primary); }
@@ -2902,8 +2905,10 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
   animation: badge-pop 0.3s cubic-bezier(0.34,1.56,0.64,1);
 }
 @keyframes badge-pop {
-  from { transform: scale(0); }
-  to   { transform: scale(1); }
+  /* scale(0) 에서 시작하면 숫자가 0.3초 동안 아예 안 보인다. 알림 개수는
+     정보이므로 사라졌다 나타나는 대신 커지며 눈에 띄게 한다. */
+  from { transform: scale(0.6); opacity: 0.4; }
+  to   { transform: scale(1);   opacity: 1; }
 }
 
 /* 드롭다운 패널 */
@@ -2983,7 +2988,7 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
   width: 20px; height: 20px; flex-shrink: 0;
   background: transparent; border: none;
   color: var(--muted2); font-size: 10px; cursor: pointer;
-  border-radius: 4px; transition: all 0.15s;
+  border-radius: 4px; transition-property: var(--t-ui); transition-duration: 0.15s;
   display: flex; align-items: center; justify-content: center;
 }
 .nb-item-dismiss:hover { background: rgba(239,68,68,0.15); color: #ef4444; }
@@ -3342,3 +3347,245 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 .af-row.kind-start .af-text { color: var(--muted, #94a3b8); }
 
 .af-body { max-height: none; }
+
+
+/* ── 눌림 피드백 ───────────────────────────────────────────────────────────
+   :hover 67곳에 :active 2곳이었다. 올리면 반응하는데 누르면 조용하니,
+   응답이 느린 동작에서 눌린 줄 모르고 한 번 더 누르게 된다. 클래스마다
+   규칙을 새로 쓰지 않고 요소 단위로 한 번에 건다 — 이 화면의 클릭 대상은
+   거의 전부 <button> 이다. */
+button:not(:disabled):active,
+[role="button"]:not([aria-disabled="true"]):active {
+  transform: translateY(1px) scale(0.985);
+  filter: brightness(0.94);
+}
+/* 눌림은 즉각적이어야 한다. hover 용 150ms 를 그대로 쓰면 손을 뗀 뒤에도
+   눌린 채로 남아 보인다. */
+button:not(:disabled):active {
+  transition-duration: 40ms;
+}
+/* 키보드 사용자에게도 초점이 보여야 한다. */
+button:focus-visible,
+[role="button"]:focus-visible,
+a:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+/* ── 동작 최소화 선호 ──────────────────────────────────────────────────────
+   전역으로 건다. 개별 애니메이션 세 개에만 걸려 있었는데, 그 사이 배지
+   팝·스피너·펄스·전환이 계속 늘었다. 새로 추가되는 것까지 자동으로
+   덮으려면 여기서 한 번에 꺼야 한다.
+   0 이 아니라 0.01ms 인 것은, 길이가 0 이면 transitionend/animationend 가
+   발생하지 않아 그 이벤트를 기다리는 코드가 멈추기 때문이다. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+  /* 눌림 표시는 움직임이 아니라 상태다. 이건 남긴다. */
+  button:not(:disabled):active {
+    transform: none;
+    filter: brightness(0.9);
+  }
+}
+
+
+/* ══════════════════════════════════════════════════════════════════════════
+   자율 프로젝트
+   화면이 답해야 하는 것은 셋뿐이다 — 지금 뭘 하고 있나 / 내가 할 일이 있나 /
+   왜 멈췄나. 그래서 목록은 상태와 진행만 보이고 나머지는 펼쳤을 때 나온다.
+══════════════════════════════════════════════════════════════════════════ */
+.pj-wrap {
+  /* width:100% 가 없으면 안 된다. 부모(.hs-root)가 세로 flex 라 원래는
+     stretch 로 폭이 채워지는데, `margin: 0 auto` 가 그 stretch 를 꺼 버린다.
+     그러면 폭이 내용의 max-content 로 잡혀 max-width 인 900px 까지 벌어지고,
+     좁은 화면에서는 부모의 overflow:hidden 에 잘려 오른쪽이 사라진다.
+     min-width:0 은 안쪽 텍스트가 말줄임될 수 있게 하기 위한 것이다. */
+  width: 100%; max-width: 900px; min-width: 0;
+  margin: 0 auto; padding: 20px 18px 60px;
+  display: flex; flex-direction: column; gap: 22px;
+  overflow-y: auto; height: 100%;
+}
+.pj-h {
+  font-size: 15px; font-weight: 700; color: var(--text);
+  margin: 0 0 6px; display: flex; align-items: center; gap: 8px;
+}
+.pj-count {
+  font-size: 11px; font-weight: 600; color: var(--muted);
+  background: var(--glass-bg); border: 1px solid var(--border);
+  border-radius: 999px; padding: 1px 8px;
+}
+.pj-sub { font-size: 12.5px; line-height: 1.65; color: var(--muted); margin: 0 0 12px; }
+.pj-sub strong { color: var(--text); font-weight: 600; }
+
+/* ── 아이디어 입력 ── */
+.pj-new {
+  background: var(--glass-bg); border: 1px solid var(--border);
+  border-radius: 12px; padding: 16px 18px;
+}
+.pj-new-row { display: flex; gap: 10px; align-items: stretch; }
+.pj-input {
+  flex: 1; min-width: 0; resize: vertical;
+  background: var(--bg); border: 1px solid var(--border); border-radius: 8px;
+  color: var(--text); font: inherit; font-size: 13px; line-height: 1.6;
+  padding: 10px 12px;
+  transition-property: var(--t-ui); transition-duration: 0.15s;
+}
+.pj-input:focus { outline: none; border-color: var(--primary); }
+.pj-input::placeholder { color: var(--muted); opacity: 0.7; }
+
+.pj-btn {
+  flex-shrink: 0; padding: 0 16px; min-height: 36px;
+  background: var(--glass-bg); border: 1px solid var(--border); border-radius: 8px;
+  color: var(--text); font: inherit; font-size: 12.5px; font-weight: 600;
+  cursor: pointer; white-space: nowrap;
+  transition-property: var(--t-ui); transition-duration: 0.15s;
+}
+.pj-btn:hover:not(:disabled) { background: var(--glass-hi); border-color: var(--primary); }
+.pj-btn-primary {
+  background: var(--primary); border-color: var(--primary); color: #fff;
+}
+.pj-btn-primary:hover:not(:disabled) { background: #7C4DEF; border-color: #7C4DEF; }
+.pj-err {
+  margin-top: 10px; font-size: 12px; color: #FCA5A5;
+  background: rgba(239,68,68,0.10); border: 1px solid rgba(239,68,68,0.25);
+  border-radius: 6px; padding: 8px 10px;
+}
+
+/* ── 목록 ── */
+.pj-list { display: flex; flex-direction: column; gap: 10px; }
+.pj-empty {
+  font-size: 12.5px; color: var(--muted); padding: 18px 4px; text-align: center;
+}
+.pj-card {
+  background: var(--glass-bg); border: 1px solid var(--border);
+  border-radius: 10px; overflow: hidden;
+  transition-property: var(--t-ui); transition-duration: 0.15s;
+}
+/* 사람이 손대야 하는 것만 테두리로 부른다. 전부 강조하면 아무것도 강조되지 않는다. */
+.pj-card.needs-me { border-color: rgba(139,92,246,0.45); }
+.pj-card.done, .pj-card.cancelled { opacity: 0.72; }
+
+.pj-card-head {
+  width: 100%; display: flex; align-items: center; gap: 10px;
+  padding: 12px 14px; background: none; border: 0;
+  color: var(--text); font: inherit; text-align: left; cursor: pointer;
+  transition-property: var(--t-ui); transition-duration: 0.15s;
+}
+.pj-card-head:hover { background: var(--glass-hi); }
+
+.pj-dot {
+  width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
+  background: var(--muted);
+}
+.pj-dot.running           { background: var(--secondary); animation: pj-breathe 2s ease-in-out infinite; }
+.pj-dot.planning          { background: var(--secondary); animation: pj-breathe 2s ease-in-out infinite; }
+.pj-dot.awaiting_approval { background: var(--primary); }
+.pj-dot.paused            { background: #F59E0B; }
+.pj-dot.done              { background: #22C55E; }
+.pj-dot.cancelled         { background: #64748B; }
+@keyframes pj-breathe { 0%,100% { opacity: 1; } 50% { opacity: 0.35; } }
+
+.pj-title {
+  font-size: 13.5px; font-weight: 600;
+  flex: 1; min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.pj-status { font-size: 11.5px; color: var(--muted); flex-shrink: 0; }
+.pj-meta {
+  font-size: 11px; color: var(--muted); opacity: 0.75; flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+}
+.pj-caret {
+  font-size: 11px; color: var(--muted); flex-shrink: 0;
+  transition-property: transform; transition-duration: 0.15s;
+}
+.pj-caret.open { transform: rotate(180deg); }
+
+/* 멈춘 이유는 접혀 있어도 보인다. 이걸 숨기면 왜 안 도는지 알 수 없다. */
+.pj-pause {
+  margin: 0; padding: 9px 14px 11px;
+  font-size: 12px; line-height: 1.6; color: #FCD34D;
+  background: rgba(245,158,11,0.08);
+  border-top: 1px solid rgba(245,158,11,0.18);
+}
+.pj-actions {
+  display: flex; gap: 8px; padding: 10px 14px 12px;
+  border-top: 1px solid var(--border);
+}
+
+/* ── 상세 ── */
+.pj-detail {
+  padding: 4px 14px 16px; border-top: 1px solid var(--border);
+  display: flex; flex-direction: column; gap: 16px;
+}
+.pj-block { display: flex; flex-direction: column; gap: 7px; }
+.pj-h3 {
+  font-size: 11px; font-weight: 700; letter-spacing: 0.06em;
+  text-transform: uppercase; color: var(--muted);
+  margin: 10px 0 0; display: flex; align-items: baseline; gap: 8px;
+}
+.pj-budget {
+  margin-left: auto; font-weight: 500; letter-spacing: 0;
+  text-transform: none; opacity: 0.8; font-variant-numeric: tabular-nums;
+}
+.pj-text { font-size: 12.5px; line-height: 1.7; color: var(--text); margin: 0; }
+.pj-ul { padding-left: 18px; display: flex; flex-direction: column; gap: 3px; }
+
+.pj-deliv { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 5px; }
+.pj-deliv-item {
+  display: flex; align-items: center; gap: 9px;
+  font-size: 12.5px; padding: 6px 8px; border-radius: 6px;
+}
+.pj-deliv-item.now  { background: var(--primary-dk); }
+.pj-deliv-item.todo { opacity: 0.55; }
+.pj-deliv-mark { width: 14px; flex-shrink: 0; text-align: center; font-size: 11px; }
+.pj-deliv-item.done .pj-deliv-mark { color: #22C55E; }
+.pj-deliv-item.now  .pj-deliv-mark { color: var(--primary); }
+.pj-deliv-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pj-deliv-dept, .pj-deliv-phase {
+  font-size: 11px; color: var(--muted); flex-shrink: 0;
+  border: 1px solid var(--border); border-radius: 4px; padding: 1px 6px;
+}
+.pj-deliv-phase { color: var(--primary); border-color: rgba(139,92,246,0.35); }
+
+.pj-steps {
+  list-style: none; margin: 0; padding: 0;
+  display: flex; flex-direction: column; gap: 2px;
+  max-height: 320px; overflow-y: auto;
+}
+.pj-step {
+  display: flex; align-items: baseline; gap: 8px;
+  font-size: 11.5px; line-height: 1.6; padding: 4px 6px; border-radius: 4px;
+}
+.pj-step.no { background: rgba(239,68,68,0.06); }
+.pj-step-n {
+  width: 22px; flex-shrink: 0; text-align: right;
+  color: var(--muted); opacity: 0.6; font-variant-numeric: tabular-nums;
+}
+.pj-step-phase { flex-shrink: 0; font-weight: 600; width: 48px; }
+.pj-step.ok .pj-step-phase { color: var(--secondary); }
+.pj-step.no .pj-step-phase { color: #F87171; }
+.pj-step-dept  { flex-shrink: 0; color: var(--muted); width: 62px; }
+.pj-step-score { flex-shrink: 0; color: var(--muted); width: 40px; font-variant-numeric: tabular-nums; }
+.pj-step-note {
+  flex: 1; min-width: 0; color: var(--muted);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+.pj-done-note {
+  margin: 6px 0 0; font-size: 12px; line-height: 1.65; color: var(--muted);
+  background: rgba(34,197,94,0.07); border: 1px solid rgba(34,197,94,0.2);
+  border-radius: 6px; padding: 10px 12px;
+}
+
+@media (max-width: 700px) {
+  .pj-meta, .pj-step-dept { display: none; }
+  .pj-new-row { flex-direction: column; }
+}

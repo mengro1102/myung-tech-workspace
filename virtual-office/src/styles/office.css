@@ -376,7 +376,7 @@
   padding: 5px 10px;
   cursor: pointer;
   font-family: inherit;
-  transition: all 0.12s;
+  transition-property: var(--t-ui); transition-duration: 0.12s;
 }
 .vo-detail-close-btn:hover {
   background: rgba(255,255,255,0.08);

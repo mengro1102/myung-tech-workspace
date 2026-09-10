@@ -100,10 +100,58 @@ export interface ApprovalRow extends StoreItem {
   department?: string;
   detail?: string;
   status?: 'pending' | 'approved' | 'rejected';
-  /** 'file' 이면 승인하는 순간 workspace 에 파일이 쓰인다. */
-  kind?: 'file';
+  /** 'file' 이면 승인하는 순간 workspace 에 파일이 쓰인다.
+   *  'project' 면 승인하는 순간 자율 실행이 시작된다 — 그 뒤로는
+   *  결과가 나올 때까지 다시 묻지 않는다. */
+  kind?: 'file' | 'project';
+  project_id?: string;
   file_path?: string;
   file_content?: string;
+}
+
+/* ── 자율 프로젝트 ─────────────────────────────────────────────────────────
+   아이디어 → 계획 → 착수 승인(한 번) → 자율 실행 → 완료.
+   상한은 없다. 진전이 멈추면 스스로 pause 하고 텔레그램으로 알린다. */
+export type ProjectStatus =
+  | 'intake' | 'planning' | 'awaiting_approval'
+  | 'running' | 'paused' | 'done' | 'cancelled';
+
+export interface Deliverable {
+  id: string; title: string; dept: string; desc: string;
+}
+
+export interface ProjectStep {
+  n: number;
+  /** draft = 초안, review1 = 부서 1차, review2 = 오케스트레이터 2차 */
+  phase: 'plan' | 'draft' | 'review1' | 'review2';
+  dept: string;
+  ok: boolean;
+  /** 리뷰 점수. 초안 단계는 -1 */
+  score: number;
+  note: string;
+  at: number;
+}
+
+export interface ProjectRow {
+  id: string;
+  title: string;
+  idea: string;
+  status: ProjectStatus;
+  intent?: string;
+  plan?: { goal?: string; done_when?: string[]; risks?: string[];
+           deliverables?: Deliverable[] } | null;
+  cursor: number;
+  phase: string;
+  /** 목록 응답에는 없다 — 산출물이 수만 자라 따로 받는다 */
+  steps?: ProjectStep[];
+  artifacts?: Record<string, string>;
+  budget?: { calls: number; day: string };
+  pause_reason?: string;
+  progress: string;
+  step_count?: number;
+  budget_left: number;
+  created_at: number;
+  updated_at?: number;
 }
 
 export const api = {
@@ -230,6 +278,26 @@ export const api = {
         body: JSON.stringify({ model }),
       })
     ),
+
+  /* ── 자율 프로젝트 ── */
+  listProjects: () =>
+    safeJson<{ projects: ProjectRow[] }>(fetch(`${API_BASE}/projects`)),
+  getProject: (id: string) =>
+    safeJson<{ project: ProjectRow }>(fetch(`${API_BASE}/projects/${id}`)),
+  createProject: (idea: string) =>
+    safeJson<{ ok: boolean; project: ProjectRow; error?: string }>(
+      fetch(`${API_BASE}/projects`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ idea }),
+      })
+    ),
+  /** approve = 착수 승인, resume = 정지 해제, cancel = 접기 */
+  projectAction: (id: string, action: 'approve' | 'resume' | 'cancel') =>
+    safeJson<{ ok: boolean; project: ProjectRow; error?: string }>(
+      fetch(`${API_BASE}/projects/${id}/${action}`, { method: 'POST' })
+    ),
+  deleteProject: (id: string) =>
+    safeJson<{ ok: boolean }>(fetch(`${API_BASE}/projects/${id}`, { method: 'DELETE' })),
 
   /* ── Phase 5: 장기기억 FT (SFT 데이터셋 + Colab 노트북) ── */
   longtermBuildDataset: (mode = 'sft') =>
