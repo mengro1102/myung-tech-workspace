@@ -142,6 +142,21 @@ def _approval_followup(row: dict) -> dict:
     approved = row.get("status") == "approved"
     verdict = "승인" if approved else "거절"
 
+    # 프로젝트 착수 승인. 이 승인 하나로 자율 실행이 시작되고, 그 뒤로는
+    # 결과가 나올 때까지 사람을 다시 부르지 않는다 — 진전이 멈출 때만 부른다.
+    if row.get("kind") == "project":
+        pid = row.get("project_id") or ""
+        if not approved:
+            projects.update(pid, {"status": "cancelled",
+                                  "pause_reason": "사장님이 착수를 거절했습니다"})
+            return {"queued": False, "reason": "거절 — 프로젝트를 접었습니다"}
+        try:
+            import project_runner
+            project_runner.approve(pid)
+        except Exception as e:  # noqa: BLE001
+            return {"queued": False, "reason": f"착수 실패: {e}"}
+        return {"queued": True, "project_id": pid, "autonomous": True}
+
     # 파일 제안은 승인 순간에 디스크로 간다. 후속 태스크를 만들지는 않는다 —
     # 파일이 생긴 것으로 그 안건은 끝이다.
     if row.get("kind") == "file":
@@ -231,6 +246,7 @@ import task_queue
 import message_broker
 import workspace_store
 import file_proposals
+import projects
 from cycle_runner import runner as cycle_runner
 
 # 단기기억 = GraphRAG 지식베이스 참조 (knowledge_base.py, repo 루트). import 실패해도 서버는 떠야 하므로 guard.
@@ -471,6 +487,30 @@ def _event_watcher():
 threading.Thread(target=_event_watcher, daemon=True).start()
 
 
+def _project_runner_loop():
+    """자율 프로젝트를 한 스텝씩 굴린다.
+
+    별도 프로세스로 두지 않는 이유: 프로젝트는 계획 → 초안 → 검토가
+    파일 하나에 이어져 있고 스텝 사이에 상태가 남는다. 프로세스가 하나 더
+    늘면 START/STOP 배치와 상태 확인에 항목이 하나 더 붙는데, 얻는 것이
+    없다 — LLM 호출은 어차피 네트워크 대기라 GIL 을 쥐고 있지 않는다.
+
+    한 바퀴에 프로젝트마다 딱 한 스텝만 나아간다. 그래야 프로젝트가 여럿일
+    때 하나가 나머지를 굶기지 않는다.
+    """
+    import project_runner
+    while True:
+        try:
+            moved = project_runner.run_once_all()
+        except Exception as exc:  # noqa: BLE001
+            print(f"[projects] 루프 오류(계속 진행): {exc}", file=sys.stderr)
+            moved = 0
+        time.sleep(1.0 if moved else 5.0)
+
+
+threading.Thread(target=_project_runner_loop, daemon=True).start()
+
+
 # ── HTTP 핸들러 ───────────────────────────────────────────────
 
 def _json_resp(handler, status: int, data: dict | list):
@@ -682,6 +722,27 @@ class Handler(BaseHTTPRequestHandler):
         # ── GET /api/store/<collection>  (할 일 · 등록 서비스 · 승인 큐)
         #    브라우저에만 있던 것들을 서버로 올렸다. 에이전트도 같은 파일을 읽고
         #    쓴다 — 그래야 "에이전트가 할 일을 쌓는다"가 말이 된다.
+        elif path == "/api/projects":
+            rows = []
+            for p in projects.load():
+                # 목록에는 본문을 싣지 않는다. 산출물이 수만 자라 화면이 굳는다.
+                rows.append({k: v for k, v in p.items()
+                             if k not in ("artifacts", "steps")}
+                            | {"progress": projects.progress(p),
+                               "step_count": len(p.get("steps") or []),
+                               "budget_left": projects.budget_left(p)})
+            _json_resp(self, 200, {"projects": rows})
+
+        elif path.startswith("/api/projects/"):
+            pid = path.split("/api/projects/")[1]
+            p = projects.get(pid)
+            if p is None:
+                _json_resp(self, 404, {"error": f"없는 프로젝트: {pid}"})
+                return
+            _json_resp(self, 200, {"project": p | {
+                "progress": projects.progress(p),
+                "budget_left": projects.budget_left(p)}})
+
         elif path.startswith("/api/store/"):
             collection = path.split("/api/store/")[1]
             if collection not in workspace_store.COLLECTIONS:
@@ -797,6 +858,10 @@ class Handler(BaseHTTPRequestHandler):
                 return
             _json_resp(self, 200, {"ok": workspace_store.remove(rest[0], rest[1])})
 
+        elif path.startswith("/api/projects/"):
+            pid = path.split("/api/projects/")[1]
+            _json_resp(self, 200, {"ok": projects.remove(pid)})
+
         elif path.startswith("/api/tasks/"):
             task_id = path.split("/api/tasks/")[1]
             ok = task_queue.delete_task(task_id) if hasattr(task_queue, "delete_task") else False
@@ -901,6 +966,38 @@ class Handler(BaseHTTPRequestHandler):
             _json_resp(self, 200, {"ok": True, "tasks": created, "count": len(created)})
 
         # ── POST /api/store/<collection>  {…}  (항목 추가)
+        elif path == "/api/projects":
+            body = self._read_body()
+            idea = str(body.get("idea") or "").strip()
+            if not idea:
+                _json_resp(self, 400, {"error": "아이디어를 적어 주세요"})
+                return
+            # 계획 수립은 LLM 호출이라 수십 초가 걸린다. 여기서 기다리면 화면이
+            # 멈추므로 만들어만 두고 돌려준다 — 러너 스레드가 집어 간다.
+            _json_resp(self, 200, {"ok": True,
+                                   "project": projects.create(idea, str(body.get("title") or ""))})
+
+        elif path.startswith("/api/projects/"):
+            rest = path.split("/api/projects/")[1]
+            pid, _, action = rest.partition("/")
+            if projects.get(pid) is None:
+                _json_resp(self, 404, {"error": f"없는 프로젝트: {pid}"})
+                return
+            try:
+                import project_runner
+            except Exception as e:  # noqa: BLE001
+                _json_resp(self, 500, {"error": f"러너를 불러오지 못했습니다: {e}"})
+                return
+            if action == "approve":
+                _json_resp(self, 200, {"ok": True, "project": project_runner.approve(pid)})
+            elif action == "resume":
+                _json_resp(self, 200, {"ok": True, "project": project_runner.resume(pid)})
+            elif action == "cancel":
+                _json_resp(self, 200, {"ok": True, "project": projects.update(
+                    pid, {"status": "cancelled", "pause_reason": "사장님이 중단했습니다"})})
+            else:
+                _json_resp(self, 404, {"error": f"알 수 없는 동작: {action}"})
+
         elif path.startswith("/api/store/"):
             collection = path.split("/api/store/")[1]
             if collection not in workspace_store.COLLECTIONS:

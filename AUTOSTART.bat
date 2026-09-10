@@ -44,8 +44,8 @@ REM  Telegram/Discord gateway stays Mengbiseo's business.
 curl -s -o nul --max-time 3 http://127.0.0.1:3001/ && (
     echo         already running - skipped.
 ) || (
-    if exist "D:\AI_Workspacereellmapi\server\dist\index.js" (
-        start "mt-router" /min cmd /c "cd /d D:\AI_Workspacereellmapi && node server\dist\index.js"
+    if exist "D:\AI_Workspace\freellmapi\server\dist\index.js" (
+        start "mt-router" /min cmd /c "cd /d D:\AI_Workspace\freellmapi && node server\dist\index.js"
         echo         launched.
     ) else (
         echo         router build missing - departments will use local Ollama.

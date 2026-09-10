@@ -261,15 +261,24 @@ def _post_chat(url: str, body: dict, headers: dict, label: str) -> str:
         raise RuntimeError(f"{label} 연결 실패: {exc.reason}") from exc
 
 
-def call_llm(backend: str, model: str, messages: list[dict]) -> str:
+def call_llm(backend: str, model: str, messages: list[dict],
+             max_tokens: int = 0) -> str:
+    """max_tokens 를 주지 않으면 프로바이더 기본값을 쓴다.
+
+    기본값은 대개 4096 토큰이고, 한국어로는 7~8천 자쯤에서 잘린다. 실제로
+    자율 프로젝트가 여기 걸렸다 — 초안이 매번 스크립트 중간에서 끊겼고,
+    리뷰어는 "코드가 잘려 실행 불가"라고 반려했고, 다시 써도 같은 자리에서
+    또 잘렸다. 모델이 못 쓰는 게 아니라 자리가 없었던 것이다.
+    """
+    extra = {"max_tokens": max_tokens} if max_tokens else {}
     if backend == "router":
         return _post_chat(f"{ROUTER_BASE_URL}/chat/completions",
-                          {"model": model, "messages": messages, "stream": False},
+                          {"model": model, "messages": messages, "stream": False, **extra},
                           {"Authorization": f"Bearer {_router_key()}"},
                           f"라우터({model})")
     if backend == "openrouter":
         return _post_chat(OPENROUTER_CHAT_URL,
-                          {"model": model, "messages": messages},
+                          {"model": model, "messages": messages, **extra},
                           {"Authorization": f"Bearer {OPENROUTER_API_KEY}",
                            "HTTP-Referer": "https://myung-tech.internal",
                            "X-Title": "Myung-Tech Orchestration"},
@@ -281,14 +290,14 @@ def call_llm(backend: str, model: str, messages: list[dict]) -> str:
             "되지 않았습니다. `ollama serve` 를 실행한 뒤 다시 시도하세요.")
     try:
         return _post_chat(f"{OLLAMA_BASE_URL}/v1/chat/completions",
-                          {"model": model, "messages": messages, "stream": False},
+                          {"model": model, "messages": messages, "stream": False, **extra},
                           {}, f"Ollama({model})")
     except RuntimeError as exc:
         if "연결 실패" not in str(exc):
             raise
         time.sleep(2.0)
         return _post_chat(f"{OLLAMA_BASE_URL}/v1/chat/completions",
-                          {"model": model, "messages": messages, "stream": False},
+                          {"model": model, "messages": messages, "stream": False, **extra},
                           {}, f"Ollama({model}, 재시도)")
 
 
