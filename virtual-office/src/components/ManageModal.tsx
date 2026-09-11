@@ -35,7 +35,11 @@ async function saveCredentials(service: string, payload: Record<string, string>)
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     });
-    return r.ok ? `✅ ${service} 저장 완료` : `❌ 저장 실패`;
+    if (r.ok) return `✅ ${service} 저장 완료`;
+    // 예전에는 "❌ 저장 실패" 한 마디였다. 서버는 이유를 말해 주는데(틀린 칸에
+    // 넣은 값, 허용되지 않은 키) 화면이 그걸 버렸다.
+    const body = await r.json().catch(() => null);
+    return `❌ ${service} — ${body?.error ?? '저장 실패'}`;
   } catch { return '❌ 서버 미연결'; }
 }
 
@@ -63,9 +67,12 @@ function StatusBadge({ kind }: { kind: keyof typeof BADGE }) {
 }
 
 /* ── 입력 필드 ── */
-function Field({ label, hint, placeholder, value, onChange, secret }: {
+function Field({ label, hint, placeholder, value, onChange, secret, saved }: {
   label: string; hint?: string; placeholder?: string;
   value: string; onChange: (v: string) => void; secret?: boolean;
+  /** 서버에 이미 저장된 값의 흔적(끝 4자리·길이). 입력칸이 빈칸으로 열려도
+   *  "저장돼 있다" 는 것이 보여야 한다 — 안 보이면 다시 채우려다 엉뚱한 칸에 넣는다. */
+  saved?: string;
 }) {
   const [show, setShow] = useState(false);
   return (
@@ -75,7 +82,7 @@ function Field({ label, hint, placeholder, value, onChange, secret }: {
         <input
           className="hm-input font-mono"
           type={secret && !show ? 'password' : 'text'}
-          placeholder={placeholder}
+          placeholder={saved ? `저장됨 ${saved} — 바꿀 때만 입력` : placeholder}
           value={value}
           onChange={e => onChange(e.target.value)}
           style={{ paddingRight: secret ? 36 : undefined }}
@@ -87,6 +94,11 @@ function Field({ label, hint, placeholder, value, onChange, secret }: {
           }}>{show ? '🙈' : '👁'}</button>
         )}
       </div>
+      {saved && !value && (
+        <div style={{ fontSize: 10, color: 'var(--green, #0ffd6a)', marginTop: 3 }}>
+          ✓ 저장된 값 있음 {saved} · 비워 두고 저장하면 그대로 유지됩니다
+        </div>
+      )}
       {hint && <div style={{ fontSize: 10, color: 'var(--muted2)', marginTop: 3 }}>{hint}</div>}
     </div>
   );
@@ -191,6 +203,7 @@ export default function ManageModal({ onClose, agentCount, globalModel, onOpenTe
   const [tab,         setTab]         = useState<Tab>('대시보드');
   const [toast,       setToast]       = useState('');
   const [connKeys,    setConnKeys]    = useState<Record<string, boolean>>({});
+  const [connHints,   setConnHints]   = useState<Record<string, string>>({});
   const [ytOauth,     setYtOauth]     = useState<{ connected: boolean; has_client: boolean } | null>(null);
   const [ytBusy,      setYtBusy]      = useState(false);
 
@@ -254,7 +267,6 @@ export default function ManageModal({ onClose, agentCount, globalModel, onOpenTe
   const [ppMode,      setPpMode]      = useState<'live'|'sandbox'>('live');
   const [tossKey,     setTossKey]     = useState('');
   const [ghToken,     setGhToken]     = useState('');
-  const [ghRepo,      setGhRepo]      = useState('');
   const [hfToken,     setHfToken]     = useState('');
 
   // 병렬 연결 진행 상태
@@ -268,7 +280,7 @@ export default function ManageModal({ onClose, agentCount, globalModel, onOpenTe
 
   /* 저장된 키 로드 */
   useEffect(() => {
-    fetch('/api/config/load').then(r => r.json()).then(d => setConnKeys(d.keys ?? {})).catch(() => {});
+    fetch('/api/config/load').then(r => r.json()).then(d => { setConnKeys(d.keys ?? {}); setConnHints(d.hints ?? {}); }).catch(() => {});
     api.ytOauthStatus().then(d => d && setYtOauth(d));
     void refreshIntegrations();
   }, [refreshIntegrations]);
@@ -314,7 +326,12 @@ export default function ManageModal({ onClose, agentCount, globalModel, onOpenTe
   const save = useCallback(async (service: string, payload: Record<string, string>) => {
     const msg = await saveCredentials(service, payload);
     showToast(msg);
-    fetch('/api/config/load').then(r => r.json()).then(d => setConnKeys(d.keys ?? {})).catch(() => {});
+    if (msg.startsWith('✅')) {
+      for (const setter of [setTgToken, setTgChatId, setYtKey, setYtChannel, setYtOauthId,
+                            setYtOauthSec, setPpClientId, setPpClientSec, setTossKey,
+                            setGhToken, setHfToken]) setter('');
+    }
+    fetch('/api/config/load').then(r => r.json()).then(d => { setConnKeys(d.keys ?? {}); setConnHints(d.hints ?? {}); }).catch(() => {});
     void refreshIntegrations();
   }, [refreshIntegrations]);
 
@@ -444,7 +461,7 @@ export default function ManageModal({ onClose, agentCount, globalModel, onOpenTe
     } else {
       log('❌ 태스크 생성 실패');
     }
-    fetch('/api/config/load').then(r => r.json()).then(d => setConnKeys(d.keys ?? {})).catch(() => {});
+    fetch('/api/config/load').then(r => r.json()).then(d => { setConnKeys(d.keys ?? {}); setConnHints(d.hints ?? {}); }).catch(() => {});
     setBatchRunning(false);
   };
 
@@ -837,9 +854,9 @@ export default function ManageModal({ onClose, agentCount, globalModel, onOpenTe
               onSave={() => save('텔레그램 봇', { TELEGRAM_BOT_TOKEN: tgToken, TELEGRAM_CHAT_ID: tgChatId })}
               onHelp="https://core.telegram.org/bots#how-do-i-create-a-bot"
             >
-              <Field label="Bot Token" placeholder="123456789:ABCdef..." value={tgToken} onChange={setTgToken} secret
+              <Field label="Bot Token" placeholder="123456789:ABCdef..." value={tgToken} saved={connHints.TELEGRAM_BOT_TOKEN} onChange={setTgToken} secret
                 hint="@BotFather에서 /newbot으로 발급 (숫자:문자)" />
-              <Field label="Chat ID" placeholder="비워두면 자동 감지" value={tgChatId} onChange={setTgChatId}
+              <Field label="Chat ID" placeholder="비워두면 자동 감지" value={tgChatId} saved={connHints.TELEGRAM_CHAT_ID} onChange={setTgChatId}
                 hint="봇한테 메시지 1번 보내고 비운 채 저장하면 자동 입력" />
             </IntegCard>
 
@@ -852,9 +869,9 @@ export default function ManageModal({ onClose, agentCount, globalModel, onOpenTe
               onSave={() => save('YouTube API', { YOUTUBE_API_KEY: ytKey, YOUTUBE_CHANNEL_ID: ytChannel })}
               onHelp="https://console.cloud.google.com/"
             >
-              <Field label="API Key" value={ytKey} onChange={setYtKey} secret
+              <Field label="API Key" value={ytKey} saved={connHints.YOUTUBE_API_KEY} onChange={setYtKey} secret
                 hint="Cloud Console → YouTube Data API v3 → API 키" />
-              <Field label="Channel ID" placeholder="UCxxx..." value={ytChannel} onChange={setYtChannel} />
+              <Field label="Channel ID" placeholder="UCxxx..." value={ytChannel} saved={connHints.YOUTUBE_CHANNEL_ID} onChange={setYtChannel} />
             </IntegCard>
 
             {/* YouTube Analytics OAuth */}
@@ -878,8 +895,8 @@ export default function ManageModal({ onClose, agentCount, globalModel, onOpenTe
                 }}>⚡ 자동 연결</button>
               }
             >
-              <Field label="Client ID" value={ytOauthId} onChange={setYtOauthId} secret />
-              <Field label="Client Secret" value={ytOauthSec} onChange={setYtOauthSec} secret
+              <Field label="Client ID" value={ytOauthId} saved={connHints.YOUTUBE_OAUTH_CLIENT_ID} onChange={setYtOauthId} secret />
+              <Field label="Client Secret" value={ytOauthSec} saved={connHints.YOUTUBE_OAUTH_CLIENT_SECRET} onChange={setYtOauthSec} secret
                 hint="Cloud Console에서 승인된 리디렉션 URI에 http://127.0.0.1:5814/yt-oauth-callback 추가" />
             </IntegCard>
 
@@ -918,8 +935,8 @@ export default function ManageModal({ onClose, agentCount, globalModel, onOpenTe
                 </select>
                 <div style={{ fontSize: 10, color: 'var(--muted2)', marginTop: 3 }}>실제 결제는 live, 테스트는 sandbox</div>
               </div>
-              <Field label="Client ID" value={ppClientId} onChange={setPpClientId} secret />
-              <Field label="Client Secret" value={ppClientSec} onChange={setPpClientSec} secret />
+              <Field label="Client ID" value={ppClientId} saved={connHints.PAYPAL_CLIENT_ID} onChange={setPpClientId} secret />
+              <Field label="Client Secret" value={ppClientSec} saved={connHints.PAYPAL_CLIENT_SECRET} onChange={setPpClientSec} secret />
             </IntegCard>
 
             {/* 토스페이먼츠 */}
@@ -929,7 +946,7 @@ export default function ManageModal({ onClose, agentCount, globalModel, onOpenTe
               onSave={() => save('토스페이먼츠', { TOSS_SECRET_KEY: tossKey })}
               onHelp="https://docs.tosspayments.com/"
             >
-              <Field label="시크릿 키" value={tossKey} onChange={setTossKey} secret
+              <Field label="시크릿 키" value={tossKey} saved={connHints.TOSS_SECRET_KEY} onChange={setTossKey} secret
                 hint="토스페이먼츠 개발자센터 → API 키 → 시크릿 키(live_sk_... 실거래 / test_sk_... 테스트)" />
             </IntegCard>
 
@@ -939,12 +956,11 @@ export default function ManageModal({ onClose, agentCount, globalModel, onOpenTe
               onGuide={() => setGuide('github')}
               onProbe={() => void probeOne('github')}
               probing={probing === 'github'}
-              onSave={() => save('GitHub', { GITHUB_TOKEN: ghToken, GITHUB_REPO: ghRepo })}
+              onSave={() => save('GitHub', { GITHUB_TOKEN: ghToken })}
               onHelp="https://github.com/settings/tokens"
             >
-              <Field label="Personal Access Token" value={ghToken} onChange={setGhToken} secret
-                hint="github.com/settings/tokens → repo(Contents) 권한" />
-              <Field label="지식 저장소" placeholder="owner/repo" value={ghRepo} onChange={setGhRepo} />
+              <Field label="Personal Access Token" value={ghToken} saved={connHints.GITHUB_TOKEN} onChange={setGhToken} secret
+                hint="github_pat_… · Settings → Developer settings → Fine-grained tokens. 고칠 레포는 '내 서비스' 탭에 등록된 것을 씁니다" />
             </IntegCard>
 
             {/* HuggingFace */}
@@ -954,7 +970,7 @@ export default function ManageModal({ onClose, agentCount, globalModel, onOpenTe
               onSave={() => save('HuggingFace', { HUGGINGFACE_TOKEN: hfToken })}
               onHelp="https://huggingface.co/settings/tokens"
             >
-              <Field label="Access Token" placeholder="hf_..." value={hfToken} onChange={setHfToken} secret
+              <Field label="Access Token" placeholder="hf_..." value={hfToken} saved={connHints.HUGGINGFACE_TOKEN} onChange={setHfToken} secret
                 hint="huggingface.co/settings/tokens → write 권한" />
             </IntegCard>
           </div>

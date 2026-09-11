@@ -273,6 +273,46 @@ ALLOWED_ENV_KEYS = {
     "YOUTUBE_OAUTH_REFRESH_TOKEN",
 }
 
+def _check_credential(key: str, value: str) -> str:
+    """값이 그 칸에 들어갈 모양인지. 틀렸으면 사람이 읽을 이유, 맞으면 빈 문자열.
+
+    YouTube Data API 카드의 'API Key' 와 'Channel ID' 칸에 OAuth 클라이언트 ID 와
+    보안 비밀번호가 들어가, 잘 되던 키를 덮어쓴 일이 있었다. 두 카드가 나란히
+    있고 입력칸이 늘 빈칸으로 보이니 둘 다 채워야 하는 줄 알게 된다. 모양이
+    뚜렷한 값은 저장 전에 걸러서, 틀린 칸에 넣었다고 바로 알려 준다.
+    """
+    import re as _re
+    v = value.strip()
+    if key == "YOUTUBE_API_KEY" and not v.startswith("AIza"):
+        if v.endswith(".apps.googleusercontent.com"):
+            return ("이건 OAuth 클라이언트 ID 입니다. 아래 'YouTube Analytics · 업로드' "
+                    "카드의 Client ID 칸에 넣으세요. API 키는 AIza 로 시작합니다.")
+        return "YouTube API 키는 AIza 로 시작하는 39자입니다."
+    if key == "YOUTUBE_CHANNEL_ID" and not _re.fullmatch(r"UC[\w-]{22}", v):
+        if v.startswith("GOCSPX-"):
+            return ("이건 OAuth 보안 비밀번호입니다. 아래 'YouTube Analytics · 업로드' "
+                    "카드의 Client Secret 칸에 넣으세요.")
+        return "채널 ID 는 UC 로 시작하는 24자입니다(@핸들이 아닙니다)."
+    if key == "YOUTUBE_OAUTH_CLIENT_ID" and not v.endswith(".apps.googleusercontent.com"):
+        return "OAuth 클라이언트 ID 는 .apps.googleusercontent.com 으로 끝납니다."
+    if key == "YOUTUBE_OAUTH_CLIENT_SECRET" and (
+            v.endswith(".apps.googleusercontent.com") or v.startswith("AIza")):
+        return "보안 비밀번호 칸에 다른 값(클라이언트 ID 또는 API 키)이 들어갔습니다."
+    if key == "GITHUB_TOKEN" and not v.startswith(("github_pat_", "ghp_")):
+        return "GitHub 토큰은 github_pat_ (또는 ghp_) 로 시작합니다."
+    if key == "PAYPAL_MODE" and v not in ("sandbox", "live"):
+        return "PayPal 모드는 sandbox 또는 live 입니다."
+    if key == "TELEGRAM_BOT_TOKEN" and not _re.fullmatch(r"\d+:[\w-]{30,}", v):
+        return "텔레그램 봇 토큰은 '숫자:문자열' 모양입니다."
+    return ""
+
+
+def _mask(value: str) -> str:
+    """저장된 값의 흔적만. 화면에 '들어 있다' 는 사실과 어느 값인지만 보인다."""
+    v = value.strip()
+    return f"…{v[-4:]} ({len(v)}자)" if len(v) > 8 else f"({len(v)}자)"
+
+
 sys.path.insert(0, str(ROOT / "shared_memory"))
 sys.path.insert(0, str(ROOT / "bridge"))
 sys.path.insert(0, str(ROOT / "orchestrator"))
@@ -839,13 +879,18 @@ class Handler(BaseHTTPRequestHandler):
         # ── GET /api/config/load  (저장된 키 이름 목록 반환 — 값은 마스킹)
         elif path == "/api/config/load":
             keys: dict[str, bool] = {}
+            # 값 자체는 보내지 않는다. 끝 4자리와 길이만 — 입력칸이 빈칸으로 열려도
+            # "저장돼 있다" 는 것과 "어느 값이 들어 있는지" 는 알 수 있어야 한다.
+            hints: dict[str, str] = {}
             if ENV_FILE.exists():
                 for line in ENV_FILE.read_text(encoding="utf-8").splitlines():
                     if "=" in line and not line.startswith("#"):
                         k = line.split("=")[0].strip()
                         v = line.split("=", 1)[1].strip().strip('"')
                         keys[k] = bool(v)
-            _json_resp(self, 200, {"keys": keys})
+                        if v and k in ALLOWED_ENV_KEYS:
+                            hints[k] = _mask(v)
+            _json_resp(self, 200, {"keys": keys, "hints": hints})
 
         # ── GET /api/models  (Ollama 설치 모델 목록)
         elif path == "/api/models":
@@ -1168,20 +1213,30 @@ class Handler(BaseHTTPRequestHandler):
                     "error": f"허용되지 않은 설정 키: {', '.join(sorted(unknown))}",
                 })
                 return
+            # 빈칸은 "바꾸지 않음" 이다. 예전에는 빈칸으로 저장을 누르면 그 키의
+            # 기존 값이 지워졌다 — 입력칸이 늘 빈칸으로 열리니, 한 칸만 고치려고
+            # 저장을 누르면 나머지 칸의 값이 사라졌다.
+            given = {k: str(v).strip() for k, v in body.items() if str(v or "").strip()}
+            if not given:
+                _json_resp(self, 400, {"ok": False, "error": "입력한 값이 없습니다 — 바꿀 칸만 채우고 저장하세요."})
+                return
+            problems = [f"{k}: {msg}" for k, v in given.items()
+                        if (msg := _check_credential(k, v))]
+            vals = list(given.values())
+            if len(set(vals)) != len(vals):
+                problems.append("같은 값이 두 칸에 들어갔습니다 — 각 칸에 맞는 값을 넣으세요.")
+            if problems:
+                _json_resp(self, 400, {"ok": False, "error": " / ".join(problems)})
+                return
             lines: list[str] = []
             if ENV_FILE.exists():
-                existing = ENV_FILE.read_text(encoding="utf-8").splitlines()
-                # 이미 있는 키는 덮어쓰기
-                keys_to_update = set(body.keys())
-                for line in existing:
-                    key = line.split("=")[0].strip()
-                    if key not in keys_to_update:
+                for line in ENV_FILE.read_text(encoding="utf-8").splitlines():
+                    if line.split("=")[0].strip() not in given:
                         lines.append(line)
-            for k, v in body.items():
-                if v:
-                    lines.append(f'{k}="{v}"')
+            for k, v in given.items():
+                lines.append(f'{k}="{v}"')
             ENV_FILE.write_text("\n".join(lines) + "\n", encoding="utf-8")
-            _json_resp(self, 200, {"ok": True, "saved": list(body.keys())})
+            _json_resp(self, 200, {"ok": True, "saved": list(given.keys())})
 
         # ── POST /api/workflow/run  (UI 채팅 → 즉시 태스크 + 폴링 결과 반환)
         elif path == "/api/workflow/run":
