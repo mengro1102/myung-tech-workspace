@@ -278,6 +278,34 @@ def _say(pid: str, from_dept: str, from_kind: str, to_dept: str, to_kind: str,
         print(f"[project] 대화 기록 실패(무시): {exc}", file=sys.stderr)
 
 
+_WRAPPED = re.compile(
+    r"^\s*(?:\*\*)?\[파일\](?:\*\*)?[^\n]*\n+```([\w+-]*)[ \t]*\n(.*)\n```\s*$", re.S)
+
+
+def _unwrap(text: str) -> str:
+    """산출물 전체를 감싼 '[파일] 경로' + 코드 블록 포장을 벗긴다.
+
+    디스패처의 시스템 프롬프트에는 "파일로 남길 것은 [파일] 경로 + 코드 블록"
+    이라는 약속이 있고, 프로젝트 초안도 같은 프롬프트를 쓴다. 그래서 기획서
+    전체가 ```markdown 한 덩어리로 들어왔다 — 화면에서는 제목·표가 렌더링되지
+    않고, 승인하면 파일에도 포장째 저장됐다. 프로젝트 산출물은 완료되면 어차피
+    파일이 되므로 포장이 필요 없다.
+
+    문서(markdown/md/무표시)는 본문만 남기고, 코드는 코드 블록으로 남긴다.
+    """
+    t = (text or "").strip()
+    m = _WRAPPED.match(t)
+    if not m:
+        lines = t.splitlines()
+        if lines and lines[0].strip().strip("*").startswith("[파일]"):
+            t = "\n".join(lines[1:]).strip()
+        return t
+    lang, inner = m.group(1).lower(), m.group(2).strip()
+    if lang in ("", "markdown", "md"):
+        return inner
+    return f"```{lang}\n{inner}\n```"
+
+
 def _split_notes(text: str) -> tuple[str, str, str]:
     """초안 끝의 [한마디]·[인계] 줄을 떼어 낸다 → (본문, 한마디, 인계).
 
@@ -557,6 +585,9 @@ def _do_draft(p: dict) -> dict:
                "대화로 전달되고, 산출물에는 들어가지 않습니다.\n"
                "[한마디] 검토자에게 — 무엇에 집중했고 어디를 봐 달라는지 한두 문장\n"
                "[인계] 다음 담당자에게 — 이어받을 때 꼭 알아야 할 것 한두 문장")
+    system += ("\n\n이 산출물은 완료되면 자동으로 파일이 됩니다. [파일] 표시를 쓰거나 "
+               "본문 전체를 코드 블록으로 감싸지 마세요 — 문서는 마크다운 본문 그대로, "
+               "코드는 코드 블록으로 쓰세요.")
 
     _emit(pid, d["dept"], f"초안 작성 — {d['title']}")
     out, exhausted = _ask(p, d["dept"], system, user, max_tokens=DRAFT_MAX_TOKENS)
@@ -564,6 +595,7 @@ def _do_draft(p: dict) -> dict:
         return _pause(p, "초안 작성 중 상위 모델 할당량이 바닥났습니다.")
 
     out, memo, handoff_note = _split_notes(out)
+    out = _unwrap(out)
     notes = dict(p.get("notes") or {})
     notes[d["id"]] = {"memo": memo, "handoff": handoff_note}
     projects.update(pid, {"notes": notes})
@@ -711,7 +743,7 @@ def _finish(p: dict) -> dict:
     # 산출물을 파일 제안으로 올린다. 승인해야 디스크에 쓰인다 — 자율 실행이
     # 사람 모르게 파일을 만드는 일은 없어야 한다.
     for d in projects.deliverables(p):
-        body = p.get("artifacts", {}).get(d["id"], "")
+        body = _unwrap(p.get("artifacts", {}).get(d["id"], ""))
         if not body:
             continue
         safe = re.sub(r"[^\w가-힣-]+", "_", d["title"]).strip("_")[:40] or d["id"]
