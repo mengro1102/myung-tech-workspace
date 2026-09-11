@@ -844,7 +844,7 @@ export default function ManageModal({ onClose, agentCount, globalModel, onOpenTe
             </IntegCard>
 
             {/* YouTube Data API */}
-            <IntegCard icon="📺" title="YouTube Data API" desc="내 채널 + 경쟁 채널 분석, 댓글 답장 큐. 비공개 데이터는 OAuth 별도."
+            <IntegCard icon="📺" title="YouTube Data API" desc="채널·영상 공개 지표(구독·조회·좋아요)를 에이전트 분석의 근거로 넣습니다. 비공개 지표와 업로드는 아래 OAuth."
               status={integStatus.youtube_data} saved={!!connKeys.YOUTUBE_API_KEY}
               onGuide={() => setGuide('youtube-data')}
               onProbe={() => void probeOne('youtube_data')}
@@ -858,7 +858,7 @@ export default function ManageModal({ onClose, agentCount, globalModel, onOpenTe
             </IntegCard>
 
             {/* YouTube Analytics OAuth */}
-            <IntegCard icon="📊" title="YouTube Analytics (OAuth)" desc="시청 지속률·트래픽·구독 증감. 저장 후 '⚡ 자동 연결'로 구글 로그인."
+            <IntegCard icon="📊" title="YouTube Analytics · 업로드 (OAuth)" desc="시청 지속률·트래픽·구독 증감 읽기 + 결재 승인 후 영상 업로드·수정. 저장 후 '⚡ 자동 연결'로 구글 로그인."
               status={integStatus.youtube_oauth} saved={!!ytOauth?.connected}
               onGuide={() => setGuide('youtube-oauth')}
               onProbe={() => void probeOne('youtube_oauth')}
@@ -902,7 +902,7 @@ export default function ManageModal({ onClose, agentCount, globalModel, onOpenTe
             </div>
 
             {/* PayPal */}
-            <IntegCard icon="💰" title="PayPal (매출 분석)" desc="결제 거래 분석. 💰 매출 대시보드 + 새 결제 알림에 사용."
+            <IntegCard icon="💰" title="PayPal (수익 조회)" desc="잔액과 최근 30일 입금·수수료·순수익을 에이전트 분석의 근거로 넣습니다. 읽기 전용 — 송금·환불은 하지 않습니다."
               status={integStatus.paypal} saved={!!connKeys.PAYPAL_CLIENT_ID}
               onGuide={() => setGuide('paypal')}
               onProbe={() => void probeOne('paypal')}
@@ -923,7 +923,7 @@ export default function ManageModal({ onClose, agentCount, globalModel, onOpenTe
             </IntegCard>
 
             {/* 토스페이먼츠 */}
-            <IntegCard icon="🏦" title="토스페이먼츠 (매출 분석)" desc="토스 결제 거래(KRW)를 분석. 💰 매출 대시보드 + 자신분석에 PayPal과 합쳐서 보여줍니다."
+            <IntegCard icon="🏦" title="토스페이먼츠" desc="키 저장만 됩니다. 조회 기능은 아직 없습니다 — PayPal 과 같은 방식으로 붙일 수 있습니다."
               saved={!!connKeys.TOSS_SECRET_KEY}
               onGuide={() => setGuide('toss')}
               onSave={() => save('토스페이먼츠', { TOSS_SECRET_KEY: tossKey })}
@@ -934,7 +934,7 @@ export default function ManageModal({ onClose, agentCount, globalModel, onOpenTe
             </IntegCard>
 
             {/* GitHub */}
-            <IntegCard icon="🐙" title="GitHub — ⚡ 단기 기억" desc="지식 네트워크(단기 기억)를 GitHub 레포에 버전관리로 동기화. 어디서든 불러오고 사람이 직접 편집도."
+            <IntegCard icon="🐙" title="GitHub (서비스 레포)" desc="'내 서비스' 에 등록한 레포를 읽고, 결재 승인 후 수정 PR 을 엽니다. 머지는 직접. (위키 동기화는 이 토큰과 무관 — 로컬 git 으로 합니다)"
               status={integStatus.github} saved={!!connKeys.GITHUB_TOKEN}
               onGuide={() => setGuide('github')}
               onProbe={() => void probeOne('github')}
@@ -948,7 +948,7 @@ export default function ManageModal({ onClose, agentCount, globalModel, onOpenTe
             </IntegCard>
 
             {/* HuggingFace */}
-            <IntegCard icon="🤗" title="HuggingFace — 🎯 장기 기억" desc="파인튜닝 모델 & 데이터셋을 HuggingFace Hub에 업로드·로드합니다."
+            <IntegCard icon="🤗" title="HuggingFace (나중 단계)" desc="파인튜닝 모델 업로드용. 지금은 쓰지 않습니다 — 장기기억은 위키 축적으로 먼저 동작합니다. 지금 넣지 않아도 됩니다."
               saved={!!connKeys.HUGGINGFACE_TOKEN}
               onGuide={() => setGuide('huggingface')}
               onSave={() => save('HuggingFace', { HUGGINGFACE_TOKEN: hfToken })}
