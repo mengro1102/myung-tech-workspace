@@ -293,8 +293,11 @@ export default function ManageModal({ onClose, agentCount, globalModel, onOpenTe
         await new Promise(r => setTimeout(r, 3000));
         const fin = await api.ytOauthFinish();
         if (fin?.ok) {
-          showToast('✅ YouTube Analytics 연결됨');
+          showToast('✅ YouTube 연결됨 — 지표·업로드 권한을 받았습니다');
           setYtOauth(await api.ytOauthStatus());
+          // 카드 배지는 실제 호출 결과(integStatus)를 따른다. 토큰을 받았으면
+          // 그 자리에서 한 번 불러 봐야 '연결 확인됨' 으로 바뀐다.
+          void refreshIntegrations();
           return;
         }
         if (fin && !fin.pending) {

@@ -57,7 +57,17 @@ DEFAULT_GLOBAL_MODEL = "qwen2.5:7b"
 # 저장할 이유가 없다.
 YT_OAUTH_PORT = 5814
 YT_REDIRECT_URI = f"http://127.0.0.1:{YT_OAUTH_PORT}/yt-oauth-callback"
-YT_SCOPE = "https://www.googleapis.com/auth/yt-analytics.readonly"
+# 한 번의 동의로 세 가지를 모두 받는다. 예전에는 analytics 읽기 하나뿐이었는데,
+# 그 상태로 업로드 기능을 붙이자 "자동 연결" 을 끝낸 사람이 첫 업로드에서
+# 403(insufficientPermissions)을 만나고 동의부터 다시 해야 했다.
+#   yt-analytics.readonly  지표 읽기
+#   youtube.upload         영상 올리기
+#   youtube.force-ssl      제목·설명·공개범위 수정 (videos.update)
+YT_SCOPE = " ".join([
+    "https://www.googleapis.com/auth/yt-analytics.readonly",
+    "https://www.googleapis.com/auth/youtube.upload",
+    "https://www.googleapis.com/auth/youtube.force-ssl",
+])
 _yt_oauth: dict = {"state": "", "code": "", "error": "", "started_at": 0.0}
 
 
