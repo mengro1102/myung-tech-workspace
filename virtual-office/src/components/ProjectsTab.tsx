@@ -10,7 +10,8 @@
  * 하면 승인을 기다리는 프로젝트가 며칠씩 방치된다.
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { api, deptLabels, type ProjectRow, type ProjectStatus } from '../api';
+import { api, deptLabels, type DialogueEntry, type ProjectRow, type ProjectStatus } from '../api';
+import AgentChat from './AgentChat';
 
 const STATUS_LABEL: Record<ProjectStatus, string> = {
   intake:            '접수',
@@ -200,6 +201,29 @@ export default function ProjectsTab() {
   );
 }
 
+/* 이 프로젝트에서 에이전트들이 주고받은 말. 진행 기록(steps)이 '무슨 일이
+   있었나' 라면 이쪽은 '누가 누구에게 뭐라고 했나' 다. */
+function DialogueBlock({ pid }: { pid: string }) {
+  const [rows, setRows] = useState<DialogueEntry[] | null>(null);
+  useEffect(() => {
+    let alive = true;
+    const load = () => api.dialogue(300, pid).then(r => { if (alive && r?.dialogue) setRows(r.dialogue); });
+    void load();
+    const t = setInterval(load, 5000);
+    return () => { alive = false; clearInterval(t); };
+  }, [pid]);
+  if (!rows || rows.length === 0) return null;
+  return (
+    <div className="pj-block">
+      <h3 className="pj-h3">
+        에이전트 대화
+        <span className="pj-budget">{rows.length}마디{rows[0]?.restored ? ' · 단계 기록에서 복원' : ''}</span>
+      </h3>
+      <div className="pj-dialogue"><AgentChat entries={rows} /></div>
+    </div>
+  );
+}
+
 function Detail({ p }: { p: ProjectRow }) {
   const ds = p.plan?.deliverables ?? [];
   const steps = p.steps ?? [];
@@ -243,6 +267,8 @@ function Detail({ p }: { p: ProjectRow }) {
           </ul>
         </div>
       )}
+
+      <DialogueBlock pid={p.id} />
 
       {steps.length > 0 && (
         <div className="pj-block">

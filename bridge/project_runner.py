@@ -252,14 +252,100 @@ def _who(dept: str, kind: str) -> str:
 
 
 def _say(pid: str, from_dept: str, from_kind: str, to_dept: str, to_kind: str,
-         text: str) -> None:
-    """사무실에 보이는 한 마디 — '[pid] 말한 사람 → 들은 사람: 내용'."""
+         text: str, *, kind: str = "", detail: str = "",
+         score: int | None = None) -> None:
+    """에이전트 사이에 오간 한 마디. 두 곳에 남긴다.
+
+      · 이벤트 — 사무실 말풍선용 짧은 한 줄 ('[pid] 말한 사람 → 들은 사람: 내용')
+      · 프로젝트의 대화 기록 — 전문(detail)까지. 말풍선은 몇 초 뒤 사라지고
+        두 줄에서 잘리므로, 관리자가 누가 누구에게 무엇을 말했는지 끝까지
+        읽으려면 따로 남아 있어야 한다.
+    """
+    speaker, listener = _who(from_dept, from_kind), _who(to_dept, to_kind)
     try:
-        dispatcher.emit(from_dept, to_dept,
-                        f"[{pid}] {_who(from_dept, from_kind)} → "
-                        f"{_who(to_dept, to_kind)}: {text}")
+        dispatcher.emit(from_dept, to_dept, f"[{pid}] {speaker} → {listener}: {text}")
     except Exception:  # noqa: BLE001
         pass
+    try:
+        cur = projects.get(pid) or {}
+        log = list(cur.get("dialogue") or [])
+        log.append({"at": time.time(), "from": speaker, "from_dept": from_dept,
+                    "to": listener, "to_dept": to_dept, "kind": kind or "say",
+                    "text": text[:200], "detail": (detail or text)[:3000],
+                    "score": score})
+        projects.update(pid, {"dialogue": log[-300:]})
+    except Exception as exc:  # noqa: BLE001
+        print(f"[project] 대화 기록 실패(무시): {exc}", file=sys.stderr)
+
+
+def _split_notes(text: str) -> tuple[str, str, str]:
+    """초안 끝의 [한마디]·[인계] 줄을 떼어 낸다 → (본문, 한마디, 인계).
+
+    그대로 두면 산출물 파일에 동료에게 한 말이 섞인다. 떼어 낸 두 줄은
+    에이전트가 **자기 말로** 쓴 것이라, 대화 기록에 그대로 쓴다 — 시스템이
+    지어 붙이는 "초안 제출 — 제목" 보다 무엇에 집중했는지가 드러난다.
+    """
+    body, memo, hand = [], [], []
+    for line in text.splitlines():
+        t = line.strip().lstrip("-*•> ").replace("**", "").strip()
+        if t.startswith("[한마디]"):
+            memo.append(t[len("[한마디]"):].strip(" :：-—"))
+            continue
+        if t.startswith("[인계]"):
+            hand.append(t[len("[인계]"):].strip(" :：-—"))
+            continue
+        body.append(line)
+    return "\n".join(body).rstrip(), " ".join(memo).strip(), " ".join(hand).strip()
+
+
+def _plan_brief(plan: dict) -> str:
+    lines = [f"의도: {plan.get('intent', '')}", "", "배분:"]
+    for i, d in enumerate(plan.get("deliverables") or [], 1):
+        lines.append(f"{i}. {d['title']} — {_who(d['dept'], 'maker')} ({d['dept']})")
+    return "\n".join(lines)
+
+
+def dialogue_of(p: dict) -> list[dict]:
+    """프로젝트의 대화 기록.
+
+    기록 기능이 생기기 전에 돈 프로젝트는 단계 기록(steps)으로 되살린다. 검토
+    의견은 steps 에 300자까지 남아 있어 내용이 완전히 사라지지는 않았다.
+    review2 단계의 dept 는 검토자(오케스트레이터)라, 누구에게 한 말인지는
+    직전 초안의 부서로 거슬러 찾는다.
+    """
+    if p.get("dialogue"):
+        return list(p["dialogue"])
+    out: list[dict] = []
+    maker_dept = ""
+    first = (projects.deliverables(p) or [{"dept": ORCHESTRATOR}])[0]["dept"]
+    for st in p.get("steps") or []:
+        dept, ph = st.get("dept", ""), st.get("phase", "")
+        ok, sc, note = bool(st.get("ok")), st.get("score", -1), st.get("note", "")
+        sc_txt = f"({sc}점)" if isinstance(sc, int) and sc >= 0 else ""
+        if ph == "plan":
+            row = (ORCHESTRATOR, "lead", first, "maker", "plan",
+                   f"착수 회의 — {note}", p.get("intent") or note)
+        elif ph == "draft":
+            maker_dept = dept
+            row = (dept, "maker", dept, "reviewer", "submit" if ok else "retry",
+                   note if ok else f"다시 씁니다 — {note}", note)
+        elif ph == "review1":
+            row = (dept, "reviewer", ORCHESTRATOR if ok else dept,
+                   "lead" if ok else "maker", "pass" if ok else "reject",
+                   ("1차 통과" if ok else "반려") + sc_txt, note)
+        elif ph == "review2":
+            tgt = maker_dept or first
+            row = (ORCHESTRATOR, "lead", tgt, "maker", "pass" if ok else "reject",
+                   ("최종 통과" if ok else "반려") + sc_txt, note)
+        else:
+            continue
+        fd, fk, td, tk, kind, text, detail = row
+        out.append({"at": st.get("at", 0), "from": _who(fd, fk), "from_dept": fd,
+                    "to": _who(td, tk), "to_dept": td, "kind": kind,
+                    "text": text[:200], "detail": detail,
+                    "score": sc if isinstance(sc, int) and sc >= 0 else None,
+                    "restored": True})
+    return out
 
 
 def _sources(p: dict) -> str:
@@ -296,7 +382,8 @@ def _sources(p: dict) -> str:
     p["sources"] = text
     if names:
         _say(pid, "research_dept", "maker", ORCHESTRATOR, "lead",
-             "자료 조회 완료 — " + ", ".join(names))
+             "자료 조회 완료 — " + ", ".join(names), kind="research",
+             detail="조회한 자료: " + ", ".join(names) + "\n\n" + text[:1200])
     return text
 
 
@@ -431,7 +518,8 @@ def _do_plan(p: dict) -> dict:
     # '회의' 가 들어가면 사무실에서 사람들이 회의실로 모인다. 실제로 계획이
     # 나온 순간에만 모이게 한다.
     _say(pid, ORCHESTRATOR, "lead", plan["deliverables"][0]["dept"], "maker",
-         f"착수 회의 — 산출물 {len(plan['deliverables'])}개 배분, 사장님 승인 대기")
+         f"착수 회의 — 산출물 {len(plan['deliverables'])}개 배분, 사장님 승인 대기",
+         kind="plan", detail=_plan_brief(plan))
     return projects.get(pid) or p
 
 
@@ -465,11 +553,21 @@ def _do_draft(p: dict) -> dict:
     user += _grounding(p) + _handoff(p)
     system += ("\n\n[근거 자료]에 없는 구체적 수치·색상 코드·시간·조회수·인용을 지어내지 "
                "마세요. 모르는 것은 '확인 필요' 라고 적으세요.")
+    system += ("\n\n본문을 다 쓴 뒤 **맨 끝에 두 줄**을 덧붙이세요. 본문과 분리되어 동료에게 "
+               "대화로 전달되고, 산출물에는 들어가지 않습니다.\n"
+               "[한마디] 검토자에게 — 무엇에 집중했고 어디를 봐 달라는지 한두 문장\n"
+               "[인계] 다음 담당자에게 — 이어받을 때 꼭 알아야 할 것 한두 문장")
 
     _emit(pid, d["dept"], f"초안 작성 — {d['title']}")
     out, exhausted = _ask(p, d["dept"], system, user, max_tokens=DRAFT_MAX_TOKENS)
     if exhausted:
         return _pause(p, "초안 작성 중 상위 모델 할당량이 바닥났습니다.")
+
+    out, memo, handoff_note = _split_notes(out)
+    notes = dict(p.get("notes") or {})
+    notes[d["id"]] = {"memo": memo, "handoff": handoff_note}
+    projects.update(pid, {"notes": notes})
+    p["notes"] = notes
 
     if _truncated(out):
         # 리뷰어에게 물어볼 것도 없다. 원인이 분명하므로 바로 되먹인다.
@@ -494,7 +592,8 @@ def _do_draft(p: dict) -> dict:
     steps = _log(p, "draft", d["dept"], True, f"{d['title']} ({len(out)}자)")
     projects.update(pid, {"artifacts": arts, "steps": steps, "phase": "review1"})
     _say(pid, d["dept"], "maker", d["dept"], "reviewer",
-         f"초안 제출 — {d['title']} ({len(out)}자)")
+         memo or f"초안 제출 — {d['title']}", kind="submit",
+         detail=(memo + "\n\n" if memo else "") + f"「{d['title']}」 초안 {len(out)}자를 제출합니다.")
     return projects.get(pid) or p
 
 
@@ -563,7 +662,8 @@ def _do_review(p: dict, level: int) -> dict:
             projects.update(pid, patch)
             _emit(pid, reviewer, f"1차 통과 ({score}점)")
             _say(pid, d["dept"], "reviewer", ORCHESTRATOR, "lead",
-                 f"1차 통과({score}점) — 최종 검토 부탁드립니다")
+                 f"1차 통과({score}점) — 최종 검토 부탁드립니다",
+                 kind="pass", detail=feedback, score=score)
             return projects.get(pid) or p
         # 2차까지 통과 — 이 산출물은 끝났다.
         patch["phase"] = "draft"
@@ -572,12 +672,21 @@ def _do_review(p: dict, level: int) -> dict:
         _emit(pid, reviewer, f"2차 통과 ({score}점) — {d['title']} 완료")
         after = projects.get(pid) or p
         _say(pid, ORCHESTRATOR, "lead", d["dept"], "maker",
-             f"최종 통과({score}점) — {d['title']}")
+             f"최종 통과({score}점) — {d['title']}",
+             kind="pass", detail=feedback, score=score)
         nxt = projects.current(after)
         if nxt is not None:
             # 부서 간 인계. 다음 부서는 _handoff() 로 이 산출물을 실제로 받는다.
-            _say(pid, d["dept"], "maker", nxt["dept"], "maker",
-                 f"📦 {d['title']} 전달 — 이어서 '{nxt['title']}' 부탁합니다")
+            note = ((after.get("notes") or {}).get(d["id"]) or {}).get("handoff", "")
+            same = _who(d["dept"], "maker") == _who(nxt["dept"], "maker")
+            # 같은 사람이 다음 산출물도 맡으면 "강작가 → 강작가" 가 된다. 자기에게
+            # 인계하는 대화는 어색하므로 '이어서 쓴다' 로 말한다.
+            msg = (f"(이어서) '{nxt['title']}' 작성을 시작합니다" if same
+                   else note or f"📦 {d['title']} 전달 — 이어서 '{nxt['title']}' 부탁합니다")
+            _say(pid, d["dept"], "maker", nxt["dept"], "maker", msg,
+                 kind="continue" if same else "handoff",
+                 detail=(note + "\n\n" if note else "")
+                 + f"넘기는 것: 「{d['title']}」(검토 통과본)\n다음: 「{nxt['title']}」")
         if projects.current(after) is None:
             return _finish(after)
         return after
@@ -588,7 +697,8 @@ def _do_review(p: dict, level: int) -> dict:
     _emit(pid, reviewer, f"{label} 반려 ({score}점) — {feedback[:100]}")
     _say(pid, d["dept"] if level == 1 else ORCHESTRATOR,
          "reviewer" if level == 1 else "lead", d["dept"], "maker",
-         f"반려({score}점) — {' '.join(feedback.split())[:70]}")
+         f"반려({score}점) — {' '.join(feedback.split())[:70]}",
+         kind="reject", detail=feedback, score=score)
     return projects.get(pid) or p
 
 
@@ -636,7 +746,9 @@ def _finish(p: dict) -> dict:
         + (f"\n위키에 {len(archived)}건을 쌓았습니다 — 다음 질문부터 검색됩니다."
            if archived else ""))
     _emit(pid, ORCHESTRATOR, "프로젝트 완료")
-    _say(pid, ORCHESTRATOR, "lead", ORCHESTRATOR, "lead", "전체 브리핑 — 프로젝트 완료")
+    _say(pid, ORCHESTRATOR, "lead", ORCHESTRATOR, "lead", "전체 브리핑 — 프로젝트 완료",
+         kind="brief",
+         detail=_plan_brief(plan) + "\n\n모든 산출물이 부서 1차·총괄 2차 검토를 통과했습니다.")
     return projects.get(pid) or p
 
 
@@ -694,6 +806,9 @@ def approve(pid: str) -> dict | None:
     if p is None or p.get("status") != "awaiting_approval":
         return p
     _close_approval(pid, "approved")
+    _say(pid, ORCHESTRATOR, "lead",
+         (projects.deliverables(p) or [{"dept": ORCHESTRATOR}])[0]["dept"], "maker",
+         "사장님 착수 승인 — 시작합시다", kind="approve")
     _emit(pid, ORCHESTRATOR, "착수 승인 — 자율 실행 시작")
     return projects.update(pid, {"status": "running", "phase": "draft",
                                  "cursor": 0, "pause_reason": ""})

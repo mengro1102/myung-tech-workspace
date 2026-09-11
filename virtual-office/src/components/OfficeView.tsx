@@ -1,5 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import PixelOffice from './PixelOffice';
+import AgentChat from './AgentChat';
+import { api, type DialogueEntry } from '../api';
 
 interface Agent {
   agent_id: string;
@@ -69,6 +71,11 @@ export default function OfficeView({ agents, cycleStatus, taskSummary, onDeptCha
   const [chatInput,   setChatInput]  = useState('');
   const [cmdInput,    setCmdInput]   = useState('');
   const feedScrollRef = useRef<HTMLDivElement>(null);
+  /* 오른쪽 패널. 기본은 에이전트 대화 — 사무실에서 보고 싶은 것은 '누가 누구와
+     무엇을 주고받는가' 이고, 운영 피드는 시스템 로그에 가깝다. */
+  const [panel,    setPanel]    = useState<'chat' | 'feed'>('chat');
+  const [dialogue, setDialogue] = useState<DialogueEntry[]>([]);
+  const chatScrollRef = useRef<HTMLDivElement>(null);
   const feedEndRef    = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -83,6 +90,19 @@ export default function OfficeView({ agents, cycleStatus, taskSummary, onDeptCha
     const el = feedScrollRef.current;
     if (el) el.scrollTop = el.scrollHeight;
   }, [feed]);
+
+  useEffect(() => {
+    const load = () => api.dialogue(80).then(r => { if (r?.dialogue) setDialogue(r.dialogue); });
+    void load();
+    const t = setInterval(load, 4000);
+    return () => clearInterval(t);
+  }, []);
+
+  // 새 말이 오면 맨 아래(가장 최근)로. 대화는 위에서 아래로 읽는다.
+  useEffect(() => {
+    const el = chatScrollRef.current;
+    if (el && panel === 'chat') el.scrollTop = el.scrollHeight;
+  }, [dialogue.length, panel]);
 
   const senderLabel = (s: string) => {
     const meta = DEPT_META[s];
@@ -211,17 +231,36 @@ export default function OfficeView({ agents, cycleStatus, taskSummary, onDeptCha
       <div className="ov-right">
         {/* 헤더 */}
         <div className="ov-right-header">
-          <div className="ov-right-title">
-            <span style={{ color: '#2DD4BF', fontSize: 14 }}>◉</span>
-            실시간 운영 피드
+          <div className="ov-panel-tabs" role="tablist">
+            <button role="tab" aria-selected={panel === 'chat'}
+                    className={`ov-panel-tab ${panel === 'chat' ? 'active' : ''}`}
+                    onClick={() => setPanel('chat')}>
+              💬 에이전트 대화{dialogue.length > 0 && <span className="ov-panel-count">{dialogue.length}</span>}
+            </button>
+            <button role="tab" aria-selected={panel === 'feed'}
+                    className={`ov-panel-tab ${panel === 'feed' ? 'active' : ''}`}
+                    onClick={() => setPanel('feed')}>
+              ◉ 운영 피드
+            </button>
           </div>
-          <div style={{ display: 'flex', gap: 6 }}>
-            <button className="ov-feed-action-btn" onClick={() => setFeed([])}>삭제</button>
-          </div>
+          {panel === 'feed' && (
+            <div style={{ display: 'flex', gap: 6 }}>
+              <button className="ov-feed-action-btn" onClick={() => setFeed([])}>삭제</button>
+            </div>
+          )}
         </div>
 
+        {/* 에이전트 대화 */}
+        {panel === 'chat' && (
+          <div className="ov-feed ov-chat" ref={chatScrollRef}>
+            <AgentChat entries={dialogue} showProject
+              emptyText="프로젝트가 돌면 에이전트끼리 주고받는 말이 여기 쌓입니다 — 제출 · 검토 · 반려 · 인계." />
+          </div>
+        )}
+
         {/* 피드 */}
-        <div className="ov-feed" ref={feedScrollRef}>
+        <div className="ov-feed" ref={feedScrollRef}
+             style={{ display: panel === 'feed' ? undefined : 'none' }}>
           {feed.length === 0 && (
             <div className="ov-feed-empty">
               <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>

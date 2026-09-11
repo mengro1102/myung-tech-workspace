@@ -829,6 +829,29 @@ class Handler(BaseHTTPRequestHandler):
             else:
                 _json_resp(self, 200, {"integrations": integrations.status_all()})
 
+        # 에이전트 사이에 오간 말. 여러 프로젝트를 시간순으로 합친다.
+        # 사무실의 '💬 에이전트 대화' 와 프로젝트 탭이 읽는다.
+        elif path == "/api/dialogue":
+            q = parse_qs(parsed.query)
+            try:
+                limit = max(1, min(500, int((q.get("limit") or ["80"])[0])))
+            except ValueError:
+                limit = 80
+            only = (q.get("project") or [""])[0]
+            try:
+                import project_runner
+                rows = []
+                for p in projects.load():
+                    if only and p.get("id") != only:
+                        continue
+                    for e in project_runner.dialogue_of(p):
+                        rows.append({**e, "project_id": p.get("id"),
+                                     "project_title": p.get("title", "")})
+                rows.sort(key=lambda e: e.get("at") or 0)
+                _json_resp(self, 200, {"dialogue": rows[-limit:]})
+            except Exception as e:  # noqa: BLE001
+                _json_resp(self, 500, {"error": f"대화 기록을 읽지 못했습니다: {e}"})
+
         elif path == "/api/projects":
             rows = []
             for p in projects.load():

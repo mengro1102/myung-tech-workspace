@@ -184,6 +184,24 @@ export interface IntegrationStatus {
   docs: string;
 }
 
+/* ── 에이전트 대화 ─────────────────────────────────────────────────────────
+   누가 누구에게 무엇을 말했는가. text 는 말풍선용 한 줄, detail 은 전문
+   (검토 의견 · 한마디 · 인계 메모). restored 는 대화 기록 기능 이전에 돈
+   프로젝트를 단계 기록에서 되살린 줄이다. */
+export interface DialogueEntry {
+  at: number;
+  from: string; from_dept: string;
+  to: string;   to_dept: string;
+  kind: 'plan' | 'research' | 'approve' | 'submit' | 'retry' | 'pass'
+      | 'reject' | 'handoff' | 'continue' | 'brief' | 'say';
+  text: string;
+  detail: string;
+  score?: number | null;
+  restored?: boolean;
+  project_id?: string;
+  project_title?: string;
+}
+
 export const api = {
   health: () => safeJson<{ status: string; redis: string; vllm: string }>(fetch(`${API_BASE}/health`)),
   listAgents: () => safeJson<{ total: number; agents: AgentSummary[] }>(fetch(`${API_BASE}/agents`)),
@@ -323,6 +341,11 @@ export const api = {
   probeIntegration: (name: string) =>
     safeJson<{ ok: boolean; status: IntegrationStatus; error?: string }>(
       fetch(`${API_BASE}/integrations/${name}/probe`, { method: 'POST' })),
+
+  /* ── 에이전트 대화 ── */
+  dialogue: (limit = 80, project = '') =>
+    safeJson<{ dialogue: DialogueEntry[]; error?: string }>(
+      fetch(`${API_BASE}/dialogue?limit=${limit}${project ? `&project=${project}` : ''}`)),
 
   /* ── 자율 프로젝트 ── */
   listProjects: () =>

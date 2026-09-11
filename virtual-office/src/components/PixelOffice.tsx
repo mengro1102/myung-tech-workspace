@@ -120,12 +120,32 @@ function lerp(a: number, b: number, t: number) { return a + (b - a) * t; }
 
 // ── 말풍선 ───────────────────────────────────────────────
 function drawSpeechBubble(ctx: CanvasRenderingContext2D, x: number, y: number, text: string) {
-  const line = text.length > 24 ? text.slice(0, 23) + '…' : text;
+  // 한 줄(24자)로는 "초안 제출 — 첫 영상 채널…" 에서 잘려 무슨 말인지 몰랐다.
+  // 두 줄까지 감싸고, 넘치면 말줄임. 전문은 오른쪽 '💬 에이전트 대화' 에 있다.
   ctx.font = '11px "Noto Sans KR", sans-serif';
-  const w = Math.max(52, ctx.measureText(line).width + 16);
-  const h = 21;
+  const maxW = 150;
+  const lines: string[] = [];
+  let cur = '';
+  let used = 0;
+  for (const ch of text) {
+    if (cur && ctx.measureText(cur + ch).width > maxW) {
+      lines.push(cur);
+      cur = '';
+      if (lines.length === 2) break;
+    }
+    cur += ch;
+    used += ch.length;
+  }
+  if (lines.length < 2 && cur) { lines.push(cur); cur = ''; }
+  if (used < text.length || cur) {
+    const last = lines.length - 1;
+    lines[last] = lines[last].slice(0, -1) + '…';
+  }
+
+  const w = Math.max(52, ...lines.map(l => ctx.measureText(l).width)) + 16;
+  const h = 8 + lines.length * 14;
   const bx = x - w / 2;
-  const by = y - CHAR_H - 32;
+  const by = y - CHAR_H - 11 - h;
 
   ctx.fillStyle = 'rgba(9,11,18,0.92)';
   ctx.fillRect(bx, by, w, h);
@@ -142,7 +162,7 @@ function drawSpeechBubble(ctx: CanvasRenderingContext2D, x: number, y: number, t
 
   ctx.fillStyle = '#e6ecf5';
   ctx.textAlign = 'center';
-  ctx.fillText(line, x, by + 14);
+  lines.forEach((l, i) => ctx.fillText(l, x, by + 14 + i * 14));
   ctx.textAlign = 'left';
 }
 
@@ -356,7 +376,7 @@ export default function PixelOffice({
 
     if (speaker) {
       speaker.speechBubble = said.slice(0, 60);
-      speaker.speechTimer = 240;
+      speaker.speechTimer = 480;   // 약 8초 — 읽을 시간
       speaker.busy = true;
       speaker.busyTimer = 240;
       if (listener && listener !== speaker) {
