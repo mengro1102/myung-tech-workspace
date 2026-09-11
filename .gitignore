@@ -74,3 +74,6 @@ knowledge_base.py.bak.*
 *.wsl-bak
 *.bak
 *.bak-*
+
+# 테스트 단계 기록 보관 (태스크·이벤트·결재)
+shared_memory/_archive/

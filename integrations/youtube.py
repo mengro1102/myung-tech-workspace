@@ -304,8 +304,21 @@ def probe_oauth() -> Probe:
                        f"구독 +{a['subscribers_gained']}/-{a['subscribers_lost']}")
 
 
-def context_data(_query: str = "") -> str:
-    """에이전트 프롬프트에 넣을 사실 블록. 실패하면 빈 문자열."""
+def context_data(query: str = "") -> str:
+    """에이전트 프롬프트에 넣을 사실 블록. 실패하면 빈 문자열.
+
+    지시문이 **남의** 영상·채널을 가리키면 내 채널 데이터는 붙이지 않는다.
+    둘이 같이 들어가면 모델이 그 영상을 내 것으로 착각한다 — "이 영상 조회수가
+    왜 0 이지?" 같은 엉뚱한 답이 나온다. '내 채널' 이라고 분명히 말한 경우만 예외.
+    """
+    try:
+        from .youtube_lookup import parse
+        want = parse(query)
+        others = want["videos"] or want["channel_ids"] or want["handles"] or want["query"]
+        if others and not any(w in query for w in ("내 채널", "우리 채널", "제 채널")):
+            return ""
+    except Exception:  # noqa: BLE001
+        pass
     try:
         st = channel_stats()
     except base.IntegrationError:
@@ -317,7 +330,7 @@ def context_data(_query: str = "") -> str:
     except base.IntegrationError:
         vids = []
     subs = "비공개" if st["hidden_subscribers"] else f"{st['subscribers']:,}"
-    lines = [f"[YouTube 채널 — 실제 데이터]",
+    lines = [f"[내 YouTube 채널 — 실제 데이터]",
              f"채널: {st['title']} (개설 {st['published_at']})",
              f"구독자 {subs} · 총 조회 {st['views']:,} · 영상 {st['videos']:,}개"]
     if not vids:
@@ -331,7 +344,17 @@ def context_data(_query: str = "") -> str:
     return "\n".join(lines)
 
 
-def context_analytics(_query: str = "") -> str:
+def context_analytics(query: str = "") -> str:
+    # 남의 영상·채널·검색을 물을 때 내 지표를 붙이면 모델이 섞어 읽는다.
+    # context_data 와 같은 규칙.
+    try:
+        from .youtube_lookup import parse
+        want = parse(query)
+        others = want["videos"] or want["channel_ids"] or want["handles"] or want["query"]
+        if others and not any(w in query for w in ("내 채널", "우리 채널", "제 채널")):
+            return ""
+    except Exception:  # noqa: BLE001
+        pass
     try:
         a = analytics(28)
         src = traffic_sources(28)
@@ -339,7 +362,7 @@ def context_analytics(_query: str = "") -> str:
         return ""
     if a.get("note"):
         return ""
-    lines = [f"[YouTube Analytics — 최근 28일 실제 지표]",
+    lines = [f"[내 채널 YouTube Analytics — 최근 28일 실제 지표]",
              f"기간: {a['period']}",
              f"조회 {a['views']:,} · 시청 {a['minutes_watched']:,}분 · "
              f"평균 시청 {a['avg_view_seconds']}초",

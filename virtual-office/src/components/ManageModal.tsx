@@ -861,7 +861,7 @@ export default function ManageModal({ onClose, agentCount, globalModel, onOpenTe
             </IntegCard>
 
             {/* YouTube Data API */}
-            <IntegCard icon="📺" title="YouTube Data API" desc="채널·영상 공개 지표(구독·조회·좋아요)를 에이전트 분석의 근거로 넣습니다. 비공개 지표와 업로드는 아래 OAuth."
+            <IntegCard icon="📺" title="YouTube Data API" desc="내 채널 지표에 더해, 지시문에 영상 링크 · 채널 링크 · @핸들 · '유튜브에서 ~ 찾아' 가 있으면 남의 영상·채널·검색 결과도 조회해 근거로 넣습니다. 비공개 지표와 업로드는 아래 OAuth."
               status={integStatus.youtube_data} saved={!!connKeys.YOUTUBE_API_KEY}
               onGuide={() => setGuide('youtube-data')}
               onProbe={() => void probeOne('youtube_data')}

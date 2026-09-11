@@ -11,7 +11,7 @@ import json
 import re
 
 from . import base  # noqa: F401
-from . import github, paypal, youtube  # noqa: F401  (import 하는 것만으로 등록된다)
+from . import github, paypal, youtube, youtube_lookup  # noqa: F401  (import 하는 것만으로 등록된다)
 from .base import (Action, Integration, IntegrationError, NotConfigured,  # noqa: F401
                    Probe, all_integrations, env, get, register)
 
