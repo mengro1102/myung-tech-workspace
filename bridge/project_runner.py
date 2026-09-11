@@ -195,6 +195,147 @@ def _pause(p: dict, reason: str) -> dict:
 
 
 # ── 1단계: 의도 파악 + 계획 ─────────────────────────────────────────────
+# ── 근거 자료 · 부서 간 인계 · 누가 누구에게 ────────────────────────────
+#
+# 첫 실전 테스트에서 드러난 것 셋.
+#
+#   1. 러너가 아무것도 조회하지 않았다. "이 영상처럼 기획해 줘" 에 링크가
+#      있었는데 영상 데이터가 프롬프트에 없었다. 연구부는 영상을 보지 않고
+#      "색상 코드와 효과 수치까지" 적었고, 리뷰어도 영상을 못 봤으니 100점을
+#      줬다. 검토 두 단계가 지어낸 내용을 통과시킨 것이다.
+#   2. 부서가 서로의 결과를 받지 않았다. 콘텐츠부는 연구부의 분석을 보지
+#      못한 채 시나리오를 썼다 — 부서 간 데이터 교환이 실제로는 없었다.
+#   3. 사무실에 아무것도 안 보였다. 이벤트의 받는 쪽이 전부 studio_ui 라
+#      어떤 캐릭터에게도 말풍선이 뜨지 않았다.
+
+def _roster(dept: str) -> list[dict]:
+    out = []
+    for f in sorted((MYUNG_TECH / "departments" / dept / "agents").glob("*.json")):
+        try:
+            a = json.loads(f.read_text(encoding="utf-8-sig"))
+        except Exception:  # noqa: BLE001
+            continue
+        full = str(a.get("character_name") or "").strip()
+        if full:
+            # 사무실 캐릭터는 이름의 첫 단어로 불린다(PixelOffice). 거기에 맞춘다.
+            out.append({"name": full.split(" ")[0], "role": str(a.get("role") or "")})
+    return out
+
+
+def _who(dept: str, kind: str) -> str:
+    """kind: maker(쓰는 사람) · reviewer(부서 검토) · lead(총괄)."""
+    r = _roster(dept)
+    if not r:
+        return dept.replace("_dept", "")
+    prefs = {
+        "maker": None,
+        "reviewer": ("QA Engineer", "Project Manager"),
+        "lead": ("Master Orchestrator", "Project Manager"),
+    }[kind]
+    if prefs is None:
+        # 글·코드·분석을 실제로 만드는 역할을 먼저. 파일 순서대로 고르면 콘텐츠부의
+        # 시나리오를 디자이너가 쓰게 된다.
+        for key in ("Writer", "Software Engineer", "Analyst", "Data Engineer",
+                    "Crawler", "Designer"):
+            for a in r:
+                if key in a["role"]:
+                    return a["name"]
+        for a in r:
+            if a["role"] not in ("Project Manager", "QA Engineer", "Master Orchestrator"):
+                return a["name"]
+        return r[0]["name"]
+    for want in prefs:
+        for a in r:
+            if a["role"] == want:
+                return a["name"]
+    return r[0]["name"]
+
+
+def _say(pid: str, from_dept: str, from_kind: str, to_dept: str, to_kind: str,
+         text: str) -> None:
+    """사무실에 보이는 한 마디 — '[pid] 말한 사람 → 들은 사람: 내용'."""
+    try:
+        dispatcher.emit(from_dept, to_dept,
+                        f"[{pid}] {_who(from_dept, from_kind)} → "
+                        f"{_who(to_dept, to_kind)}: {text}")
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def _sources(p: dict) -> str:
+    """프로젝트의 근거 자료. 아이디어에 담긴 링크·채널·검색 + 위키.
+
+    한 번 조회해서 프로젝트에 저장한다. 스텝마다 다시 부르면 할당량이 마르고,
+    무엇보다 초안을 쓴 사람과 검토하는 사람이 **같은 자료**를 봐야 검토가
+    지어낸 것을 잡을 수 있다.
+    """
+    if "sources" in p:
+        return p.get("sources") or ""
+    pid = p["id"]
+    idea = p.get("idea", "")
+    parts: list[str] = []
+    names: list[str] = []
+    integ = getattr(dispatcher, "integrations", None)
+    if integ is not None:
+        try:
+            live, used = integ.context_block(idea, budget=3500)
+            if live:
+                parts.append(live)
+                names += used
+        except Exception as exc:  # noqa: BLE001
+            print(f"[project] 연동 조회 실패(무시): {exc}", file=sys.stderr)
+    try:
+        kb_block, paths = dispatcher.kb_context(idea)
+        if kb_block:
+            parts.append(kb_block[:2500])
+            names.append(f"위키 {len(paths)}건")
+    except Exception as exc:  # noqa: BLE001
+        print(f"[project] 위키 조회 실패(무시): {exc}", file=sys.stderr)
+    text = "\n\n".join(parts)
+    projects.update(pid, {"sources": text, "source_names": names})
+    p["sources"] = text
+    if names:
+        _say(pid, "research_dept", "maker", ORCHESTRATOR, "lead",
+             "자료 조회 완료 — " + ", ".join(names))
+    return text
+
+
+def _grounding(p: dict, limit: int = 3500) -> str:
+    src = _sources(p)
+    if not src:
+        return ("\n\n[근거 자료]\n조회된 외부 자료가 없습니다. 구체적 수치·사실을 쓸 때는 "
+                "추측임을 밝히세요.")
+    return ("\n\n[근거 자료 — 실제로 조회한 데이터. 여기 없는 수치·사실을 지어내지 마세요]\n"
+            + src[:limit])
+
+
+def _handoff(p: dict, budget: int = 4500) -> str:
+    """앞 단계에서 검토를 통과한 산출물. 부서가 서로의 결과를 이어받게 한다."""
+    ds = projects.deliverables(p)
+    cur = int(p.get("cursor", 0))
+    arts = p.get("artifacts") or {}
+    chunks, used = [], 0
+    for d in ds[:cur]:
+        body = arts.get(d["id"], "")
+        if not body:
+            continue
+        piece = body[:1800]
+        if used + len(piece) > budget:
+            break
+        chunks.append(f"### {d['title']} ({d['dept']} 작성, 검토 통과)\n{piece}")
+        used += len(piece)
+    if not chunks:
+        return ""
+    return ("\n\n[앞 부서가 넘겨준 산출물 — 이 내용과 어긋나지 않게 이어받아 쓰세요]\n"
+            + "\n\n".join(chunks))
+
+
+GROUNDING_RULE = (
+    "제출물의 구체적 수치·색상 코드·시간·인용·조회수 같은 사실이 [근거 자료]에 없으면 "
+    "지어낸 것으로 보고 반드시 반려하세요. 근거 자료가 없는 주제라면 추측임을 밝혔는지 "
+    "보세요. 그럴듯함은 통과 사유가 아닙니다.\n\n")
+
+
 PLAN_SYSTEM = """당신은 명테크의 오케스트레이터입니다. 사장님이 던진 아이디어 한 줄을
 받아서, 실제로 만들 수 있는 계획으로 바꾸는 것이 당신의 일입니다.
 
@@ -233,7 +374,7 @@ def _do_plan(p: dict) -> dict:
     _emit(pid, ORCHESTRATOR, "의도 파악 및 계획 수립 시작")
 
     raw, exhausted = _ask(p, ORCHESTRATOR, PLAN_SYSTEM,
-                          f"사장님의 아이디어:\n\n{p['idea']}", prefer_cloud=True)
+                          f"사장님의 아이디어:\n\n{p['idea']}" + _grounding(p), prefer_cloud=True)
     if exhausted:
         return _pause(p, "계획 수립 단계에서 상위 모델 할당량이 바닥났습니다.")
 
@@ -287,6 +428,10 @@ def _do_plan(p: dict) -> dict:
                   for i, d in enumerate(plan["deliverables"])) +
         "\n\n승인하면 결과가 나올 때까지 자율로 진행합니다.")
     _emit(pid, ORCHESTRATOR, "착수 승인 대기")
+    # '회의' 가 들어가면 사무실에서 사람들이 회의실로 모인다. 실제로 계획이
+    # 나온 순간에만 모이게 한다.
+    _say(pid, ORCHESTRATOR, "lead", plan["deliverables"][0]["dept"], "maker",
+         f"착수 회의 — 산출물 {len(plan['deliverables'])}개 배분, 사장님 승인 대기")
     return projects.get(pid) or p
 
 
@@ -317,6 +462,10 @@ def _do_draft(p: dict) -> dict:
                  "지적된 부분을 고쳐서 **전체를 다시** 써 주세요. "
                  "'수정했습니다' 같은 말 없이 본문만.")
 
+    user += _grounding(p) + _handoff(p)
+    system += ("\n\n[근거 자료]에 없는 구체적 수치·색상 코드·시간·조회수·인용을 지어내지 "
+               "마세요. 모르는 것은 '확인 필요' 라고 적으세요.")
+
     _emit(pid, d["dept"], f"초안 작성 — {d['title']}")
     out, exhausted = _ask(p, d["dept"], system, user, max_tokens=DRAFT_MAX_TOKENS)
     if exhausted:
@@ -344,6 +493,8 @@ def _do_draft(p: dict) -> dict:
     arts[d["id"]] = out
     steps = _log(p, "draft", d["dept"], True, f"{d['title']} ({len(out)}자)")
     projects.update(pid, {"artifacts": arts, "steps": steps, "phase": "review1"})
+    _say(pid, d["dept"], "maker", d["dept"], "reviewer",
+         f"초안 제출 — {d['title']} ({len(out)}자)")
     return projects.get(pid) or p
 
 
@@ -385,8 +536,9 @@ def _do_review(p: dict, level: int) -> dict:
             f"산출물: {d['title']}\n요구: {d['desc']}\n\n"
             f"--- 제출된 내용 ---\n{body[:6000]}\n--- 끝 ---")
 
+    user += _grounding(p, 2500)
     _emit(pid, reviewer, f"{label} — {d['title']}")
-    out, exhausted = _ask(p, reviewer, REVIEW_SYSTEM + "\n\n" + extra, user,
+    out, exhausted = _ask(p, reviewer, GROUNDING_RULE + REVIEW_SYSTEM + "\n\n" + extra, user,
                           prefer_cloud=(level == 2))
     if exhausted:
         return _pause(p, f"{label} 중 상위 모델 할당량이 바닥났습니다.")
@@ -410,6 +562,8 @@ def _do_review(p: dict, level: int) -> dict:
             patch["phase"] = "review2"
             projects.update(pid, patch)
             _emit(pid, reviewer, f"1차 통과 ({score}점)")
+            _say(pid, d["dept"], "reviewer", ORCHESTRATOR, "lead",
+                 f"1차 통과({score}점) — 최종 검토 부탁드립니다")
             return projects.get(pid) or p
         # 2차까지 통과 — 이 산출물은 끝났다.
         patch["phase"] = "draft"
@@ -417,6 +571,13 @@ def _do_review(p: dict, level: int) -> dict:
         projects.update(pid, patch)
         _emit(pid, reviewer, f"2차 통과 ({score}점) — {d['title']} 완료")
         after = projects.get(pid) or p
+        _say(pid, ORCHESTRATOR, "lead", d["dept"], "maker",
+             f"최종 통과({score}점) — {d['title']}")
+        nxt = projects.current(after)
+        if nxt is not None:
+            # 부서 간 인계. 다음 부서는 _handoff() 로 이 산출물을 실제로 받는다.
+            _say(pid, d["dept"], "maker", nxt["dept"], "maker",
+                 f"📦 {d['title']} 전달 — 이어서 '{nxt['title']}' 부탁합니다")
         if projects.current(after) is None:
             return _finish(after)
         return after
@@ -425,6 +586,9 @@ def _do_review(p: dict, level: int) -> dict:
     patch["phase"] = "draft"
     projects.update(pid, patch)
     _emit(pid, reviewer, f"{label} 반려 ({score}점) — {feedback[:100]}")
+    _say(pid, d["dept"] if level == 1 else ORCHESTRATOR,
+         "reviewer" if level == 1 else "lead", d["dept"], "maker",
+         f"반려({score}점) — {' '.join(feedback.split())[:70]}")
     return projects.get(pid) or p
 
 
@@ -472,6 +636,7 @@ def _finish(p: dict) -> dict:
         + (f"\n위키에 {len(archived)}건을 쌓았습니다 — 다음 질문부터 검색됩니다."
            if archived else ""))
     _emit(pid, ORCHESTRATOR, "프로젝트 완료")
+    _say(pid, ORCHESTRATOR, "lead", ORCHESTRATOR, "lead", "전체 브리핑 — 프로젝트 완료")
     return projects.get(pid) or p
 
 

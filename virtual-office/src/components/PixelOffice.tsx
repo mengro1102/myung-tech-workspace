@@ -322,7 +322,7 @@ export default function PixelOffice({
   useEffect(() => {
     if (!recentMessages.length) return;
     const last = recentMessages[0];
-    const key = `${last.sender}${last.target}${last.payload.slice(0, 20)}`;
+    const key = `${last.sender}${last.target}${last.payload}`;
     if (stateRef.current.prevMsgKey === key) return;
     stateRef.current.prevMsgKey = key;
 
@@ -330,26 +330,48 @@ export default function PixelOffice({
     const to = roomCenter(last.target);
     const color = DEPT_COLOR[last.sender] ?? '#94a3b8';
     const text = last.payload.replace(/\[task-[^\]]+\]\s*/g, '');
-    const isDone = /완료|done/i.test(text);
+
+    /* 프로젝트 러너는 '[prj-…] 말한 사람 → 들은 사람: 내용' 으로 보낸다.
+       예전에는 받는 부서의 첫 캐릭터에게 말풍선을 붙였고, 러너의 받는 쪽이
+       전부 studio_ui 라 실제로는 아무에게도 붙지 않았다. 이제 **말한 사람**
+       머리 위에 말풍선이 뜨고, 전달 표시가 들은 사람에게 날아간다. */
+    const talk = text.match(/^\[prj-[\w-]+\]\s*(\S+)\s*→\s*(\S+):\s*(.*)$/);
+    const people = stateRef.current.pixelAgents;
+    const speaker = talk ? people.find(a => a.name === talk[1]) : undefined;
+    const listener = talk ? people.find(a => a.name === talk[2]) : undefined;
+    const said = talk ? talk[3] : text;
+    const isDone = /완료|통과|done/i.test(said);
 
     stateRef.current.particles.push({
       id: Date.now().toString(),
-      sx: from.x, sy: from.y,
-      tx: to.x, ty: to.y,
+      sx: speaker?.x ?? from.x, sy: speaker?.y ?? from.y,
+      tx: listener?.x ?? to.x, ty: listener?.y ?? to.y,
       t: 0, color,
-      label: text.slice(0, 25),
+      label: said.slice(0, 25),
       done: isDone,
     });
 
-    // 전체 방송·브리핑은 회의로 본다 — 사람들이 회의실로 모인다.
-    if (/전체|브리핑|회의|방송/.test(text)) stateRef.current.meetingRequested = true;
+    // 전체 방송·브리핑·회의는 사람들이 회의실로 모인다.
+    if (/전체|브리핑|회의|방송/.test(said)) stateRef.current.meetingRequested = true;
 
-    const receiver = stateRef.current.pixelAgents.find(a => a.dept === last.target);
-    if (receiver) {
-      receiver.speechBubble = text.slice(0, 60);
-      receiver.speechTimer = 180;
-      receiver.busy = true;
-      receiver.busyTimer = 240;
+    if (speaker) {
+      speaker.speechBubble = said.slice(0, 60);
+      speaker.speechTimer = 240;
+      speaker.busy = true;
+      speaker.busyTimer = 240;
+      if (listener && listener !== speaker) {
+        // 들은 사람은 받은 일을 시작한다 — 이것도 실제 일이 넘어갔을 때만.
+        listener.busy = true;
+        listener.busyTimer = 300;
+      }
+    } else {
+      const receiver = people.find(a => a.dept === last.target);
+      if (receiver) {
+        receiver.speechBubble = text.slice(0, 60);
+        receiver.speechTimer = 180;
+        receiver.busy = true;
+        receiver.busyTimer = 240;
+      }
     }
   }, [recentMessages]);
 
@@ -478,10 +500,9 @@ export default function PixelOffice({
 
       if (a.busyTimer > 0 && --a.busyTimer === 0) a.busy = false;
       if (a.speechTimer > 0 && --a.speechTimer === 0) a.speechBubble = undefined;
-      if (running && !meeting && Math.random() < 0.0008) {
-        a.busy = true;
-        a.busyTimer = 180 + Math.floor(Math.random() * 300);
-      }
+      // 여기서 무작위로 '타이핑' 을 켰었다. 실제로 일하지 않는 사람이 일하는
+      // 것처럼 보이면, 진짜 일이 오갈 때 구분이 안 된다. 이제 타이핑은 실제
+      // 이벤트(말하거나 일을 넘겨받았을 때)에서만 켜진다.
     }
 
     // ── 가구 + 사람을 발밑 y 로 정렬해 한 번에 ──
