@@ -3764,3 +3764,29 @@ button.ac-bubble:hover { border-color: rgba(139,92,246,0.4); }
   color: var(--primary); opacity: 0.85;
 }
 .pj-dialogue { max-height: 460px; overflow-y: auto; padding-right: 4px; }
+
+/* ── 산출물 펼쳐 읽기 ──────────────────────────────────────────────────────
+   목록에 제목만 있고 본문을 볼 곳이 없었다. 줄을 누르면 그 자리에서 펼친다. */
+.pj-deliv-wrap { list-style: none; }
+button.pj-deliv-item {
+  width: 100%; background: none; border: 1px solid transparent;
+  font: inherit; color: inherit; text-align: left; cursor: pointer;
+  transition-property: var(--t-ui); transition-duration: 0.15s;
+}
+button.pj-deliv-item:hover { background: var(--glass-hi); border-color: var(--border); }
+button.pj-deliv-item[aria-expanded="true"] { background: var(--glass-hi); border-color: rgba(139,92,246,0.35); }
+.pj-deliv-open {
+  flex-shrink: 0; font-size: 11px; color: var(--primary); font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.pj-artifact {
+  margin: 6px 0 10px 22px; border: 1px solid var(--border); border-radius: 8px;
+  background: var(--bg2); overflow: hidden;
+}
+.pj-art-bar {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  padding: 8px 10px; border-bottom: 1px solid var(--border); background: var(--bg3);
+}
+.pj-art-file { font-size: 11px; color: var(--muted); font-family: 'JetBrains Mono', monospace; word-break: break-all; }
+.pj-art-file.ok { color: #4ade80; }
+.pj-art-body { padding: 4px 16px 14px; max-height: 520px; overflow-y: auto; }

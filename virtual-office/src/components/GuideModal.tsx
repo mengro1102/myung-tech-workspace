@@ -53,7 +53,8 @@ function inline(text: string, keyBase: string) {
   return parts;
 }
 
-function Markdown({ src }: { src: string }) {
+/** 가벼운 마크다운 렌더러. 프로젝트 산출물 보기에서도 쓴다. */
+export function Markdown({ src }: { src: string }) {
   const blocks: React.ReactNode[] = [];
   const lines = src.split('\n');
   let i = 0;

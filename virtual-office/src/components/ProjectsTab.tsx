@@ -10,7 +10,9 @@
  * 하면 승인을 기다리는 프로젝트가 며칠씩 방치된다.
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { api, deptLabels, type DialogueEntry, type ProjectRow, type ProjectStatus } from '../api';
+import { api, deptLabels, type ApprovalRow, type DialogueEntry, type ProjectRow,
+         type ProjectStatus } from '../api';
+import { Markdown } from './GuideModal';
 import AgentChat from './AgentChat';
 
 const STATUS_LABEL: Record<ProjectStatus, string> = {
@@ -224,7 +226,39 @@ function DialogueBlock({ pid }: { pid: string }) {
   );
 }
 
+/* 산출물 하나의 파일 상태. 완료 시 러너가 결재함에 '파일 저장' 제안을 올리고,
+   승인해야 workspace 에 쓰인다. 제안의 detail 은 '프로젝트 제목 — 산출물 제목'. */
+function findProposal(rows: ApprovalRow[], pid: string, title: string) {
+  return rows.find(a => a.kind === 'file'
+    && (a.file_path ?? '').includes(`projects/${pid}/`)
+    && (a.detail ?? '').endsWith(title));
+}
+
 function Detail({ p }: { p: ProjectRow }) {
+  /* 산출물을 여기서 바로 읽는다. 예전에는 목록에 제목만 있고 본문을 볼 곳이
+     없었다 — 결재함의 '내용 보기' 로 돌아가거나 파일을 찾아 열어야 했다. */
+  const [openD,  setOpenD]  = useState<string | null>(null);
+  const [copied, setCopied] = useState('');
+  const [saving, setSaving] = useState('');
+  const [props,  setProps]  = useState<ApprovalRow[]>([]);
+  const loadProps = useCallback(() => {
+    api.storeList<ApprovalRow>('approvals').then(r => { if (r?.items) setProps(r.items); });
+  }, []);
+  useEffect(() => { loadProps(); }, [loadProps, p.status]);
+
+  async function copy(id: string, body: string) {
+    try { await navigator.clipboard.writeText(body); setCopied(id); setTimeout(() => setCopied(''), 1500); }
+    catch { setCopied(''); }
+  }
+
+  async function saveFile(row: ApprovalRow) {
+    // 결재함에서 '승인' 을 누르는 것과 같다. 서버가 그 순간 파일을 쓴다.
+    setSaving(row.id);
+    await api.storeUpdate<ApprovalRow>('approvals', row.id, { status: 'approved' });
+    setSaving('');
+    loadProps();
+  }
+
   const ds = p.plan?.deliverables ?? [];
   const steps = p.steps ?? [];
   return (
@@ -243,15 +277,62 @@ function Detail({ p }: { p: ProjectRow }) {
             {ds.map((d, i) => {
               const state = i < p.cursor ? 'done' : i === p.cursor ? 'now' : 'todo';
               return (
-                <li key={d.id} className={`pj-deliv-item ${state}`}>
-                  <span className="pj-deliv-mark" aria-hidden="true">
-                    {state === 'done' ? '✓' : state === 'now' ? '●' : '○'}
-                  </span>
-                  <span className="pj-deliv-title">{d.title}</span>
-                  <span className="pj-deliv-dept">{deptLabels[d.dept] ?? d.dept}</span>
-                  {state === 'now' && p.status === 'running' && (
-                    <span className="pj-deliv-phase">{PHASE_LABEL[p.phase] ?? p.phase}</span>
-                  )}
+                <li key={d.id} className="pj-deliv-wrap">
+                  {(() => {
+                    const body = p.artifacts?.[d.id] ?? '';
+                    const open = openD === d.id;
+                    const prop = findProposal(props, p.id, d.title);
+                    const head = (
+                      <>
+                        <span className="pj-deliv-mark" aria-hidden="true">
+                          {state === 'done' ? '✓' : state === 'now' ? '●' : '○'}
+                        </span>
+                        <span className="pj-deliv-title">{d.title}</span>
+                        <span className="pj-deliv-dept">{deptLabels[d.dept] ?? d.dept}</span>
+                        {state === 'now' && p.status === 'running' && (
+                          <span className="pj-deliv-phase">{PHASE_LABEL[p.phase] ?? p.phase}</span>
+                        )}
+                        {body && <span className="pj-deliv-open">{open ? '접기 ▴' : `읽기 ▾ · ${body.length.toLocaleString()}자`}</span>}
+                      </>
+                    );
+                    return (
+                      <>
+                        {body ? (
+                          <button className={`pj-deliv-item ${state} clickable`} aria-expanded={open}
+                                  onClick={() => setOpenD(open ? null : d.id)}>{head}</button>
+                        ) : (
+                          <div className={`pj-deliv-item ${state}`}>{head}</div>
+                        )}
+                        {open && body && (
+                          <div className="pj-artifact">
+                            <div className="pj-art-bar">
+                              <button className="pj-btn" onClick={() => void copy(d.id, body)}>
+                                {copied === d.id ? '✓ 복사됨' : '📋 복사'}
+                              </button>
+                              {prop?.status === 'approved' ? (
+                                <span className="pj-art-file ok">💾 저장됨 · workspace/{prop.file_path}</span>
+                              ) : prop?.status === 'pending' ? (
+                                <>
+                                  <button className="pj-btn pj-btn-primary" disabled={saving === prop.id}
+                                          onClick={() => void saveFile(prop)}>
+                                    {saving === prop.id ? '저장 중…' : '💾 파일로 저장 (승인)'}
+                                  </button>
+                                  <span className="pj-art-file">workspace/{prop.file_path}</span>
+                                </>
+                              ) : prop?.status === 'rejected' ? (
+                                <span className="pj-art-file">결재에서 거절됨 — 파일로 저장하지 않았습니다</span>
+                              ) : (
+                                <span className="pj-art-file">
+                                  {p.status === 'done' ? '파일 저장 제안이 결재함에 없습니다' : '완료되면 파일 저장 제안이 결재함에 올라갑니다'}
+                                </span>
+                              )}
+                            </div>
+                            <div className="pj-art-body"><Markdown src={body} /></div>
+                          </div>
+                        )}
+                      </>
+                    );
+                  })()}
                 </li>
               );
             })}
