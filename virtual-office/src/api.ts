@@ -1,3 +1,4 @@
+import { DEPT_COLORS } from './deptTheme';
 export const API_BASE = '/api';
 
 export interface AgentSummary {
@@ -394,13 +395,9 @@ export const deptLabels: Record<string, string> = {
   orchestration_dept: '오케스트레이션팀',
 };
 
-export const deptColors: Record<string, string> = {
-  research_dept:      '#2ecc71',
-  finance_dept:       '#3b82f6',
-  content_dept:       '#a855f7',
-  dev_dept:           '#ef4444',
-  orchestration_dept: '#f59e0b',
-};
+/* 부서 색은 deptTheme.ts 가 기준이다. 여기서 따로 정하면 사무실 방 색과
+   어긋난다(실제로 연구부가 방에서는 파랑, 대화 프로필에서는 초록이었다). */
+export const deptColors: Record<string, string> = DEPT_COLORS;
 
 export function avatarFor(agent: { role: string; department: string }): string {
   const isManager = agent.role.toLowerCase() === 'project manager' ||

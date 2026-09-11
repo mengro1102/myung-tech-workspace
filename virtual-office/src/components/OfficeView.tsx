@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import PixelOffice from './PixelOffice';
 import AgentChat from './AgentChat';
+import { deptColor, deptTint } from '../deptTheme';
 import { api, type DialogueEntry } from '../api';
 
 interface Agent {
@@ -27,11 +28,12 @@ interface Props {
 }
 
 const DEPT_META: Record<string, { icon: string; label: string; color: string; bg: string; room: string }> = {
-  orchestration_dept: { icon: '🧠', label: 'CEO실',     color: '#8B5CF6', bg: 'rgba(139,92,246,0.08)',  room: 'CEO·오케스트레이션' },
-  research_dept:      { icon: '🔬', label: '연구실',    color: '#2DD4BF', bg: 'rgba(45,212,191,0.08)',  room: '학술연구팀' },
-  finance_dept:       { icon: '📈', label: '금융실',    color: '#F59E0B', bg: 'rgba(245,158,11,0.08)',  room: '금융투자팀' },
-  dev_dept:           { icon: '⚙️', label: '개발실',    color: '#FB923C', bg: 'rgba(251,146,60,0.08)', room: '개발팀' },
-  content_dept:       { icon: '✍️', label: '콘텐츠실', color: '#A78BFA', bg: 'rgba(167,139,250,0.08)', room: '콘텐츠생산팀' },
+  // 색은 deptTheme.ts 가 기준 — 사무실 방 색과 같다.
+  orchestration_dept: { icon: '🧠', label: 'CEO실',     color: deptColor('orchestration_dept'), bg: deptTint('orchestration_dept', 0.08), room: 'CEO·오케스트레이션' },
+  research_dept:      { icon: '🔬', label: '연구실',    color: deptColor('research_dept'),      bg: deptTint('research_dept', 0.08),      room: '학술연구팀' },
+  finance_dept:       { icon: '📈', label: '금융실',    color: deptColor('finance_dept'),       bg: deptTint('finance_dept', 0.08),       room: '금융투자팀' },
+  dev_dept:           { icon: '⚙️', label: '개발실',    color: deptColor('dev_dept'),           bg: deptTint('dev_dept', 0.08),           room: '개발팀' },
+  content_dept:       { icon: '✍️', label: '콘텐츠실', color: deptColor('content_dept'),       bg: deptTint('content_dept', 0.08),       room: '콘텐츠생산팀' },
 };
 
 const ROLE_EMOJI: Record<string, string> = {

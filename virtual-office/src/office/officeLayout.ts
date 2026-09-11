@@ -1,3 +1,4 @@
+import { DEPT_COLORS } from '../deptTheme';
 /* 오피스 평면도.
  *
  * 좌표는 전부 16px 타일 단위다. 화면 픽셀은 렌더러가 배율을 곱해 만든다.
@@ -82,7 +83,7 @@ export const ROOMS: RoomDef[] = [
   {
     dept: 'research_dept', label: '학술연구부',
     x: 1, y: 1, w: 18, h: 14,
-    floorPattern: 2, floorColor: '#3f4d69', wallColor: '#647aa0', accent: '#60a5fa',
+    floorPattern: 2, floorColor: '#3f4d69', wallColor: '#647aa0', accent: DEPT_COLORS.research_dept,
     carpet: { x: 4, y: 9, w: 7, h: 4, color: '#5a86c0', variant: 0 },
     doors: [[18, 8]],
     toMeeting: [[18, 8], [20, 8], [20, 24], [22, 24]],
@@ -102,7 +103,7 @@ export const ROOMS: RoomDef[] = [
   {
     dept: 'finance_dept', label: '금융투자부',
     x: 1, y: 16, w: 18, h: 17,
-    floorPattern: 1, floorColor: '#5e4d2c', wallColor: '#8d7440', accent: '#fbbf24',
+    floorPattern: 1, floorColor: '#5e4d2c', wallColor: '#8d7440', accent: DEPT_COLORS.finance_dept,
     carpet: { x: 4, y: 25, w: 7, h: 5, color: '#c09140', variant: 1 },
     doors: [[18, 24]],
     toMeeting: [[18, 24], [20, 24], [22, 24]],
@@ -124,7 +125,7 @@ export const ROOMS: RoomDef[] = [
   {
     dept: 'orchestration_dept', label: 'CEO실 · 회의실',
     x: 21, y: 1, w: 18, h: 32,
-    floorPattern: 4, floorColor: '#35594a', wallColor: '#4d7d64', accent: '#0ffd6a',
+    floorPattern: 4, floorColor: '#35594a', wallColor: '#4d7d64', accent: DEPT_COLORS.orchestration_dept,
     carpet: { x: 26, y: 20, w: 8, h: 8, color: '#4aa377', variant: 2 },
     doors: [[21, 8], [38, 8], [21, 24], [38, 24]],
     // CEO 실에서 회의실로는 칸막이 문만 지나면 된다.
@@ -175,7 +176,7 @@ export const ROOMS: RoomDef[] = [
   {
     dept: 'dev_dept', label: '개발실',
     x: 41, y: 1, w: 18, h: 14,
-    floorPattern: 3, floorColor: '#4a4370', wallColor: '#6d5c9b', accent: '#a78bfa',
+    floorPattern: 3, floorColor: '#4a4370', wallColor: '#6d5c9b', accent: DEPT_COLORS.dev_dept,
     carpet: { x: 45, y: 9, w: 7, h: 4, color: '#8468c9', variant: 0 },
     doors: [[41, 8]],
     toMeeting: [[41, 8], [39, 8], [39, 24], [37, 24]],
@@ -196,7 +197,7 @@ export const ROOMS: RoomDef[] = [
   {
     dept: 'content_dept', label: '콘텐츠생산부',
     x: 41, y: 16, w: 18, h: 17,
-    floorPattern: 2, floorColor: '#603a4f', wallColor: '#8d4d6d', accent: '#f472b6',
+    floorPattern: 2, floorColor: '#603a4f', wallColor: '#8d4d6d', accent: DEPT_COLORS.content_dept,
     carpet: { x: 45, y: 25, w: 7, h: 5, color: '#c96594', variant: 1 },
     doors: [[41, 24]],
     toMeeting: [[41, 24], [39, 24], [37, 24]],
