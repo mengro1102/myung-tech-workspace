@@ -322,6 +322,39 @@ def _strip_front(text: str) -> str:
     return t[end + 4:].lstrip() if end != -1 else text
 
 
+# 질의는 한국어, 코퍼스는 영어 논문이다. 번역 없이 세면 "지연"은 delay 를 쓴
+# 문단에서 0점이 되고, 결국 문서 앞부분이 실린다. 아래는 그 간극만 메우는
+# 최소 사전 — 검색 대상을 넓히는 게 아니라, 이미 고른 문서 안에서 어느 구간을
+# 실을지 정할 때만 쓴다.
+_KO_EN = {
+    "지연": ["delay", "latency"], "지터": ["jitter"], "핸드오프": ["handoff"],
+    "비동기": ["asynchronous", "async"], "동기": ["synchronous"],
+    "성공률": ["success rate"], "베이스라인": ["baseline"], "기준선": ["baseline"],
+    "지표": ["metric"], "평가": ["evaluation", "evaluate"], "실험": ["experiment"],
+    "결과": ["results"], "비교": ["comparison", "compared"], "제거": ["ablation"],
+    "충돌": ["collision"], "개입": ["intervention"], "안전": ["safety", "safe"],
+    "추론": ["inference"], "학습": ["training", "learning"], "미세조정": ["fine-tuning"],
+    "어댑터": ["adapter"], "정책": ["policy"], "보상": ["reward"],
+    "제어": ["control"], "궤적": ["trajectory"], "조작": ["manipulation"],
+    "로봇": ["robot"], "보행": ["locomotion"], "파지": ["grasp"],
+    "시뮬레이터": ["simulation", "simulator"], "시뮬레이션": ["simulation"],
+    "실물": ["real-world"], "실기": ["real-world"], "데이터셋": ["dataset"],
+    "파라미터": ["parameter"], "확산": ["diffusion"], "강화학습": ["reinforcement learning"],
+    "모방학습": ["imitation learning"], "세계모델": ["world model"],
+    "관측": ["observation"], "행동": ["action"], "청크": ["chunk"],
+}
+
+
+def _expand(terms: set[str]) -> set[str]:
+    """한국어 질의어에 영어 대응어를 얹는다. 원래 어휘는 그대로 둔다."""
+    out = set(terms)
+    for t in terms:
+        for ko, ens in _KO_EN.items():
+            if ko in t:          # 조사가 붙은 '지연을'·'성공률이' 까지 잡는다
+                out.update(ens)
+    return out
+
+
 def _relevant_slice(text: str, query: str, max_chars: int) -> str:
     """질의어가 가장 많이 나오는 구간을 잘라 준다.
 
@@ -331,25 +364,50 @@ def _relevant_slice(text: str, query: str, max_chars: int) -> str:
     body = _strip_front(text)
     if len(body) <= max_chars:
         return body
-    terms = {t for t in _tokenize(query) if len(t) >= 2}
+    terms = _expand({t for t in _tokenize(query) if len(t) >= 2})
     if not terms:
         return body[:max_chars]
+
+    # 한 덩어리로 실으면 초록이든 방법이든 **하나만** 들어온다. 논문에서 알고
+    # 싶은 것은 대개 둘 이상 — 무엇을 하겠다는 것(초록·방법)과 그래서 얼마나
+    # 좋아졌는가(실험·표)가 서로 다른 절에 떨어져 있다. 같은 예산을 반으로
+    # 나눠 겹치지 않는 상위 두 구간을 싣는다.
+    win = max_chars // 2
     low = body.lower()
-    step = max(200, max_chars // 4)
-    best, best_score = 0, -1
-    for start in range(0, len(body) - max_chars + 1, step):
-        seg = low[start:start + max_chars]
-        score = sum(seg.count(t) for t in terms)
-        if score > best_score:
-            best_score, best = score, start
-    if best_score <= 0:
+    step = max(200, win // 4)
+    scored: list[tuple[float, int]] = []
+    for start in range(0, max(1, len(body) - win + 1), step):
+        seg = low[start:start + win]
+        scored.append((sum(seg.count(t) for t in terms), start))
+    scored.sort(key=lambda x: (-x[0], x[1]))
+    if not scored or scored[0][0] <= 0:
         return body[:max_chars]
-    # 문단 중간에서 시작하지 않게 줄 경계로 맞춘다.
-    cut = body.rfind("\n", 0, best) + 1 if best else 0
-    piece = body[cut:cut + max_chars]
-    head = "…(앞부분 생략)\n" if cut > 0 else ""
-    tail = "\n…(뒷부분 생략)" if cut + max_chars < len(body) else ""
-    return head + piece + tail
+
+    picked: list[int] = []
+    for score, start in scored:
+        if score <= 0:
+            break
+        if any(abs(start - p) < win for p in picked):
+            continue          # 겹치면 같은 내용을 두 번 싣는 셈이다
+        picked.append(start)
+        if len(picked) == 2:
+            break
+
+    parts: list[str] = []
+    prev_end = 0
+    for start in sorted(picked):
+        # 문단 중간에서 시작하지 않게 줄 경계로 당기되, 가까울 때만 당긴다.
+        # 줄바꿈이 멀면(긴 한 문단) 예전 코드는 rfind 가 -1 을 줘서 문서 맨
+        # 앞으로 되돌아갔다 — 고르고도 앞부분을 싣는 꼴이었다.
+        nl = body.rfind("\n", max(0, start - 300), start)
+        cut = nl + 1 if nl != -1 else start
+        if cut > prev_end:
+            parts.append("…(생략)\n" if prev_end else "…(앞부분 생략)\n")
+        parts.append(body[cut:cut + win])
+        prev_end = cut + win
+    if prev_end < len(body):
+        parts.append("\n…(뒷부분 생략)")
+    return "".join(parts)
 
 
 def retrieve(
