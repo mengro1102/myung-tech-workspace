@@ -258,6 +258,7 @@ export default function ManageModal({ onClose, agentCount, globalModel, onOpenTe
   // 연동 자격증명
   const [tgToken,     setTgToken]     = useState('');
   const [tgChatId,    setTgChatId]    = useState('');
+  const [tgAllowed,   setTgAllowed]   = useState('');
   const [ytKey,       setYtKey]       = useState('');
   const [ytChannel,   setYtChannel]   = useState('');
   const [ytOauthId,   setYtOauthId]   = useState('');
@@ -329,7 +330,7 @@ export default function ManageModal({ onClose, agentCount, globalModel, onOpenTe
     if (msg.startsWith('✅')) {
       for (const setter of [setTgToken, setTgChatId, setYtKey, setYtChannel, setYtOauthId,
                             setYtOauthSec, setPpClientId, setPpClientSec, setTossKey,
-                            setGhToken, setHfToken]) setter('');
+                            setGhToken, setHfToken, setTgAllowed]) setter('');
     }
     fetch('/api/config/load').then(r => r.json()).then(d => { setConnKeys(d.keys ?? {}); setConnHints(d.hints ?? {}); }).catch(() => {});
     void refreshIntegrations();
@@ -851,13 +852,20 @@ export default function ManageModal({ onClose, agentCount, globalModel, onOpenTe
             <IntegCard icon="✈️" title="텔레그램 봇" desc="비서가 텔레그램으로 양방향 명령을 받고 보고합니다. 폰 어디서든 회사를 운영하세요."
               saved={!!connKeys.TELEGRAM_BOT_TOKEN}
               onGuide={() => setGuide('telegram')}
-              onSave={() => save('텔레그램 봇', { TELEGRAM_BOT_TOKEN: tgToken, TELEGRAM_CHAT_ID: tgChatId })}
+              onSave={() => save('텔레그램 봇', { TELEGRAM_BOT_TOKEN: tgToken, TELEGRAM_CHAT_ID: tgChatId,
+                                            TELEGRAM_ALLOWED_USERS: tgAllowed })}
               onHelp="https://core.telegram.org/bots#how-do-i-create-a-bot"
             >
               <Field label="Bot Token" placeholder="123456789:ABCdef..." value={tgToken} saved={connHints.TELEGRAM_BOT_TOKEN} onChange={setTgToken} secret
                 hint="@BotFather에서 /newbot으로 발급 (숫자:문자)" />
               <Field label="Chat ID" placeholder="비워두면 자동 감지" value={tgChatId} saved={connHints.TELEGRAM_CHAT_ID} onChange={setTgChatId}
                 hint="봇한테 메시지 1번 보내고 비운 채 저장하면 자동 입력" />
+              {/* 이 칸이 비어 있으면 텔레그램에서 아무도 결재를 누를 수 없다.
+                  봇 토큰이 새더라도 남이 업로드·PR 을 승인하지 못해야 하므로,
+                  기본값은 '아무도' 다. */}
+              <Field label="결재 허용 사용자 ID (쉼표로 여러 명)" placeholder="예: 8791756428"
+                value={tgAllowed} saved={connHints.TELEGRAM_ALLOWED_USERS} onChange={setTgAllowed}
+                hint="봇에게 아무 메시지나 보내면 본인 ID 를 알려줍니다. 비우면 결재 버튼이 아무에게도 동작하지 않습니다" />
             </IntegCard>
 
             {/* YouTube Data API */}
