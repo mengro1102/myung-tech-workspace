@@ -3790,3 +3790,131 @@ button.pj-deliv-item[aria-expanded="true"] { background: var(--glass-hi); border
 .pj-art-file { font-size: 11px; color: var(--muted); font-family: 'JetBrains Mono', monospace; word-break: break-all; }
 .pj-art-file.ok { color: #4ade80; }
 .pj-art-body { padding: 4px 16px 14px; max-height: 520px; overflow-y: auto; }
+
+
+/* ── 노트 탭 ────────────────────────────────────────────────────────────
+   할 일을 스레드 카드로 쌓는다. 카드는 접힌 상태가 기본이라 목록을 훑을 때는
+   제목 줄만 보이고, 눌러야 본문이 열린다 — 스무 장이 쌓여도 한 화면에 든다. */
+.nt-wrap { display: flex; flex-direction: column; gap: 12px; padding: 16px; overflow-y: auto; }
+
+.nt-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.nt-title { display: flex; align-items: baseline; gap: 10px; font-size: 16px; font-weight: 700; }
+.nt-count { font-size: 12px; font-weight: 500; color: var(--muted); }
+.nt-actions { display: flex; align-items: center; gap: 6px; margin-left: auto; flex-wrap: wrap; }
+
+.nt-filter, .nt-clear, .nt-new, .nt-ghost, .nt-save {
+  padding: 6px 12px; font-size: 12px; border-radius: 8px; cursor: pointer;
+  border: 1px solid var(--border); background: var(--glass-bg); color: var(--text);
+  transition: var(--t-ui) .15s;
+}
+.nt-filter:hover, .nt-clear:hover, .nt-ghost:hover { background: var(--glass-hi); }
+.nt-filter.on { background: var(--primary-dim); border-color: var(--primary); color: var(--text); }
+.nt-clear { color: var(--muted); }
+.nt-new, .nt-save { background: var(--primary); border-color: var(--primary); font-weight: 600; }
+.nt-new:hover, .nt-save:hover { filter: brightness(1.12); }
+
+.nt-err {
+  padding: 9px 12px; border-radius: 8px; font-size: 12px; cursor: pointer;
+  background: rgba(248, 113, 113, .12); border: 1px solid rgba(248, 113, 113, .35);
+  color: #fca5a5;
+}
+.nt-empty { padding: 42px 16px; text-align: center; color: var(--muted); font-size: 13px; }
+
+.nt-list { display: flex; flex-direction: column; gap: 8px; }
+
+.nt-card {
+  border: 1px solid var(--border); border-radius: 11px; background: var(--bg3);
+  overflow: hidden; transition: var(--t-ui) .15s;
+}
+.nt-card:hover { border-color: var(--glass-border); }
+/* 끝낸 카드는 지우지 않고 가라앉힌다 — 무엇을 했는지가 기록으로 남는다. */
+.nt-card.done { opacity: .5; }
+.nt-card.done .nt-card-title { text-decoration: line-through; text-decoration-thickness: 1px; }
+
+.nt-card-head { display: flex; align-items: center; gap: 8px; padding: 10px 12px; }
+
+/* 체크박스는 손가락으로도 눌러야 하므로 기본 크기보다 키운다. */
+.nt-check { position: relative; display: grid; place-items: center; width: 22px; height: 22px; flex: none; cursor: pointer; }
+.nt-check input { position: absolute; opacity: 0; width: 100%; height: 100%; margin: 0; cursor: pointer; }
+.nt-check span {
+  width: 18px; height: 18px; border-radius: 6px; border: 1.5px solid var(--muted);
+  transition: var(--t-ui) .15s;
+}
+.nt-check input:checked + span {
+  background: var(--secondary); border-color: var(--secondary);
+}
+.nt-check input:checked + span::after {
+  content: '✓'; display: block; text-align: center; line-height: 15px;
+  font-size: 13px; font-weight: 700; color: #06231f;
+}
+.nt-check input:focus-visible + span { outline: 2px solid var(--primary); outline-offset: 2px; }
+
+.nt-card-title {
+  flex: 1; min-width: 0; display: flex; align-items: center; gap: 7px;
+  padding: 2px 0; font-size: 13.5px; font-weight: 600; text-align: left;
+  background: none; border: 0; color: var(--text); cursor: pointer;
+}
+.nt-pin-mark { font-size: 11px; }
+.nt-chev { color: var(--muted); font-size: 11px; }
+
+.nt-tag {
+  flex: none; padding: 2px 7px; border-radius: 5px; font-size: 10.5px; font-weight: 600;
+  background: var(--glass-bg); border: 1px solid var(--border); color: var(--muted);
+}
+.nt-tag.t-1 { color: #fbbf24; border-color: rgba(251, 191, 36, .4); }   /* 입력 */
+.nt-tag.t-2 { color: #60a5fa; border-color: rgba(96, 165, 250, .4); }   /* 계정 */
+.nt-tag.t-3 { color: #f472b6; border-color: rgba(244, 114, 182, .4); }  /* 결재 */
+.nt-tag.t-4 { color: #2DD4BF; border-color: rgba(45, 212, 191, .4); }   /* 확인 */
+
+.nt-when { flex: none; font-size: 11px; color: var(--muted); }
+
+/* 도구는 평소 흐리게 두고 카드에 손이 갈 때 드러낸다. 목록이 단추밭이
+   되지 않게. 터치 기기에는 hover 가 없으므로 항상 보이게 둔다. */
+.nt-card-tools { display: flex; gap: 2px; flex: none; opacity: .35; transition: opacity .15s; }
+.nt-card:hover .nt-card-tools, .nt-card:focus-within .nt-card-tools { opacity: 1; }
+@media (hover: none) { .nt-card-tools { opacity: 1; } }
+.nt-card-tools button {
+  padding: 4px 6px; font-size: 12px; line-height: 1; border: 0; border-radius: 6px;
+  background: none; cursor: pointer; transition: var(--t-ui) .15s;
+}
+.nt-card-tools button:hover { background: var(--glass-hi); }
+
+.nt-card-body {
+  padding: 2px 14px 12px 42px; border-top: 1px solid var(--border);
+  font-size: 13px; line-height: 1.7;
+}
+.nt-card-body > :first-child { margin-top: 10px; }
+
+/* ── 편집기 ── */
+.nt-editor {
+  display: flex; flex-direction: column; gap: 8px; padding: 12px;
+  border: 1px solid var(--primary); border-radius: 11px; background: var(--bg2);
+}
+.nt-editor-row { display: flex; gap: 8px; }
+.nt-input, .nt-select, .nt-textarea {
+  padding: 9px 11px; font-size: 13px; font-family: inherit; color: var(--text);
+  background: var(--bg); border: 1px solid var(--border); border-radius: 8px;
+}
+.nt-input { flex: 1; min-width: 0; font-weight: 600; }
+.nt-select { flex: none; }
+.nt-textarea { resize: vertical; line-height: 1.6; }
+.nt-input:focus, .nt-textarea:focus, .nt-select:focus { outline: none; border-color: var(--primary); }
+
+.nt-preview {
+  min-height: 140px; padding: 10px 12px; font-size: 13px; line-height: 1.7;
+  background: var(--bg); border: 1px solid var(--border); border-radius: 8px;
+  overflow-x: auto;
+}
+.nt-editor-foot { display: flex; align-items: center; gap: 8px; }
+.nt-hint { margin-right: auto; font-size: 11px; color: var(--muted); }
+
+/* 폰에서는 제목 줄이 좁으므로 시각·도구를 아래로 접는다. */
+@media (max-width: 560px) {
+  .nt-wrap { padding: 12px; }
+  .nt-card-head { flex-wrap: wrap; }
+  .nt-card-title { flex-basis: calc(100% - 30px); }
+  .nt-when { order: 3; margin-left: 30px; }
+  .nt-card-tools { order: 4; margin-left: auto; }
+  .nt-card-body { padding-left: 14px; }
+  .nt-actions { width: 100%; margin-left: 0; }
+}

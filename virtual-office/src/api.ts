@@ -75,7 +75,7 @@ async function safeJson<T>(p: Promise<Response>): Promise<T | null> {
   }
 }
 
-export type StoreCollection = 'tasks' | 'services' | 'approvals';
+export type StoreCollection = 'tasks' | 'services' | 'approvals' | 'notes';
 
 export interface StoreItem {
   id: string;
