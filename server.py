@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import json
+import mimetypes
 import os
 import sys
 import time
@@ -381,6 +382,15 @@ PORT = int(os.environ.get("API_PORT", 9000))
 # 있었다는 뜻이다. 이 PC 에서만 쓰므로 루프백에 고정한다. 바깥에 열어야 할 일이
 # 생기면 그때는 바인드만 바꿀 게 아니라 인증부터 붙여야 한다.
 BIND_HOST = "127.0.0.1"
+
+# 빌드된 화면. 있으면 이 서버가 같이 내보낸다(없으면 API 전용으로 동작).
+UI_DIR = ROOT / "virtual-office" / "dist"
+
+# 윈도우는 레지스트리에서 MIME 을 읽는데, 거기서 .js 가 text/plain 으로 잡혀
+# 있는 PC 가 흔하다. 그러면 브라우저가 모듈 실행을 거부해 흰 화면만 뜬다.
+mimetypes.add_type("text/javascript", ".js")
+mimetypes.add_type("text/css", ".css")
+mimetypes.add_type("image/svg+xml", ".svg")
 
 # ── Ollama 상태 프로브 캐시 ───────────────────────────────────
 # Ollama가 내려가 있으면 연결 시도가 TCP 타임아웃까지 수 초 블로킹된다. /api/health는
@@ -956,8 +966,57 @@ class Handler(BaseHTTPRequestHandler):
 
 
 
+        elif not path.startswith("/api"):
+            self._serve_ui(path)
+
         else:
             _json_resp(self, 404, {"error": "Not found"})
+
+    # ── 빌드된 화면 서빙 ──────────────────────────────────────
+    #
+    # 개발 중에는 Vite(5174)가 화면을, 이 서버(9000)가 API를 맡고 Vite 가
+    # /api 를 이쪽으로 넘긴다. 그 구성은 이 PC 안에서만 성립한다 — 밖에서
+    # 쓰려면 포트 두 개를 뚫어야 하고, HMR 웹소켓이 터널을 잘 타지 못한다.
+    # 빌드본을 이 서버가 같이 내보내면 출처가 하나가 되므로, 터널도 포트
+    # 하나만 감싸면 된다. 화면과 API 가 같은 출처라 CORS 도 필요 없다.
+    def _serve_ui(self, path: str) -> None:
+        if not UI_DIR.is_dir():
+            _json_resp(self, 404, {"error": "빌드된 화면이 없습니다 "
+                                            "(virtual-office 에서 npm run build)"})
+            return
+
+        rel = (path or "/").lstrip("/") or "index.html"
+        target = (UI_DIR / rel).resolve()
+        # 심볼릭 링크나 ../ 로 dist 밖을 읽지 못하게 막는다.
+        if not target.is_relative_to(UI_DIR.resolve()) or not target.is_file():
+            # 클라이언트 라우팅: 없는 경로는 화면이 알아서 처리하도록 index 로.
+            target = UI_DIR / "index.html"
+            rel = "index.html"
+            if not target.is_file():
+                _json_resp(self, 404, {"error": "index.html 이 없습니다"})
+                return
+
+        ctype = mimetypes.guess_type(rel)[0] or "application/octet-stream"
+        if ctype.startswith("text/") or ctype in ("application/javascript",
+                                                  "application/json"):
+            ctype += "; charset=utf-8"
+        try:
+            body = target.read_bytes()
+        except OSError as e:
+            _json_resp(self, 500, {"error": f"읽기 실패: {e}"})
+            return
+
+        self.send_response(200)
+        self.send_header("Content-Type", ctype)
+        self.send_header("Content-Length", str(len(body)))
+        # assets/ 는 파일명에 해시가 붙으므로 길게 캐시해도 안전하다. index.html
+        # 은 그 해시를 가리키는 지도라서 캐시되면 옛 화면에 갇힌다.
+        if rel.startswith("assets/"):
+            self.send_header("Cache-Control", "public, max-age=31536000, immutable")
+        else:
+            self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(body)
 
     def do_PUT(self):
         """PATCH 대신 PUT 을 쓴다 — do_PATCH 는 이미 에이전트 수정에 쓰고 있다."""
