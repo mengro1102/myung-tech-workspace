@@ -130,7 +130,9 @@ DEPT_TIER = {
 
 KB_HOPS = 1
 KB_LIMIT = 5
-KB_BUDGET_CHARS = 8000
+# 문서당 예산 = 이 값 / KB_LIMIT. 8000 이면 문서 하나에 1,600자였고,
+# 논문 전문에서는 그 분량이 표지와 초록으로 다 찼다.
+KB_BUDGET_CHARS = 16000
 
 POLL_INTERVAL = 3.0
 REQUEST_TIMEOUT = 300

@@ -313,6 +313,45 @@ def _seed_scores(query: str, *, max_seeds: int = 6) -> dict[str, float]:
     return dict(sorted(scores.items(), key=lambda kv: -kv[1])[:max_seeds])
 
 
+def _strip_front(text: str) -> str:
+    """YAML 머리말을 뗀다. 본문이 어디서 시작하는지가 중요하다."""
+    t = text.lstrip()
+    if not t.startswith("---"):
+        return text
+    end = t.find("\n---", 3)
+    return t[end + 4:].lstrip() if end != -1 else text
+
+
+def _relevant_slice(text: str, query: str, max_chars: int) -> str:
+    """질의어가 가장 많이 나오는 구간을 잘라 준다.
+
+    앞에서부터 자르면 논문 전문에서는 표지와 초록만 실린다. 우리가 알고 싶은
+    것은 대개 방법 절이다. 창을 옮겨 가며 질의어가 가장 많은 곳을 고른다.
+    """
+    body = _strip_front(text)
+    if len(body) <= max_chars:
+        return body
+    terms = {t for t in _tokenize(query) if len(t) >= 2}
+    if not terms:
+        return body[:max_chars]
+    low = body.lower()
+    step = max(200, max_chars // 4)
+    best, best_score = 0, -1
+    for start in range(0, len(body) - max_chars + 1, step):
+        seg = low[start:start + max_chars]
+        score = sum(seg.count(t) for t in terms)
+        if score > best_score:
+            best_score, best = score, start
+    if best_score <= 0:
+        return body[:max_chars]
+    # 문단 중간에서 시작하지 않게 줄 경계로 맞춘다.
+    cut = body.rfind("\n", 0, best) + 1 if best else 0
+    piece = body[cut:cut + max_chars]
+    head = "…(앞부분 생략)\n" if cut > 0 else ""
+    tail = "\n…(뒷부분 생략)" if cut + max_chars < len(body) else ""
+    return head + piece + tail
+
+
 def retrieve(
     query: str,
     *,
@@ -377,7 +416,7 @@ def retrieve(
         }
         if include_body and rel:
             try:
-                doc["body"] = read_node(rel)[:max_chars]
+                doc["body"] = _relevant_slice(read_node(rel), query, max_chars)
             except (OSError, ValueError):
                 doc["body"] = ""
         out.append(doc)

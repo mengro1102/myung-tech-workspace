@@ -34,6 +34,8 @@ ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT / "shared_memory"))
 sys.path.insert(0, str(ROOT / "bridge"))
 
+import requests
+
 import task_queue
 import message_broker
 
@@ -45,7 +47,32 @@ except ImportError:
     sys.exit(1)
 
 # ── 설정 ──────────────────────────────────────────────
-TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
+def _env(key: str, default: str = "") -> str:
+    """환경변수 → .env 순으로 찾는다.
+
+    예전에는 환경변수만 봤다. 토큰은 .env 에 있는데 배치로 띄우면 그 값이
+    환경에 없어서, 게이트웨이가 "토큰을 설정하세요" 만 찍고 즉시 죽었다.
+    """
+    v = os.environ.get(key, "").strip()
+    if v:
+        return v
+    try:
+        for line in (ROOT / ".env").read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if line.startswith(f"{key}=") and not line.startswith("#"):
+                return line.split("=", 1)[1].strip().strip('"').strip("'")
+    except OSError:
+        pass
+    return default
+
+
+API = _env("MYUNGTECH_API", "http://127.0.0.1:9000")
+
+# 결재를 누를 수 있는 사람. 비어 있으면 아무도 못 누른다 — 봇 토큰이 새면
+# 누구나 업로드·PR 을 승인할 수 있게 되므로, 기본값은 '아무도' 여야 한다.
+ALLOWED = {u.strip() for u in _env("TELEGRAM_ALLOWED_USERS").split(",") if u.strip()}
+
+TOKEN = _env("TELEGRAM_BOT_TOKEN")
 if not TOKEN:
     print("[ERROR] TELEGRAM_BOT_TOKEN 환경변수를 설정하세요.")
     print("  export TELEGRAM_BOT_TOKEN=<your_bot_token>   (Linux/Mac)")
@@ -149,6 +176,163 @@ def _dispatch_and_reply(chat_id: int, instruction: str, target_dept: str = "orch
     )
 
 
+# ── 결재 ──────────────────────────────────────────────
+#
+# 화면 앞에 앉아 있을 때만 승인할 수 있으면, 자율 프로젝트는 사장님이 자리에
+# 없는 동안 결재 하나에 막혀 멈춘다. 그래서 텔레그램에서 목록을 보고 그 자리
+# 에서 승인한다. 승인은 서버 API 를 그대로 부르므로, 화면에서 누르는 것과
+# 완전히 같은 경로다 — 파일이 쓰이고, 업로드가 올라가고, 프로젝트가 시작된다.
+
+KIND_LABEL = {"file": "📄 파일 저장", "action": "🚀 외부 실행",
+              "project": "📋 프로젝트 착수", None: "결재"}
+
+
+def _allowed(msg_or_call) -> bool:
+    uid = str(getattr(msg_or_call, "from_user", None).id) if getattr(
+        msg_or_call, "from_user", None) else ""
+    return uid in ALLOWED
+
+
+def _deny(chat_id: int, uid: str) -> None:
+    bot.send_message(
+        chat_id,
+        "🔒 이 봇은 사장님 전용입니다.\n\n"
+        f"당신의 사용자 ID: `{uid}`\n"
+        "명테크 화면 → ⚙️ 관리 탭 → 🔗 연동 → ✈️ 텔레그램 카드의 "
+        "`TELEGRAM_ALLOWED_USERS` 에 이 값을 넣고 저장하면 됩니다.",
+        parse_mode="Markdown")
+
+
+def _pending() -> list[dict]:
+    r = requests.get(f"{API}/api/store/approvals", timeout=10)
+    return [a for a in r.json().get("items", []) if a.get("status") == "pending"]
+
+
+def _brief(a: dict) -> str:
+    """무엇이 나가는지 한눈에. 되돌릴 수 없는 값은 반드시 보인다."""
+    bits = [KIND_LABEL.get(a.get("kind"), "결재"), a.get("label", "")[:90]]
+    args = a.get("action_args") or {}
+    if args.get("privacy"):
+        bits.append(f"공개범위 {args['privacy']}")
+    if args.get("repo"):
+        bits.append(f"레포 {args['repo']}")
+    if a.get("file_path"):
+        bits.append(f"경로 workspace/{a['file_path']}")
+    return " · ".join(b for b in bits if b)
+
+
+def _keyboard(aid: str):
+    kb = telebot.types.InlineKeyboardMarkup(row_width=3)
+    kb.add(telebot.types.InlineKeyboardButton("✅ 승인", callback_data=f"ap:{aid}"),
+           telebot.types.InlineKeyboardButton("❌ 거절", callback_data=f"rj:{aid}"),
+           telebot.types.InlineKeyboardButton("🔍 내용", callback_data=f"dt:{aid}"))
+    return kb
+
+
+@bot.message_handler(commands=["결재", "approvals"])
+def handle_approvals(msg):
+    uid = str(msg.from_user.id)
+    if not _allowed(msg):
+        _deny(msg.chat.id, uid)
+        return
+    try:
+        rows = _pending()
+    except Exception as exc:  # noqa: BLE001
+        bot.send_message(msg.chat.id, f"⚠️ 명테크 서버에 연결하지 못했습니다 ({API})\n{exc}")
+        return
+    if not rows:
+        bot.send_message(msg.chat.id, "✅ 대기 중인 결재가 없습니다.")
+        return
+    bot.send_message(msg.chat.id, f"📋 대기 중인 결재 {len(rows)}건")
+    for a in rows:
+        bot.send_message(msg.chat.id, _brief(a), reply_markup=_keyboard(a["id"]))
+
+
+@bot.callback_query_handler(func=lambda c: c.data[:3] in ("ap:", "rj:", "dt:"))
+def handle_approval_click(call):
+    uid = str(call.from_user.id)
+    if not _allowed(call):
+        bot.answer_callback_query(call.id, "권한이 없습니다")
+        _deny(call.message.chat.id, uid)
+        return
+    kind, aid = call.data[:2], call.data[3:]
+
+    if kind == "dt":
+        try:
+            rows = requests.get(f"{API}/api/store/approvals", timeout=10).json()["items"]
+            a = next((x for x in rows if x["id"] == aid), None)
+        except Exception as exc:  # noqa: BLE001
+            bot.answer_callback_query(call.id, "조회 실패")
+            return
+        if not a:
+            bot.answer_callback_query(call.id, "이미 사라진 결재입니다")
+            return
+        body = a.get("file_content") or json.dumps(a.get("action_args") or {},
+                                                   ensure_ascii=False, indent=2)
+        detail = (a.get("detail") or "")[:500]
+        bot.answer_callback_query(call.id)
+        bot.send_message(call.message.chat.id,
+                         (detail + "\n\n" if detail else "") + body[:3000] or "(내용 없음)")
+        return
+
+    status = "approved" if kind == "ap" else "rejected"
+    try:
+        r = requests.put(f"{API}/api/store/approvals/{aid}",
+                         json={"status": status}, timeout=180)
+        d = r.json()
+    except Exception as exc:  # noqa: BLE001
+        bot.answer_callback_query(call.id, "실패")
+        bot.send_message(call.message.chat.id, f"⚠️ 처리 실패: {exc}")
+        return
+
+    f = d.get("followup") or {}
+    if status == "rejected":
+        result = "❌ 거절했습니다 — 실행하지 않았습니다."
+    elif f.get("ran"):
+        result = f"✅ 실행 완료 — {f['ran']}"
+    elif f.get("wrote"):
+        result = f"✅ 저장 완료 — {f['wrote']}"
+    elif f.get("queued"):
+        result = "✅ 승인 — 해당 부서에 실행 지시를 보냈습니다."
+    elif f.get("reason"):
+        result = f"⚠️ {f['reason']}"
+    else:
+        result = "✅ 승인했습니다."
+
+    bot.answer_callback_query(call.id, result[:190])
+    try:
+        bot.edit_message_text(call.message.text + "\n\n" + result,
+                              call.message.chat.id, call.message.message_id)
+    except Exception:  # noqa: BLE001
+        bot.send_message(call.message.chat.id, result)
+
+
+def _watch_approvals():
+    """새 결재가 생기면 먼저 알린다 — 물어봐야만 알 수 있으면 놓친다."""
+    seen: set[str] = set()
+    first = True
+    while True:
+        try:
+            rows = _pending()
+            if first:                       # 시작할 때 쌓여 있던 것은 알리지 않는다
+                seen = {a["id"] for a in rows}
+                first = False
+            else:
+                for a in rows:
+                    if a["id"] in seen:
+                        continue
+                    seen.add(a["id"])
+                    for uid in ALLOWED:
+                        try:
+                            bot.send_message(int(uid), "🔔 새 결재\n" + _brief(a),
+                                             reply_markup=_keyboard(a["id"]))
+                        except Exception:  # noqa: BLE001
+                            pass
+        except Exception:  # noqa: BLE001
+            pass
+        time.sleep(20)
+
+
 # ── 명령어 핸들러 ──────────────────────────────────────
 
 @bot.message_handler(commands=["start", "help"])
@@ -162,7 +346,8 @@ def handle_start(msg):
         "`/dept 금융 <지시>`   — 금융팀 직접 지시\n"
         "`/dept 개발 <지시>`   — 개발팀 직접 지시\n"
         "`/dept 콘텐츠 <지시>` — 콘텐츠팀 직접 지시\n\n"
-        "`/status`             — 시스템 현황\n\n"
+        "`/status`             — 시스템 현황\n"
+        "`/결재`               — 대기 중인 결재를 버튼으로 승인/거절\n\n"
         "또는 자유롭게 지시사항을 입력하면 자동으로 담당 부서를 찾아드립니다."
     )
     bot.send_message(msg.chat.id, text, parse_mode="Markdown")
@@ -220,6 +405,9 @@ def handle_dept(msg):
 @bot.message_handler(func=lambda m: True)
 def handle_text(msg):
     """일반 텍스트 → 오케스트레이터 라우팅."""
+    if not _allowed(msg):
+        _deny(msg.chat.id, str(msg.from_user.id))
+        return
     instruction = (
         f"{ORCH_SYSTEM}\n\n"
         f"디렉터 지시: {msg.text}"
@@ -249,6 +437,12 @@ if __name__ == "__main__":
     print("  dispatcher도 함께 실행하세요:")
     print("    python run.py dispatch daemon")
     print("=" * 50)
+    if ALLOWED:
+        print(f"  결재 허용 사용자: {', '.join(sorted(ALLOWED))}")
+        threading.Thread(target=_watch_approvals, daemon=True).start()
+    else:
+        print("  [주의] TELEGRAM_ALLOWED_USERS 가 비어 있습니다 — 아무도 결재할 수 없습니다.")
+        print("         봇에 아무 메시지나 보내면 당신의 사용자 ID 를 알려 줍니다.")
     print("  대기 중… (Ctrl+C로 종료)\n")
 
     bot.infinity_polling(timeout=30, long_polling_timeout=20)

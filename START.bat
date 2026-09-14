@@ -71,6 +71,18 @@ tasklist /FI "WINDOWTITLE eq mt-dispatch*" 2>nul | findstr "cmd.exe" > nul && (
 )
 
 echo.
+echo  [5/7] Telegram gateway (approvals)...
+REM  Myung-Tech has its own bot token, separate from Mengbiseo, so the
+REM  two gateways do not fight over one bot (409). This one answers
+REM  /approvals and executes approve/reject buttons.
+tasklist /FI "WINDOWTITLE eq mt-telegram*" 2>nul | findstr "cmd.exe" > nul && (
+    echo         already running - skipped.
+) || (
+    start "mt-telegram" /min cmd /c "cd /d %WS% && python telegram_gateway.py"
+    echo         launched.
+)
+
+echo.
 echo  [5/6] UI dev server (port 5174)...
 netstat -ano | findstr ":5174 " | findstr LISTENING > nul && (
     echo         already running - skipped.

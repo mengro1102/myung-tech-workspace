@@ -262,6 +262,9 @@ def _save_runtime_config(patch: dict) -> dict:
 # UI 연동 탭에서 저장할 수 있는 키. 여기 없는 이름은 거부한다.
 ALLOWED_ENV_KEYS = {
     "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID",
+    # 결재를 누를 수 있는 텔레그램 사용자 id 목록(쉼표). 비어 있으면 아무도
+    # 못 누른다 — 봇 토큰이 새도 남이 업로드를 승인할 수 없어야 한다.
+    "TELEGRAM_ALLOWED_USERS",
     "YOUTUBE_API_KEY", "YOUTUBE_CHANNEL_ID",
     "YOUTUBE_OAUTH_CLIENT_ID", "YOUTUBE_OAUTH_CLIENT_SECRET",
     # PAYPAL_MODE 가 빠져 있었다. UI 는 이 셋을 함께 보내므로 PayPal 저장이
