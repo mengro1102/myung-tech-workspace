@@ -14,6 +14,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import hmac
 import json
 import mimetypes
 import os
@@ -616,10 +618,155 @@ def _json_resp(handler, status: int, data: dict | list):
     handler.wfile.write(body)
 
 
+# ── 접근 열쇠 ────────────────────────────────────────────────
+#
+# 이 서버는 결재 승인(유튜브 업로드 포함)·파일 쓰기·.env 저장을 인증 없이
+# 받는다. 이 PC 안에서만 쓰는 동안에는 루프백 바인드가 그 방어였다. 밖에서
+# 쓰려고 터널을 씌우는 순간 그 방어가 사라지므로, 그때는 열쇠가 필요하다.
+#
+# MYUNGTECH_ACCESS_KEY 가 비어 있으면 예전과 똑같이 동작한다(무인증·루프백).
+# 값이 있으면, **터널을 타고 들어온 요청만** 로그인을 요구한다. 이 PC 에서
+# 직접 부르는 요청(워치독·STATUS.bat·텔레그램 게이트웨이·로컬 브라우저)은
+# 그대로 통과한다 — 안 그러면 자동화가 전부 401 로 멈춘다.
+ACCESS_KEY = (_env_get("MYUNGTECH_ACCESS_KEY")
+              or os.environ.get("MYUNGTECH_ACCESS_KEY", "")).strip()
+SESSION_TTL = 30 * 24 * 3600          # 폰에서 매번 다시 치게 하면 안 쓰게 된다
+_SESSION_SECRET = hashlib.sha256(b"myungtech-session|" + ACCESS_KEY.encode()).digest()
+
+# 무차별 대입 방어. 열쇠는 사람이 외우는 문자열이라 초당 수천 번 시도되면
+# 뚫린다. 실패가 쌓이면 잠근다.
+_LOGIN_FAILS: dict[str, list] = {}
+_LOGIN_MAX = 8
+_LOGIN_LOCK = 300.0
+
+
+def _make_session(now: float | None = None) -> str:
+    exp = int((now or time.time()) + SESSION_TTL)
+    sig = hmac.new(_SESSION_SECRET, str(exp).encode(), hashlib.sha256).hexdigest()
+    return f"{exp}.{sig}"
+
+
+def _session_valid(token: str) -> bool:
+    if not token or "." not in token:
+        return False
+    exp_s, _, sig = token.partition(".")
+    try:
+        if int(exp_s) < time.time():
+            return False
+    except ValueError:
+        return False
+    want = hmac.new(_SESSION_SECRET, exp_s.encode(), hashlib.sha256).hexdigest()
+    return hmac.compare_digest(sig, want)
+
+
+LOGIN_PAGE = """<!doctype html><html lang="ko"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>명테크</title><style>
+:root{color-scheme:dark}
+body{margin:0;min-height:100vh;display:grid;place-items:center;background:#0b1020;
+color:#e8ecf8;font:15px/1.6 system-ui,-apple-system,"Malgun Gothic",sans-serif}
+form{width:min(92vw,340px);padding:28px;background:#141a2e;border:1px solid #263152;
+border-radius:14px}
+h1{margin:0 0 4px;font-size:19px}p{margin:0 0 20px;color:#8f9bc0;font-size:13px}
+input{width:100%;box-sizing:border-box;padding:12px;font-size:16px;border-radius:9px;
+border:1px solid #2f3a5e;background:#0d1224;color:#e8ecf8}
+button{width:100%;margin-top:12px;padding:12px;font-size:15px;font-weight:600;
+border:0;border-radius:9px;background:#5b6cff;color:#fff;cursor:pointer}
+.err{margin-top:12px;color:#ff8f8f;font-size:13px;min-height:1.2em}
+</style></head><body>
+<form onsubmit="go(event)">
+<h1>명테크</h1><p>외부 접속입니다. 접근 열쇠를 넣어 주세요.</p>
+<input id="k" type="password" autocomplete="current-password" autofocus>
+<button>들어가기</button><div class="err" id="e"></div></form>
+<script>
+async function go(ev){ev.preventDefault();var e=document.getElementById('e');
+e.textContent='';var r=await fetch('/api/auth/login',{method:'POST',
+headers:{'Content-Type':'application/json'},
+body:JSON.stringify({key:document.getElementById('k').value})});
+var d=await r.json().catch(function(){return {}});
+if(r.ok&&d.ok){location.href='/';}else{e.textContent=d.error||'열쇠가 맞지 않습니다';}}
+</script></body></html>"""
+
+
 class Handler(BaseHTTPRequestHandler):
 
     def log_message(self, fmt, *args):
         pass  # 조용하게
+
+    # ── 인증 ──────────────────────────────────────────────
+    def _local_direct(self) -> bool:
+        """이 PC 에서 직접 온 요청인가.
+
+        터널(tailscale serve/funnel, cloudflared)은 프록시라서 X-Forwarded-*
+        를 붙이고 Host 를 바깥 이름으로 준다. 그 흔적이 하나라도 있으면
+        바깥에서 온 것으로 본다. 흔적을 지울 수 있는 건 이 PC 안의 프로세스
+        뿐인데, 거기까지 들어온 상대는 이미 이 파일을 직접 읽을 수 있다.
+        """
+        h = self.headers
+        if h.get("X-Forwarded-For") or h.get("X-Forwarded-Proto") \
+                or h.get("Tailscale-User-Login") or h.get("Cf-Connecting-Ip"):
+            return False
+        host = (h.get("Host") or "").rsplit(":", 1)[0].strip("[]").lower()
+        if host not in ("127.0.0.1", "localhost", "::1", ""):
+            return False
+        return self.client_address[0] in ("127.0.0.1", "::1")
+
+    def _has_session(self) -> bool:
+        raw = self.headers.get("Cookie") or ""
+        for part in raw.split(";"):
+            k, _, v = part.strip().partition("=")
+            if k == "mt_session" and _session_valid(v):
+                return True
+        return False
+
+    def _blocked(self, path: str) -> bool:
+        """막았으면 True — 호출한 쪽은 즉시 리턴해야 한다."""
+        if not ACCESS_KEY:
+            return False
+        if path == "/login" or path.startswith("/api/auth/"):
+            return False
+        if self._local_direct() or self._has_session():
+            return False
+        if path.startswith("/api"):
+            _json_resp(self, 401, {"error": "로그인이 필요합니다", "login": "/login"})
+        else:
+            body = LOGIN_PAGE.encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            self.wfile.write(body)
+        return True
+
+    def _login(self) -> None:
+        who = self.headers.get("X-Forwarded-For") or self.client_address[0]
+        now = time.time()
+        fails = [t for t in _LOGIN_FAILS.get(who, []) if now - t < _LOGIN_LOCK]
+        if len(fails) >= _LOGIN_MAX:
+            _LOGIN_FAILS[who] = fails
+            _json_resp(self, 429, {"ok": False,
+                                   "error": "시도가 너무 많습니다. 5분 뒤에 다시."})
+            return
+        given = str(self._read_body().get("key") or "")
+        if not (ACCESS_KEY and hmac.compare_digest(given, ACCESS_KEY)):
+            fails.append(now)
+            _LOGIN_FAILS[who] = fails
+            _json_resp(self, 401, {"ok": False, "error": "열쇠가 맞지 않습니다"})
+            return
+        _LOGIN_FAILS.pop(who, None)
+        # Secure 는 HTTPS 일 때만. 로컬 http 에서 붙이면 브라우저가 쿠키를 버린다.
+        secure = "; Secure" if self.headers.get("X-Forwarded-Proto") == "https" else ""
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header(
+            "Set-Cookie",
+            f"mt_session={_make_session()}; Path=/; Max-Age={SESSION_TTL}; "
+            f"HttpOnly; SameSite=Lax{secure}")
+        body = json.dumps({"ok": True}).encode("utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
 
     def _cors(self):
         self.send_header("Access-Control-Allow-Origin", "*")
@@ -650,6 +797,8 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         parsed = urlparse(self.path)
         path = parsed.path.rstrip("/")
+        if self._blocked(path):
+            return
 
         # ── GET /api/health  (상세 서비스 헬스체크)
         if path == "/api/health":
@@ -1022,6 +1171,8 @@ class Handler(BaseHTTPRequestHandler):
         """PATCH 대신 PUT 을 쓴다 — do_PATCH 는 이미 에이전트 수정에 쓰고 있다."""
         parsed = urlparse(self.path)
         path = parsed.path.rstrip("/")
+        if self._blocked(path):
+            return
         if path.startswith("/api/store/"):
             rest = path.split("/api/store/")[1].split("/")
             if len(rest) != 2 or rest[0] not in workspace_store.COLLECTIONS:
@@ -1047,6 +1198,8 @@ class Handler(BaseHTTPRequestHandler):
         # UI 의 태스크 삭제 버튼이 조용히 아무 일도 하지 않은 이유다. 합친다.
         parsed = urlparse(self.path)
         path = parsed.path.rstrip("/")
+        if self._blocked(path):
+            return
 
         if path.startswith("/api/store/"):
             rest = path.split("/api/store/")[1].split("/")
@@ -1082,6 +1235,8 @@ class Handler(BaseHTTPRequestHandler):
     def do_PATCH(self):
         parsed = urlparse(self.path)
         path = parsed.path.rstrip("/")
+        if self._blocked(path):
+            return
 
         if path.startswith("/api/agents/"):
             agent_id = path.split("/api/agents/")[1]
@@ -1104,6 +1259,13 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         parsed = urlparse(self.path)
         path = parsed.path.rstrip("/")
+        if self._blocked(path):
+            return
+
+        # ── POST /api/auth/login  (접근 열쇠 → 세션 쿠키)
+        if path == "/api/auth/login":
+            self._login()
+            return
 
         # ── POST /api/cycle/start
         if path == "/api/cycle/start":
