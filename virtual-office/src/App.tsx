@@ -17,7 +17,8 @@ import NotificationBell, { Notification } from './components/NotificationBell';
 const VirtualOffice = lazy(() => import('./pages/VirtualOffice'));
 const ProjectsTab = lazy(() => import('./components/ProjectsTab'));
 const NotesTab = lazy(() => import('./components/NotesTab'));
-import { api, AgentSummary, deptLabels } from './api';
+const ApprovalBox = lazy(() => import('./components/ApprovalBox'));
+import { api, AgentSummary, deptLabels, type ApprovalRow } from './api';
 import './styles/hermes.css';
 
 /* ── types ── */
@@ -115,6 +116,10 @@ function MainScreen() {
   const [showModel,   setShowModel]   = useState(false);
   const [showManage,  setShowManage]  = useState(false);
   const [activeTab,   setActiveTab]   = useState<'main' | 'office' | 'ceo' | 'agents' | 'projects' | 'notes'>('main');
+  // CEO 룸 KPI 용. 결재·프로젝트는 태스크 큐와 다른 컬렉션이라, 이걸 세지
+  // 않으면 프로젝트가 셋 돌아가는 중에도 대시보드가 전부 0 으로 보인다.
+  const [ceoPending, setCeoPending] = useState(0);
+  const [ceoProjects, setCeoProjects] = useState(0);
   const [overrideTask, setOverrideTask] = useState<TaskItem | null>(null);
   const [showGridMenu, setShowGridMenu] = useState(false);
   const gridMenuRef = useRef<HTMLDivElement>(null);
@@ -282,6 +287,23 @@ function MainScreen() {
   }, [messages]);
 
   // 트레이 메뉴 명령 처리 (Phase 6 — 데스크톱 셸)
+  useEffect(() => {
+    if (activeTab !== 'ceo') return;          // 안 보는 화면을 폴링하지 않는다
+    let stop = false;
+    const tick = async () => {
+      const [a, p] = await Promise.all([
+        api.storeList<ApprovalRow>('approvals'), api.listProjects()]);
+      if (stop) return;
+      setCeoPending((a?.items ?? []).filter(
+        r => (r.status ?? 'pending') === 'pending').length);
+      setCeoProjects((p?.projects ?? []).filter(
+        x => x.status === 'running' || x.status === 'intake' || x.status === 'paused').length);
+    };
+    void tick();
+    const t = setInterval(() => { void tick(); }, 15000);
+    return () => { stop = true; clearInterval(t); };
+  }, [activeTab]);
+
   useEffect(() => {
     const ea = (window as any).electronAPI;
     if (!ea?.onMenuCommand) return;
@@ -590,8 +612,19 @@ function MainScreen() {
         <div className="ceo-room">
           {/* KPI 바 */}
           <div className="ceo-kpi-bar">
+            {/* 결재가 제일 왼쪽이다 — 사장님만 할 수 있는 유일한 일이라서. */}
             <div className="ceo-kpi-item">
-              <span className="ceo-kpi-label">대기</span>
+              <span className="ceo-kpi-label">결재</span>
+              <span className={`ceo-kpi-value ${ceoPending ? 'red' : 'aqua'}`}>{ceoPending}</span>
+            </div>
+            <div className="ceo-kpi-sep" />
+            <div className="ceo-kpi-item">
+              <span className="ceo-kpi-label">프로젝트</span>
+              <span className="ceo-kpi-value purple">{ceoProjects}</span>
+            </div>
+            <div className="ceo-kpi-sep" />
+            <div className="ceo-kpi-item">
+              <span className="ceo-kpi-label">태스크 대기</span>
               <span className="ceo-kpi-value amber">{taskSummary.pending}</span>
             </div>
             <div className="ceo-kpi-sep" />
@@ -627,6 +660,12 @@ function MainScreen() {
               ⚡ 새 지시사항
             </button>
           </div>
+
+          {/* 결재함 + 진행 중인 프로젝트. 칸반은 태스크 큐만 보므로
+              프로젝트 탭에서 시킨 일은 여기서만 보인다. */}
+          <Suspense fallback={<div className="ceo-appr-empty">결재함 불러오는 중…</div>}>
+            <ApprovalBox onOpenProjects={() => setActiveTab('projects')} />
+          </Suspense>
 
           {/* 칸반 보드 */}
           <div className="ceo-kanban">

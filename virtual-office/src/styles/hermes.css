@@ -3918,3 +3918,107 @@ button.pj-deliv-item[aria-expanded="true"] { background: var(--glass-hi); border
   .nt-card-body { padding-left: 14px; }
   .nt-actions { width: 100%; margin-left: 0; }
 }
+
+
+/* ── CEO 룸 결재함 ───────────────────────────────────────────────────────
+   결재함은 ⚙️ 관리 모달 안에 묻혀 있었고, CEO 룸은 태스크 큐만 보고 있었다.
+   에이전트가 "결재함에 올라가 있습니다" 라고 말하는데 그 이름의 화면이
+   없었으니 승인할 방법을 알 수 없었다. 결재는 사장님만 할 수 있는 일이므로
+   사장님이 결정하는 화면으로 옮긴다. */
+.ceo-approval { display: flex; flex-direction: column; gap: 10px; padding: 0 16px 14px; }
+
+.ceo-sec-head { display: flex; align-items: center; gap: 10px; }
+.ceo-sec-title { display: flex; align-items: baseline; gap: 8px; font-size: 13px; font-weight: 700; }
+.ceo-sec-count { font-size: 11px; font-weight: 500; color: var(--muted); }
+.ceo-sec-link {
+  margin-left: auto; padding: 4px 10px; font-size: 11px; border-radius: 7px;
+  border: 1px solid var(--border); background: var(--glass-bg); color: var(--muted);
+  cursor: pointer; transition: var(--t-ui) .15s;
+}
+.ceo-sec-link:hover { background: var(--glass-hi); color: var(--text); }
+
+.ceo-appr-msg {
+  padding: 8px 12px; border-radius: 8px; font-size: 12px; cursor: pointer;
+  background: var(--primary-dim); border: 1px solid var(--primary); color: var(--text);
+}
+.ceo-appr-empty {
+  padding: 14px 16px; border-radius: 10px; font-size: 12px; color: var(--muted);
+  background: var(--glass-bg); border: 1px dashed var(--border);
+}
+
+.ceo-appr-list { display: flex; flex-direction: column; gap: 8px; }
+
+/* 대기 중인 결재는 눈에 띄어야 한다 — 이것 때문에 일이 멈춰 있다. */
+.ceo-appr-card {
+  padding: 11px 13px; border-radius: 11px; background: var(--bg3);
+  border: 1px solid rgba(244, 114, 182, .35);
+}
+.ceo-appr-top { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.ceo-appr-kind { flex: none; font-size: 11.5px; font-weight: 700; color: #f472b6; }
+.ceo-appr-dept {
+  flex: none; padding: 2px 7px; border-radius: 5px; font-size: 10.5px;
+  background: var(--glass-bg); border: 1px solid var(--border); color: var(--muted);
+}
+.ceo-appr-label { flex: 1; min-width: 0; font-size: 12.5px; font-weight: 600; word-break: break-all; }
+
+/* 되돌릴 수 없는 것 — 공개 범위와 레포는 승인 전에 반드시 보여야 한다. */
+.ceo-appr-warn {
+  margin-top: 8px; padding: 8px 10px; border-radius: 7px; font-size: 11.5px;
+  background: rgba(251, 191, 36, .1); border: 1px solid rgba(251, 191, 36, .35);
+  color: #fbbf24;
+}
+.ceo-appr-path {
+  margin-top: 6px; font-size: 11px; color: var(--muted);
+  font-family: 'JetBrains Mono', monospace; word-break: break-all;
+}
+.ceo-appr-body {
+  margin: 8px 0 0; padding: 10px 12px; max-height: 320px; overflow: auto;
+  border-radius: 8px; background: var(--bg); border: 1px solid var(--border);
+  font-size: 11.5px; line-height: 1.6; white-space: pre-wrap; word-break: break-word;
+}
+
+.ceo-appr-actions { display: flex; justify-content: flex-end; gap: 6px; margin-top: 10px; }
+.ceo-appr-btn {
+  padding: 6px 14px; font-size: 12px; font-weight: 600; border-radius: 8px;
+  cursor: pointer; border: 1px solid var(--border); transition: var(--t-ui) .15s;
+}
+.ceo-appr-btn:disabled { opacity: .5; cursor: default; }
+.ceo-appr-btn.ghost { background: var(--glass-bg); color: var(--muted); }
+.ceo-appr-btn.ghost:hover:not(:disabled) { background: var(--glass-hi); color: var(--text); }
+.ceo-appr-btn.reject { background: transparent; color: #fca5a5; border-color: rgba(248,113,113,.4); }
+.ceo-appr-btn.reject:hover:not(:disabled) { background: rgba(248, 113, 113, .12); }
+.ceo-appr-btn.approve { background: var(--secondary); border-color: var(--secondary); color: #06231f; }
+.ceo-appr-btn.approve:hover:not(:disabled) { filter: brightness(1.1); }
+
+/* ── 진행 중인 프로젝트 ── */
+.ceo-proj { display: flex; flex-direction: column; gap: 8px; margin-top: 4px; }
+.ceo-proj-list { display: flex; flex-direction: column; gap: 5px; }
+.ceo-proj-row {
+  display: flex; align-items: center; gap: 9px; width: 100%;
+  padding: 9px 12px; border-radius: 9px; text-align: left; cursor: pointer;
+  background: var(--glass-bg); border: 1px solid var(--border); color: var(--text);
+  transition: var(--t-ui) .15s;
+}
+.ceo-proj-row:hover { background: var(--glass-hi); }
+.ceo-proj-dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+.ceo-proj-dot.now  { background: var(--primary); box-shadow: var(--primary-glow); }
+.ceo-proj-dot.warn { background: #fbbf24; }
+.ceo-proj-dot.ok   { background: var(--secondary); }
+.ceo-proj-title { flex: 1; min-width: 0; font-size: 12.5px; font-weight: 600; }
+/* 멈춘 이유는 제목 옆에 붙인다 — 프로젝트 탭까지 들어가 찾게 하지 않는다. */
+.ceo-proj-why { font-weight: 400; color: var(--muted); }
+.ceo-proj-state { flex: none; font-size: 11px; color: var(--muted); }
+.ceo-proj-state.now  { color: var(--primary); }
+.ceo-proj-state.warn { color: #fbbf24; }
+.ceo-proj-state.ok   { color: var(--secondary); }
+.ceo-proj-prog {
+  flex: none; font-size: 11px; color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+@media (max-width: 560px) {
+  .ceo-approval { padding: 0 12px 12px; }
+  .ceo-appr-actions { flex-wrap: wrap; }
+  .ceo-proj-row { flex-wrap: wrap; }
+  .ceo-proj-title { flex-basis: 100%; }
+}
