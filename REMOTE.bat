@@ -122,12 +122,23 @@ echo.
 echo  [6/6] Publishing ^(%MODE%^)...
 REM  Idempotent: re-running just re-states the same mapping. Public port must
 REM  be 443/8443/10000 for funnel; 443 maps to our local 9000.
+REM
+REM  The first run almost always stops here with "Serve is not enabled on your
+REM  tailnet" - Serve and Funnel are tailnet policy capabilities that are off
+REM  by default. Tailscale prints a one-click consent link with the node id in
+REM  it; that link IS the fix, so show it rather than a generic message.
 "%TS%" %MODE% --bg --https=443 localhost:9000
 if errorlevel 1 (
     echo.
-    echo         FAILED. Most often HTTPS certificates are off:
-    echo         admin console ^-^> DNS ^-^> enable MagicDNS and HTTPS
-    echo         Certificates, then run this again.
+    echo         FAILED - read the message just above.
+    echo.
+    echo         "%MODE% is not enabled on your tailnet"
+    echo             ^-^> open the https://login.tailscale.com/f/... link it
+    echo                printed, approve, then run this file again.
+    echo.
+    echo         "cannot provision TLS cert" / certificate errors
+    echo             ^-^> admin console ^-^> DNS ^-^> turn on MagicDNS and
+    echo                HTTPS Certificates, then run this file again.
     echo.
     pause
     exit /b 1
