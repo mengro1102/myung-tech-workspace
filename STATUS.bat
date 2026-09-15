@@ -21,7 +21,10 @@ REM  Match on the command line, not the window title: a service started from
 REM  a terminal (or by the watchdog) has no matching title but is running.
 wmic process where "name='python.exe'" get commandline 2>nul | findstr /C:"server.py" > nul && echo         mt-server             : running || echo         mt-server             : stopped
 wmic process where "name='python.exe'" get commandline 2>nul | findstr /C:"dispatch daemon" > nul && echo         mt-dispatch           : running || echo         mt-dispatch           : stopped
-wmic process where "name='python.exe'" get commandline 2>nul | findstr /C:"telegram_gateway.py" > nul && echo         mt-telegram           : running || echo         mt-telegram           : stopped
+REM  mt-telegram is off by design - the boss approves from the Mengbiseo
+REM  window via the myungtech-approvals skill. Reporting it as "stopped"
+REM  every time would be a false alarm, so say what is actually true.
+wmic process where "name='python.exe'" get commandline 2>nul | findstr /C:"telegram_gateway.py" > nul && echo         mt-telegram           : running || echo         mt-telegram           : off ^(by design - use Mengbiseo^)
 REM  Vite by port, not by window title: npm spawns node as a child, so the
 REM  title check said "stopped" while 5174 was serving the UI.
 netstat -ano 2>nul | findstr ":5174 " | findstr "LISTENING" > nul && echo         mt-vite               : running || echo         mt-vite               : stopped
