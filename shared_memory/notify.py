@@ -7,12 +7,17 @@
 토큰을 찾는 순서:
   1. 환경변수
   2. D:\\myung-tech-workspace\\.env          (명테크 전용 봇)
-  3. D:\\AI_Workspace\\hermes\\.env          (맹비서 봇 — 이미 검증된 경로)
+  3. D:\\AI_Workspace\\hermes\\.env          (맹비서 봇 — 예비)
 
-3번까지 내려가는 이유: 명테크 .env 에는 TELEGRAM_BOT_TOKEN 은 있어도
-보낼 채널(TELEGRAM_CHAT_ID)이 없다. 맹비서 쪽은 토큰과 채널이 모두
-있고 워치독·자동화 보고가 이미 그 경로로 나가고 있다. 둘 다 사장님
-한 사람에게 가므로 굳이 봇을 나눌 이유가 없다.
+한동안 3번으로 떨어지고 있었다. 명테크 .env 에 TELEGRAM_BOT_TOKEN 은 있어도
+보낼 채널(TELEGRAM_CHAT_ID)이 없었기 때문이다. "둘 다 사장님 한 사람에게
+가니 봇을 나눌 이유가 없다"고 보았는데, 써 보니 그게 정확히 문제였다 —
+**알림은 맹비서 창에 오는데 결재 버튼은 명테크 봇에만 있다.** 알림을 보고
+그 자리에서 /결재 를 치면 맹비서가 "Unknown command" 를 돌려준다.
+알림과 그에 대한 조치는 같은 창에 있어야 한다.
+
+이제 명테크 .env 에 TELEGRAM_CHAT_ID 가 있으므로 2번에서 멈춘다. 3번은
+명테크 봇 설정이 깨졌을 때를 위한 예비로만 남긴다.
 """
 from __future__ import annotations
 
