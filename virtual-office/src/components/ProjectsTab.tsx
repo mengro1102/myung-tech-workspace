@@ -12,6 +12,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, deptLabels, type ApprovalRow, type DialogueEntry, type ProjectRow,
          type ProjectStatus } from '../api';
+import ReviewHistory from './ReviewHistory';
 import { Markdown } from './GuideModal';
 import AgentChat from './AgentChat';
 
@@ -350,6 +351,10 @@ function Detail({ p }: { p: ProjectRow }) {
       )}
 
       <DialogueBlock pid={p.id} />
+
+      {/* 42단계 평면 목록만으로는 어느 산출물이 왜 막혔는지 사람이
+          직접 재구성해야 한다. 그 재구성을 화면이 한다. */}
+      <ReviewHistory p={p} />
 
       {steps.length > 0 && (
         <div className="pj-block">

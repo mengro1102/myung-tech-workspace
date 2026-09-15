@@ -4022,3 +4022,102 @@ button.pj-deliv-item[aria-expanded="true"] { background: var(--glass-hi); border
   .ceo-proj-row { flex-wrap: wrap; }
   .ceo-proj-title { flex-basis: 100%; }
 }
+
+
+/* ── 심사 이력 ───────────────────────────────────────────────────────────
+   진행 기록은 42단계 평면 목록이라, 어느 산출물이 왜 막혔는지를 사람이 직접
+   재구성해야 했다. 중간 개입형이라면 그 재구성은 화면의 몫이다. */
+.rh-sum { margin-left: auto; font-size: 11px; font-weight: 500; color: var(--muted); }
+.rh-waste { color: #fbbf24; }
+
+.rh-alert {
+  margin-bottom: 10px; padding: 10px 12px; border-radius: 9px; font-size: 12px;
+  line-height: 1.6; background: rgba(251, 191, 36, .1);
+  border: 1px solid rgba(251, 191, 36, .35); color: #fbbf24;
+}
+
+.rh-list { display: flex; flex-direction: column; gap: 8px; }
+
+.rh-card {
+  padding: 11px 13px; border-radius: 11px;
+  background: var(--bg3); border: 1px solid var(--border);
+}
+.rh-card.ok { border-color: rgba(45, 212, 191, .3); }
+.rh-card.no { border-color: rgba(248, 113, 113, .3); }
+
+.rh-head {
+  display: flex; align-items: center; gap: 8px; width: 100%;
+  padding: 0; background: none; border: 0; text-align: left;
+  color: var(--text); cursor: pointer;
+}
+.rh-state {
+  flex: none; padding: 2px 8px; border-radius: 5px;
+  font-size: 10.5px; font-weight: 700;
+}
+.rh-state.ok  { background: rgba(45,212,191,.15); color: var(--secondary); }
+.rh-state.no  { background: rgba(248,113,113,.15); color: #fca5a5; }
+.rh-state.now { background: var(--primary-dim); color: var(--primary); }
+.rh-state.off { background: var(--glass-bg); color: var(--muted); }
+.rh-title { flex: 1; min-width: 0; font-size: 12.5px; font-weight: 600; }
+.rh-dept { flex: none; font-size: 11px; color: var(--muted); }
+.rh-chev { flex: none; font-size: 11px; color: var(--muted); }
+
+.rh-meta { margin-top: 7px; font-size: 11.5px; color: var(--muted); }
+.rh-trend {
+  margin-left: 8px; padding: 1px 7px; border-radius: 5px;
+  font-size: 10.5px; font-weight: 600;
+  background: var(--glass-bg); border: 1px solid var(--border);
+}
+.rh-trend.ok   { color: var(--secondary); border-color: rgba(45,212,191,.4); }
+.rh-trend.up   { color: #4ade80; border-color: rgba(74,222,128,.4); }
+.rh-trend.flat { color: #fbbf24; border-color: rgba(251,191,36,.4); }
+.rh-trend.down { color: #fca5a5; border-color: rgba(248,113,113,.4); }
+.rh-trend.off  { color: var(--muted); }
+
+/* 점수 띠 — 오르는지 진동하는지가 숫자 나열보다 먼저 읽혀야 한다. */
+.rh-bar { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 8px; }
+.rh-dot {
+  min-width: 30px; padding: 3px 6px; border-radius: 6px; text-align: center;
+  font-size: 10.5px; font-weight: 700; font-variant-numeric: tabular-nums;
+  background: rgba(248,113,113,.14); color: #fca5a5;
+  border: 1px solid transparent;
+}
+.rh-dot.ok { background: rgba(45,212,191,.16); color: var(--secondary); }
+/* 2차는 오케스트레이터라 기준이 다르다. 테두리로 구분한다. */
+.rh-dot.second { border-color: var(--primary); }
+
+.rh-why { margin-top: 8px; font-size: 11.5px; line-height: 1.6; color: var(--muted); }
+
+.rh-detail { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border); }
+.rh-detail-h {
+  margin: 10px 0 6px; font-size: 11px; font-weight: 700; color: var(--text);
+  letter-spacing: .02em;
+}
+.rh-detail-h:first-child { margin-top: 0; }
+.rh-note {
+  margin: 0; padding: 10px 12px; max-height: 260px; overflow: auto;
+  border-radius: 8px; background: var(--bg); border: 1px solid var(--border);
+  font-size: 11.5px; line-height: 1.65; white-space: pre-wrap; word-break: break-word;
+}
+
+.rh-reviews { margin: 0; padding: 0; list-style: none;
+              display: flex; flex-direction: column; gap: 5px; }
+.rh-reviews li {
+  display: flex; gap: 8px; padding: 7px 10px; border-radius: 7px;
+  font-size: 11.5px; line-height: 1.55; background: var(--glass-bg);
+  border-left: 2px solid rgba(248,113,113,.5);
+}
+.rh-reviews li.ok { border-left-color: var(--secondary); }
+.rh-rv-who { flex: none; font-weight: 700; color: var(--muted); }
+.rh-rv-score { flex: none; font-variant-numeric: tabular-nums; color: var(--text); }
+.rh-rv-note {
+  flex: 1; min-width: 0; color: var(--muted);
+  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+@media (max-width: 560px) {
+  .rh-head { flex-wrap: wrap; }
+  .rh-title { flex-basis: 100%; order: 3; }
+  .rh-reviews li { flex-wrap: wrap; }
+}
