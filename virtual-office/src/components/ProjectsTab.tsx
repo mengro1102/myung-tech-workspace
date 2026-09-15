@@ -44,9 +44,17 @@ function timeAgo(ts: number): string {
   return `${Math.floor(s / 86400)}일 전`;
 }
 
-export default function ProjectsTab() {
+/** CEO 현황판에서 프로젝트 카드를 눌렀을 때, 그 프로젝트가 열린 채로 뜬다.
+ *  예전에는 어느 카드를 눌러도 탭만 열려 목록 맨 위부터 다시 찾아야 했다. */
+export default function ProjectsTab({ focusId, onFocused }:
+    { focusId?: string | null; onFocused?: () => void } = {}) {
   const [rows, setRows]       = useState<ProjectRow[]>([]);
   const [openId, setOpenId]   = useState<string | null>(null);
+  useEffect(() => {
+    if (!focusId) return;
+    setOpenId(focusId);
+    onFocused?.();
+  }, [focusId, onFocused]);
   const [detail, setDetail]   = useState<ProjectRow | null>(null);
   const [idea, setIdea]       = useState('');
   const [busy, setBusy]       = useState(false);
@@ -137,9 +145,18 @@ export default function ProjectsTab() {
 
       {/* ── 목록 ── */}
       <section className="pj-list">
+        {/* 예전 제목은 "진행 중인 프로젝트" 였는데 목록에는 완료·중단·취소가
+            다 들어 있었다. 셋 다 3건이면 "3건이 돌고 있다" 로 읽힌다. */}
         <h2 className="pj-h">
-          진행 중인 프로젝트
+          프로젝트
           {rows.length > 0 && <span className="pj-count">{rows.length}</span>}
+          {(() => {
+            const live = rows.filter(r => r.status === 'running'
+              || r.status === 'intake' || r.status === 'planning').length;
+            return <span className="pj-h-sub">
+              {live ? `${live}건 진행 중` : '지금 돌고 있는 것 없음'}
+            </span>;
+          })()}
         </h2>
 
         {err && loaded && <div className="pj-err">{err}</div>}

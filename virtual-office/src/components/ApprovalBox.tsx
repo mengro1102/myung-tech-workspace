@@ -12,7 +12,7 @@
  * 결재는 정의상 사장님만 할 수 있는 일이고, CEO 룸은 사장님이 결정하는
  * 곳이다. 둘을 여기로 모은다.
  */
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, type ApprovalRow, type ProjectRow } from '../api';
 
 const KIND: Record<string, { icon: string; label: string }> = {
@@ -34,7 +34,19 @@ const PSTATUS: Record<string, { label: string; cls: string }> = {
   cancelled: { label: '취소', cls: 'off' },
 };
 
-export default function ApprovalBox({ onOpenProjects }: { onOpenProjects: () => void }) {
+interface Props {
+  /** 접힘/펼침. 기본은 펼쳐진 상태 — 결재는 막힌 일이라 먼저 보여야 한다. */
+  open: boolean;
+  onToggle: () => void;
+  /** 현황판에서 결재 카드를 눌렀을 때 그 항목으로 데려간다. */
+  focusId?: string | null;
+  onFocused?: () => void;
+  onOpenProjects: () => void;
+}
+
+export default function ApprovalBox({ open: boxOpen, onToggle, focusId,
+                                      onFocused, onOpenProjects }: Props) {
+  const cardRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const [rows, setRows] = useState<ApprovalRow[]>([]);
   const [projects, setProjects] = useState<ProjectRow[]>([]);
   const [open, setOpen] = useState<string | null>(null);
@@ -58,6 +70,19 @@ export default function ApprovalBox({ onOpenProjects }: { onOpenProjects: () => 
   }, [load]);
 
   const pending = rows.filter(r => (r.status ?? 'pending') === 'pending');
+
+  // 현황판에서 넘어온 카드로 스크롤하고 잠깐 강조한다. 눌렀는데 목록 어딘가에
+  // 있기만 하면 어느 것인지 알 수 없다.
+  useEffect(() => {
+    if (!focusId) return;
+    const el = cardRefs.current[focusId];
+    if (el) {
+      el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      el.classList.add('flash');
+      setTimeout(() => el.classList.remove('flash'), 1600);
+    }
+    onFocused?.();
+  }, [focusId, rows, onFocused]);
   const live = projects.filter(p => p.status === 'running' || p.status === 'intake'
     || p.status === 'paused');
 
@@ -90,10 +115,12 @@ export default function ApprovalBox({ onOpenProjects }: { onOpenProjects: () => 
   return (
     <div className="ceo-approval">
       <div className="ceo-sec-head">
-        <span className="ceo-sec-title">
+        <button className="ceo-sec-title as-toggle" onClick={onToggle}
+          title={boxOpen ? '접기' : '펼치기'}>
+          <span className="ceo-sec-chev">{boxOpen ? '▾' : '▸'}</span>
           🗂️ 결재함
           <span className="ceo-sec-count">{pending.length ? `${pending.length}건 대기` : '비어 있음'}</span>
-        </span>
+        </button>
         {live.length > 0 && (
           <button className="ceo-sec-link" onClick={onOpenProjects}>
             프로젝트 {live.length}건 진행 중 →
@@ -101,9 +128,9 @@ export default function ApprovalBox({ onOpenProjects }: { onOpenProjects: () => 
         )}
       </div>
 
-      {msg && <div className="ceo-appr-msg" onClick={() => setMsg('')}>{msg} — 눌러서 닫기</div>}
+      {boxOpen && msg && <div className="ceo-appr-msg" onClick={() => setMsg('')}>{msg} — 눌러서 닫기</div>}
 
-      {pending.length === 0 ? (
+      {boxOpen && (pending.length === 0 ? (
         <div className="ceo-appr-empty">
           대기 중인 결재가 없습니다. 에이전트가 파일을 쓰거나 바깥으로 나가는 일을
           하려 할 때 여기로 올립니다.
@@ -120,7 +147,8 @@ export default function ApprovalBox({ onOpenProjects }: { onOpenProjects: () => 
               ? (a.file_path.split('/').pop() || a.label)
               : a.label;
             return (
-              <div key={a.id} className="ceo-appr-card">
+              <div key={a.id} className="ceo-appr-card"
+                ref={el => { cardRefs.current[a.id] = el; }}>
                 <div className="ceo-appr-top">
                   <span className="ceo-appr-kind">{k.icon} {k.label}</span>
                   {a.department && (
@@ -171,7 +199,7 @@ export default function ApprovalBox({ onOpenProjects }: { onOpenProjects: () => 
             );
           })}
         </div>
-      )}
+      ))}
 
       {/* 진행 중인 프로젝트 목록은 아래 현황판이 맡는다. 여기서 또 보여
           주면 같은 것을 두 번 그리게 되고, 둘이 어긋나면 어느 쪽이 맞는지

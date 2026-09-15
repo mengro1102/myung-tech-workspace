@@ -100,6 +100,21 @@ function MainScreen() {
   const [showSidebar, setShowSidebar] = useState(true);
   const [liveOpen,    setLiveOpen]    = useState(true);
   const [taskSummary, setTaskSummary] = useState({ pending: 0, in_progress: 0, done: 0, failed: 0 });
+  /* 태스크는 목록 하나만 받아 와서 화면 두 곳이 같은 답을 하게 한다.
+   * 예전에는 사이드바가 /tasks/summary(전체), CEO 룸이 /tasks/list(상위 20건)
+   * 을 따로 세서 서로 다른 숫자를 보여 줬고, 어느 쪽이 맞는지 알 수 없었다. */
+  const refreshTasks = useCallback(() => {
+    fetch('/api/tasks/list?limit=200').then(r => r.json()).then(d => {
+      const rows: TaskItem[] = d.tasks ?? [];
+      setTaskList(rows);
+      setTaskSummary({
+        pending:     rows.filter(t => t.status === 'pending').length,
+        in_progress: rows.filter(t => t.status === 'in_progress').length,
+        done:        rows.filter(t => t.status === 'done').length,
+        failed:      rows.filter(t => t.status === 'failed').length,
+      });
+    }).catch(() => {});
+  }, []);
   const [backendOk,   setBackendOk]   = useState(false);
   const [healthDetail, setHealthDetail] = useState<HealthStatus | null>(null);
   const [taskList,     setTaskList]   = useState<TaskItem[]>([]);
@@ -120,6 +135,12 @@ function MainScreen() {
   // 않으면 프로젝트가 셋 돌아가는 중에도 대시보드가 전부 0 으로 보인다.
   const [ceoApprovals, setCeoApprovals] = useState<ApprovalRow[]>([]);
   const [ceoProjectList, setCeoProjectList] = useState<ProjectRow[]>([]);
+  /* 카드를 눌렀을 때 '그것' 이 열리게 하는 표식. 예전에는 결재 카드는 아무
+   * 반응이 없었고, 프로젝트 카드는 셋 다 똑같이 프로젝트 탭만 열어서 어느
+   * 카드를 눌러도 같은 화면이 나왔다. */
+  const [focusApproval, setFocusApproval] = useState<string | null>(null);
+  const [focusProject, setFocusProject] = useState<string | null>(null);
+  const [approvalOpen, setApprovalOpen] = useState(true);   // 결재함은 펼친 채 시작
   const [overrideTask, setOverrideTask] = useState<TaskItem | null>(null);
   const [showGridMenu, setShowGridMenu] = useState(false);
   const gridMenuRef = useRef<HTMLDivElement>(null);
@@ -201,21 +222,16 @@ function MainScreen() {
           });
         }
       }).catch(() => { setBackendOk(false); setHealthDetail(null); });
-    const fetchTaskSummary = () =>
-      fetch('/api/tasks/summary').then(r => r.json()).then(d => setTaskSummary(d)).catch(() => {});
-    const fetchTaskList = () =>
-      fetch('/api/tasks/list?limit=20').then(r => r.json()).then(d => setTaskList(d.tasks ?? [])).catch(() => {});
-    fetchAgents(); fetchHealth(); fetchTaskSummary(); fetchTaskList();
+    fetchAgents(); fetchHealth(); refreshTasks();
     const t  = setInterval(() => setTime(nowStr()), 30000);
     const ag = setInterval(fetchAgents, 15000);
     const hc = setInterval(fetchHealth, 10000);
-    const ts = setInterval(fetchTaskSummary, 8000);
-    const tl = setInterval(fetchTaskList, 10000);
+    const ts = setInterval(refreshTasks, 8000);
     const cs = setInterval(() => {
       fetch('/api/cycle/status').then(r => r.json()).then(d => setCycleStatus(d.status)).catch(() => {});
     }, 5000);
-    return () => { clearInterval(t); clearInterval(ag); clearInterval(hc); clearInterval(ts); clearInterval(tl); clearInterval(cs); };
-  }, []);
+    return () => { clearInterval(t); clearInterval(ag); clearInterval(hc); clearInterval(ts); clearInterval(cs); };
+  }, [refreshTasks]);
 
   // 채팅 히스토리 localStorage 저장
   useEffect(() => { saveChatHistory(messages); }, [messages]);
@@ -305,6 +321,7 @@ function MainScreen() {
     for (const a of ceoApprovals) {
       out.push({
         key: `a-${a.id}`, col: 'pending', kind: '결재', icon: '🗂️',
+        onOpen: () => { setApprovalOpen(true); setFocusApproval(a.id); },
         title: a.kind === 'file' && a.file_path
           ? (a.file_path.split('/').pop() || a.label) : a.label,
         sub: a.kind === 'action' ? `${a.integration}.${a.action} — 승인하면 즉시 실행`
@@ -325,7 +342,7 @@ function MainScreen() {
         sub: p.status === 'paused' ? p.pause_reason
           : p.status === 'cancelled' ? '취소됨' : undefined,
         meta: p.progress,
-        onOpen: () => setActiveTab('projects'),
+        onOpen: () => { setFocusProject(p.id); setActiveTab('projects'); },
       });
     }
 
@@ -421,7 +438,7 @@ function MainScreen() {
         setToasts(prev => [...prev.slice(-4), { id: Date.now().toString(), type: 'success' as const, message: `✅ ${deptLabels[targetDept] ?? targetDept} 태스크 완료` }]);
         pushNotif('success', `✅ ${deptLabels[targetDept] ?? targetDept} 응답 완료`, () => setActiveTab('main'));
         // 태스크 목록 새로고침
-        fetch('/api/tasks/list?limit=20').then(r => r.json()).then(d => setTaskList(d.tasks ?? [])).catch(() => {});
+        refreshTasks();
       } else {
         setMessages(prev => {
           const copy = [...prev];
@@ -468,14 +485,19 @@ function MainScreen() {
           onClick={() => setShowSidebar(v => !v)}
         >☰</button>
 
-        <div className="hs-logo">
+        {/* 로고는 어느 화면에서든 메인으로 돌아오는 길이다. 다른 앱이 다
+            그렇게 동작하므로 눌러도 아무 일이 없으면 고장으로 읽힌다. */}
+        <button className="hs-logo" onClick={() => setActiveTab('main')}
+          title="메인으로">
           <div className="hs-logo-icon">M</div>
           <div>
             <div className="hs-logo-text">명테크</div>
             <div className="hs-logo-sub">AGENT STUDIO</div>
           </div>
-        </div>
-        <span className="hs-time">오전 {time}</span>
+        </button>
+        {/* toLocaleTimeString('ko-KR') 이 이미 오전/오후를 붙여 준다.
+            앞에 '오전' 을 또 쓰고 있어서 "오전 오후 6:24" 가 됐다. */}
+        <span className="hs-time">{time}</span>
 
         {/* 서비스 상태.
             예전에는 상태가 나빠도 점 색만 바뀌어 알아채기 어려웠다. 정상일 때는
@@ -645,7 +667,7 @@ function MainScreen() {
         <Suspense fallback={<div className="hs-lazy-fallback">
           <div className="hs-lazy-spinner" /> 프로젝트 불러오는 중…
         </div>}>
-          <ProjectsTab />
+          <ProjectsTab focusId={focusProject} onFocused={() => setFocusProject(null)} />
         </Suspense>
       )}
 
@@ -721,7 +743,12 @@ function MainScreen() {
           {/* 결재함 + 진행 중인 프로젝트. 칸반은 태스크 큐만 보므로
               프로젝트 탭에서 시킨 일은 여기서만 보인다. */}
           <Suspense fallback={<div className="ceo-appr-empty">결재함 불러오는 중…</div>}>
-            <ApprovalBox onOpenProjects={() => setActiveTab('projects')} />
+            <ApprovalBox
+              open={approvalOpen}
+              onToggle={() => setApprovalOpen(v => !v)}
+              focusId={focusApproval}
+              onFocused={() => setFocusApproval(null)}
+              onOpenProjects={() => setActiveTab('projects')} />
           </Suspense>
 
           {/* 현황판. 결재·프로젝트·태스크를 한 자로 잰다 — 셋은 생김새가
