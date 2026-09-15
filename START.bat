@@ -17,7 +17,7 @@ echo   myung-tech Agent Studio  START
 echo  ==========================================
 echo.
 
-echo  [1/5] Ollama (port 11434)...
+echo  [1/7] Ollama (port 11434)...
 REM  Ollama is the last-resort backend: when the router is down every
 REM  department falls back to it. Health-checking it at the end was not
 REM  enough - if it is not running the fallback does not exist. Start it.
@@ -33,7 +33,7 @@ curl -s -o nul --max-time 3 http://localhost:11434/api/version && (
 )
 
 echo.
-echo  [2/6] FreeLLMAPI router (port 3001)...
+echo  [2/7] FreeLLMAPI router (port 3001)...
 REM  Cloud-tier departments go through this router; without it every task
 REM  falls back to local Ollama. It is shared with Mengbiseo (Hermes) but
 REM  nothing here started it - so one-click Myung-Tech quietly ran on the
@@ -51,7 +51,7 @@ curl -s -o nul --max-time 3 http://127.0.0.1:3001/ && (
 )
 
 echo.
-echo  [3/6] API server (port 9000)...
+echo  [3/7] API server (port 9000)...
 netstat -ano | findstr ":9000 " | findstr LISTENING > nul && (
     echo         already running - skipped.
 ) || (
@@ -60,7 +60,7 @@ netstat -ano | findstr ":9000 " | findstr LISTENING > nul && (
 )
 
 echo.
-echo  [4/6] Agent dispatcher (daemon)...
+echo  [4/7] Agent dispatcher (daemon)...
 REM  Without this nobody drains the task queue, so the 2D office and the live
 REM  feed stay empty. Running it as a daemon is what makes the screen move.
 tasklist /FI "WINDOWTITLE eq mt-dispatch*" 2>nul | findstr "cmd.exe" > nul && (
@@ -71,28 +71,19 @@ tasklist /FI "WINDOWTITLE eq mt-dispatch*" 2>nul | findstr "cmd.exe" > nul && (
 )
 
 echo.
-echo  [5/7] Telegram gateway (approvals)...
-REM  Myung-Tech has its own bot token, separate from Mengbiseo, so the
-REM  two gateways do not fight over one bot (409). This one answers
-REM  /approvals and executes approve/reject buttons.
-tasklist /FI "WINDOWTITLE eq mt-telegram*" 2>nul | findstr "cmd.exe" > nul && (
-    echo         already running - skipped.
-) || (
-    REM  -u + 로그 리다이렉트: 예전에는 창에만 찍혀서, 게이트웨이가 죽으면
-REM  이유가 아무 데도 남지 않았다. 버퍼링을 끄지 않으면 로그가 비어 보인다.
-if not exist "%WS%\logs" mkdir "%WS%\logs"
-REM  --- Myung-Tech's own Telegram bot: OFF by design ---
-REM  The boss works in the Mengbiseo window, which now has /결재 through
-REM  the myungtech-approvals skill. Running a second bot here meant two
+echo  [5/7] Myung-Tech's own Telegram bot...
+REM  OFF by design. The boss works in the Mengbiseo window, which has /결재
+REM  through the myungtech-approvals skill. A second bot here meant two
 REM  notifications for one event and approvals split across two chats.
-REM  Nothing is deleted: telegram_gateway.py still works. To bring it
-REM  back, remove the REM from the start line below.
+REM  Nothing is deleted - telegram_gateway.py still works. To bring it back,
+REM  drop the REM from the start line below and set TELEGRAM_CHAT_ID in .env
+REM  so its notifications go to its own chat too.
+if not exist "%WS%\logs" mkdir "%WS%\logs"
 REM start "mt-telegram" /min cmd /c "cd /d %WS% && python -u telegram_gateway.py >> logs\telegram.log 2>&1"
-    echo         launched.
-)
+echo         off - approvals go through Mengbiseo.
 
 echo.
-echo  [5/6] UI dev server (port 5174)...
+echo  [6/7] UI dev server (port 5174)...
 netstat -ano | findstr ":5174 " | findstr LISTENING > nul && (
     echo         already running - skipped.
 ) || (
@@ -101,7 +92,7 @@ netstat -ano | findstr ":5174 " | findstr LISTENING > nul && (
 )
 
 echo.
-echo  [6/6] Waiting for services...
+echo  [7/7] Waiting for services...
 timeout /t 8 /nobreak > nul
 
 echo.
