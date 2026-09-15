@@ -78,7 +78,10 @@ REM  /approvals and executes approve/reject buttons.
 tasklist /FI "WINDOWTITLE eq mt-telegram*" 2>nul | findstr "cmd.exe" > nul && (
     echo         already running - skipped.
 ) || (
-    start "mt-telegram" /min cmd /c "cd /d %WS% && python telegram_gateway.py"
+    REM  -u + 로그 리다이렉트: 예전에는 창에만 찍혀서, 게이트웨이가 죽으면
+REM  이유가 아무 데도 남지 않았다. 버퍼링을 끄지 않으면 로그가 비어 보인다.
+if not exist "%WS%\logs" mkdir "%WS%\logs"
+start "mt-telegram" /min cmd /c "cd /d %WS% && python -u telegram_gateway.py >> logs\telegram.log 2>&1"
     echo         launched.
 )
 
