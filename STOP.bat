@@ -44,4 +44,5 @@ echo   (Ollama and the router are left running -
 echo    they are shared with Mengbiseo.)
 echo  ==========================================
 echo.
-pause
+REM  A parent launcher sets MT_NOPAUSE=1 to skip this pause.
+if not "%MT_NOPAUSE%"=="1" pause

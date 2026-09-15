@@ -30,7 +30,8 @@ set "MODE=%~1"
 if /i "%MODE%"=="" set "MODE=serve"
 if /i not "%MODE%"=="serve" if /i not "%MODE%"=="funnel" (
     echo  Usage: REMOTE.bat [serve^|funnel]
-    pause
+REM  A parent launcher sets MT_NOPAUSE=1 to skip this pause.
+    if not "%MT_NOPAUSE%"=="1" pause
     exit /b 1
 )
 
@@ -50,7 +51,8 @@ if not exist "%TS%" (
     echo         3. Install Tailscale on the phone too, same account
     echo         4. Run this file again
     echo.
-    pause
+REM  A parent launcher sets MT_NOPAUSE=1 to skip this pause.
+    if not "%MT_NOPAUSE%"=="1" pause
     exit /b 1
 )
 echo         found.
@@ -61,7 +63,8 @@ echo  [2/6] Signed in?
 if errorlevel 1 (
     echo         NOT signed in.  Run once:   "%TS%" up
     echo.
-    pause
+REM  A parent launcher sets MT_NOPAUSE=1 to skip this pause.
+    if not "%MT_NOPAUSE%"=="1" pause
     exit /b 1
 )
 echo         yes.
@@ -81,7 +84,8 @@ if errorlevel 1 (
         echo.
         echo         then RESTART.bat, then run this again.
         echo.
-        pause
+REM  A parent launcher sets MT_NOPAUSE=1 to skip this pause.
+        if not "%MT_NOPAUSE%"=="1" pause
         exit /b 1
     )
     echo         not set - fine for serve ^(tailnet only^).
@@ -113,7 +117,8 @@ netstat -ano 2>nul | findstr ":9000 " | findstr LISTENING > nul
 if errorlevel 1 (
     echo         port 9000 is closed - run START.bat first.
     echo.
-    pause
+REM  A parent launcher sets MT_NOPAUSE=1 to skip this pause.
+    if not "%MT_NOPAUSE%"=="1" pause
     exit /b 1
 )
 echo         listening.
@@ -140,7 +145,8 @@ if errorlevel 1 (
     echo             ^-^> admin console ^-^> DNS ^-^> turn on MagicDNS and
     echo                HTTPS Certificates, then run this file again.
     echo.
-    pause
+REM  A parent launcher sets MT_NOPAUSE=1 to skip this pause.
+    if not "%MT_NOPAUSE%"=="1" pause
     exit /b 1
 )
 
@@ -160,4 +166,5 @@ if /i "%MODE%"=="funnel" (
 echo.
 echo   This PC must stay awake - sleep means no access.
 echo.
-pause
+REM  A parent launcher sets MT_NOPAUSE=1 to skip this pause.
+if not "%MT_NOPAUSE%"=="1" pause

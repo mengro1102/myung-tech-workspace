@@ -53,4 +53,5 @@ powershell -NoProfile -Command "$p='D:\myung-tech-workspace\logs\watchdog.log'; 
 echo.
 echo  START = start  ^|  RESTART = restart  ^|  STOP = stop
 echo.
-pause
+REM  A parent launcher sets MT_NOPAUSE=1 to skip this pause.
+if not "%MT_NOPAUSE%"=="1" pause

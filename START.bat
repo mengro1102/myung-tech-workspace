@@ -127,4 +127,5 @@ echo.
 echo  Router (3001) is shared with Mengbiseo. Started here too, so
 echo  Myung-Tech alone still gets the cloud path.
 echo.
-pause
+REM  A parent launcher sets MT_NOPAUSE=1 to skip this pause.
+if not "%MT_NOPAUSE%"=="1" pause
