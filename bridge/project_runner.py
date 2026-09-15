@@ -681,9 +681,20 @@ def _do_review(p: dict, level: int) -> dict:
 
     user = (f"프로젝트 의도: {p.get('intent', '')}\n"
             f"완료 조건: {'; '.join(str(x) for x in (plan.get('done_when') or []))}\n\n"
-            f"산출물: {d['title']}\n요구: {d['desc']}\n\n"
-            f"--- 제출된 내용 ---\n{body[:6000]}\n--- 끝 ---")
+            f"산출물: {d['title']}\n요구: {d['desc']}\n\n")
 
+    # 범위를 좁힌 산출물이면 무엇을 일부러 뺐는지 알려 준다. 완료 조건은
+    # 프로젝트 전체 기준이라 그대로 남아 있어서, 말해 주지 않으면 검토자가
+    # 덜어낸 항목을 계속 요구한다 — 실제로 좁힌 뒤에도 20·45·30점으로
+    # 반려됐고 사유가 전부 "덜어낸 바로 그것이 없다" 였다.
+    nw = (p.get("narrowed") or {}).get(d["id"])
+    if nw and nw.get("dropped"):
+        user += ("[덜어낸 요구 — 이 산출물에서는 요구하지 않습니다]\n"
+                 + "\n".join(f"- {x}" for x in nw["dropped"])
+                 + "\n위 항목이 없다는 이유로 감점하지 마세요. "
+                   "근거가 없어 일부러 뺀 것입니다.\n\n")
+
+    user += f"--- 제출된 내용 ---\n{body[:6000]}\n--- 끝 ---"
     user += _grounding(p, 2500)
     _emit(pid, reviewer, f"{label} — {d['title']}")
     out, exhausted = _ask(p, reviewer, GROUNDING_RULE + REVIEW_SYSTEM + "\n\n" + extra, user,
@@ -802,6 +813,107 @@ def _finish(p: dict) -> dict:
 
 
 # ── 한 스텝 ─────────────────────────────────────────────────────────────
+
+# ── 범위 좁히기 ─────────────────────────────────────────────────────────
+NARROW_SYSTEM = """너는 오케스트레이터다. 한 산출물이 검토를 여러 번 통과하지
+못했다. 담당자를 바꾸거나 더 시키는 것으로는 풀리지 않는 상태다.
+
+**요구 범위를 좁혀서** 통과 가능한 산출물로 다시 정의하라. 규칙은 셋이다.
+
+1. 핵심을 남기고 곁가지를 덜어낸다. 사장님이 이 산출물로 얻으려던 것이
+   무엇인지 먼저 생각하고, 그것만 남긴다.
+2. 반려 사유가 "근거가 없다" 라면 근거가 필요한 부분을 요구에서 뺀다.
+   없는 근거를 지어내게 하는 요구가 애초에 잘못이다.
+3. 덜어낸 것을 숨기지 마라. dropped 에 사람이 읽을 문장으로 적는다.
+
+JSON 만 출력한다:
+{
+  "title": "좁힌 산출물 이름",
+  "desc": "무엇을 어디까지 적어야 하는지. 원래보다 분명히 작아야 한다",
+  "dropped": ["덜어낸 것 1", "덜어낸 것 2"],
+  "why": "왜 이렇게 좁혔는지 한 문장"
+}"""
+
+
+def _reviews_of(p: dict, cursor: int) -> list[dict]:
+    """지금 산출물에 달린 검토들. 단계에는 산출물 id 가 없어 순서로 찾는다."""
+    i, out = 0, []
+    for st in p.get("steps") or []:
+        if st.get("phase") == "plan":
+            continue
+        if st.get("phase") == "draft":
+            continue
+        if i == cursor:
+            out.append(st)
+        if st.get("phase") == "review2" and st.get("ok"):
+            i += 1
+    return out
+
+
+def _do_narrow(p: dict) -> dict:
+    """정체를 만난 산출물의 요구를 좁히고 다시 돌린다."""
+    pid = p["id"]
+    cursor = int(p.get("cursor", 0))
+    ds = list((p.get("plan") or {}).get("deliverables") or [])
+    if cursor >= len(ds):
+        return _pause(p, "좁힐 산출물을 찾지 못했습니다.")
+    d = dict(ds[cursor])
+
+    reviews = _reviews_of(p, cursor)
+    fb = "\n\n".join(
+        f"[{r.get('score')}점] {r.get('note', '')}" for r in reviews[-4:])
+    user = (f"산출물: {d.get('title')}\n"
+            f"원래 요구: {d.get('desc')}\n\n"
+            f"검토 {len(reviews)}회, 모두 통과 실패. 최근 반려 사유:\n{fb}\n\n"
+            f"직전 초안({len((p.get('artifacts') or {}).get(d['id']) or '')}자)은 "
+            f"이 요구를 만족시키지 못했다.")
+
+    raw_out, exhausted = _ask(p, ORCHESTRATOR, NARROW_SYSTEM,
+                              user + _grounding(p), prefer_cloud=True)
+    if exhausted:
+        return _pause(p, "범위를 좁히려는데 상위 모델 할당량이 바닥났습니다.")
+
+    spec = _extract_json(raw_out)
+    if not spec or not spec.get("desc"):
+        steps = _log(p, "narrow", ORCHESTRATOR, False, "범위 재정의 파싱 실패")
+        projects.update(pid, {"steps": steps})
+        return _pause(p, "범위를 좁혀 보려 했지만 오케스트레이터가 구조화된 답을 "
+                         "주지 못했습니다. 사장님이 요구를 직접 줄여 주셔야 합니다.")
+
+    dropped = [str(x)[:120] for x in (spec.get("dropped") or []) if str(x).strip()]
+    d["title"] = str(spec.get("title") or d["title"])[:80]
+    d["desc"] = str(spec["desc"])[:600]
+    ds[cursor] = d
+    plan = dict(p.get("plan") or {})
+    plan["deliverables"] = ds
+
+    # 무엇을 덜어냈는지 프로젝트에 남긴다. 화면이 이걸 읽어 보여 준다.
+    narrowed = dict(p.get("narrowed") or {})
+    narrowed[d["id"]] = {"dropped": dropped,
+                         "why": str(spec.get("why") or "")[:200],
+                         "at": time.time()}
+
+    note = f"{d['title']} — 범위 좁힘: " + ("; ".join(dropped) if dropped else "세부 요구 축소")
+    steps = _log(p, "narrow", ORCHESTRATOR, True, note)
+    projects.update(pid, {
+        "plan": plan, "narrowed": narrowed, "steps": steps, "phase": "draft",
+        "last_feedback": "",
+        # 좁힌 뒤에는 새 출발이다. 안 비우면 좁히자마자 옛 정체로 다시 멈춘다.
+        "stall": {"seen": [], "repeat": 0, "no_improve": 0, "best": -1, "truncate": 0},
+    })
+    _emit(pid, ORCHESTRATOR, note[:180])
+    _say(pid, ORCHESTRATOR, "lead", d["dept"], "maker",
+         f"요구를 좁혔습니다 — {d['title']}", kind="narrow",
+         detail=(spec.get("why") or "")
+                + ("\n\n덜어낸 것:\n- " + "\n- ".join(dropped) if dropped else ""))
+    notify.send(
+        f"✂️ [명테크] 범위를 좁혔습니다\n\n{p.get('title', '')}\n{d['title']}\n\n"
+        + (spec.get("why") or "")
+        + ("\n\n덜어낸 것:\n- " + "\n- ".join(dropped) if dropped else "")
+        + "\n\n시킨 것보다 작아졌습니다. 결과를 받으실 때 확인해 주세요.")
+    return projects.get(pid) or p
+
+
 def step(pid: str) -> dict | None:
     """정확히 한 스텝 나아간다. 나아갈 수 없으면 그대로 돌려준다."""
     p = projects.get(pid)
@@ -821,6 +933,10 @@ def step(pid: str) -> dict | None:
 
     reason = projects.stop_reason(p)
     if reason:
+        # 점수 정체라면 멈추기 전에 한 번, 스스로 범위를 좁혀 본다.
+        # 예산·할당량·안전망으로 멈추는 것은 좁혀도 풀리지 않으므로 그대로 멈춘다.
+        if projects.can_narrow(p):
+            return _do_narrow(p)
         return _pause(p, reason)
 
     phase = p.get("phase") or "draft"

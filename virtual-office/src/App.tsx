@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback, lazy, Suspense } from 'react';
+import { useState, useEffect, useMemo, useRef, useCallback, lazy, Suspense } from 'react';
 import { Routes, Route, useNavigate, useLocation } from 'react-router-dom';
 import OpsMap         from './components/OpsMap';
 // 2D 사무실은 Phaser(minify 후 1.5MB)를 끌고 온다. 정적으로 물리면 메인 탭만
@@ -18,7 +18,7 @@ const VirtualOffice = lazy(() => import('./pages/VirtualOffice'));
 const ProjectsTab = lazy(() => import('./components/ProjectsTab'));
 const NotesTab = lazy(() => import('./components/NotesTab'));
 const ApprovalBox = lazy(() => import('./components/ApprovalBox'));
-import { api, AgentSummary, deptLabels, type ApprovalRow } from './api';
+import { api, AgentSummary, deptLabels, type ApprovalRow, type ProjectRow } from './api';
 import './styles/hermes.css';
 
 /* ── types ── */
@@ -118,8 +118,8 @@ function MainScreen() {
   const [activeTab,   setActiveTab]   = useState<'main' | 'office' | 'ceo' | 'agents' | 'projects' | 'notes'>('main');
   // CEO 룸 KPI 용. 결재·프로젝트는 태스크 큐와 다른 컬렉션이라, 이걸 세지
   // 않으면 프로젝트가 셋 돌아가는 중에도 대시보드가 전부 0 으로 보인다.
-  const [ceoPending, setCeoPending] = useState(0);
-  const [ceoProjects, setCeoProjects] = useState(0);
+  const [ceoApprovals, setCeoApprovals] = useState<ApprovalRow[]>([]);
+  const [ceoProjectList, setCeoProjectList] = useState<ProjectRow[]>([]);
   const [overrideTask, setOverrideTask] = useState<TaskItem | null>(null);
   const [showGridMenu, setShowGridMenu] = useState(false);
   const gridMenuRef = useRef<HTMLDivElement>(null);
@@ -287,6 +287,68 @@ function MainScreen() {
   }, [messages]);
 
   // 트레이 메뉴 명령 처리 (Phase 6 — 데스크톱 셸)
+  /* 현황판에 올릴 카드. 프로젝트·결재·태스크를 한 자로 잰다.
+   *
+   * 셋은 생김새가 달라도 사장님이 묻는 것은 같다 — 지금 어디에 무엇이
+   * 걸려 있나. 그래서 같은 네 칸에 넣는다. 태스크만 보던 시절에는 네 칸이
+   * 늘 비어 있었고, 정작 막힌 결재와 멈춘 프로젝트는 아무 칸에도 없었다. */
+  const ceoCards = useMemo(() => {
+    type Card = {
+      key: string; col: 'pending' | 'in_progress' | 'done' | 'failed';
+      kind: '결재' | '프로젝트' | '태스크';
+      icon: string; title: string; sub?: string; meta?: string;
+      onOpen?: () => void;
+    };
+    const out: Card[] = [];
+
+    // 결재는 전부 '대기' 다. 사람이 누르기 전에는 한 발도 못 나간다.
+    for (const a of ceoApprovals) {
+      out.push({
+        key: `a-${a.id}`, col: 'pending', kind: '결재', icon: '🗂️',
+        title: a.kind === 'file' && a.file_path
+          ? (a.file_path.split('/').pop() || a.label) : a.label,
+        sub: a.kind === 'action' ? `${a.integration}.${a.action} — 승인하면 즉시 실행`
+          : a.file_path ? `workspace/${a.file_path}` : undefined,
+        meta: deptLabels[a.department ?? ''] ?? a.department,
+      });
+    }
+
+    for (const p of ceoProjectList) {
+      const col = p.status === 'done' ? 'done'
+        : p.status === 'paused' || p.status === 'cancelled' ? 'failed'
+        : p.status === 'awaiting_approval' ? 'pending'
+        : 'in_progress';
+      out.push({
+        key: `p-${p.id}`, col, kind: '프로젝트', icon: '🚀',
+        title: p.title || p.idea?.slice(0, 50) || p.id,
+        // 멈춘 이유는 카드에서 바로 읽혀야 한다. 열어 봐야 알면 현황판이 아니다.
+        sub: p.status === 'paused' ? p.pause_reason
+          : p.status === 'cancelled' ? '취소됨' : undefined,
+        meta: p.progress,
+        onOpen: () => setActiveTab('projects'),
+      });
+    }
+
+    for (const t of taskList) {
+      if (hiddenTasks.has(t.task_id)) continue;
+      out.push({
+        key: `t-${t.task_id}`, col: t.status, kind: '태스크', icon: '📋',
+        title: t.instruction,
+        sub: t.status === 'failed' ? (t.result ?? undefined) : undefined,
+        meta: deptLabels[t.target_dept] ?? t.target_dept,
+        onOpen: () => setDrawerTaskId(t.task_id),
+      });
+    }
+    return out;
+  }, [ceoApprovals, ceoProjectList, taskList, hiddenTasks]);
+
+  const ceoCount = useMemo(() => ({
+    pending: ceoCards.filter(c => c.col === 'pending').length,
+    in_progress: ceoCards.filter(c => c.col === 'in_progress').length,
+    done: ceoCards.filter(c => c.col === 'done').length,
+    failed: ceoCards.filter(c => c.col === 'failed').length,
+  }), [ceoCards]);
+
   useEffect(() => {
     if (activeTab !== 'ceo') return;          // 안 보는 화면을 폴링하지 않는다
     let stop = false;
@@ -294,10 +356,9 @@ function MainScreen() {
       const [a, p] = await Promise.all([
         api.storeList<ApprovalRow>('approvals'), api.listProjects()]);
       if (stop) return;
-      setCeoPending((a?.items ?? []).filter(
-        r => (r.status ?? 'pending') === 'pending').length);
-      setCeoProjects((p?.projects ?? []).filter(
-        x => x.status === 'running' || x.status === 'intake' || x.status === 'paused').length);
+      setCeoApprovals((a?.items ?? []).filter(
+        r => (r.status ?? 'pending') === 'pending'));
+      setCeoProjectList(p?.projects ?? []);
     };
     void tick();
     const t = setInterval(() => { void tick(); }, 15000);
@@ -610,37 +671,33 @@ function MainScreen() {
       {/* ── CEO 룸 탭 ── */}
       {activeTab === 'ceo' && (
         <div className="ceo-room">
-          {/* KPI 바 */}
+          {/* KPI. 현황판과 같은 ceoCards 에서 센다 — 예전에는 KPI 가 태스크
+              큐만, 현황판은 셋을 다 세서 같은 화면에 '완료 1' 과 '완료 02' 가
+              나란히 떴다. 대시보드가 스스로 어긋나면 어느 쪽도 못 믿는다. */}
           <div className="ceo-kpi-bar">
             {/* 결재가 제일 왼쪽이다 — 사장님만 할 수 있는 유일한 일이라서. */}
             <div className="ceo-kpi-item">
-              <span className="ceo-kpi-label">결재</span>
-              <span className={`ceo-kpi-value ${ceoPending ? 'red' : 'aqua'}`}>{ceoPending}</span>
+              <span className="ceo-kpi-label">결재 대기</span>
+              <span className={`ceo-kpi-value ${ceoCount.pending ? 'red' : 'aqua'}`}>
+                {ceoCount.pending}
+              </span>
             </div>
             <div className="ceo-kpi-sep" />
             <div className="ceo-kpi-item">
-              <span className="ceo-kpi-label">프로젝트</span>
-              <span className="ceo-kpi-value purple">{ceoProjects}</span>
-            </div>
-            <div className="ceo-kpi-sep" />
-            <div className="ceo-kpi-item">
-              <span className="ceo-kpi-label">태스크 대기</span>
-              <span className="ceo-kpi-value amber">{taskSummary.pending}</span>
-            </div>
-            <div className="ceo-kpi-sep" />
-            <div className="ceo-kpi-item">
-              <span className="ceo-kpi-label">처리 중</span>
-              <span className="ceo-kpi-value purple">{taskSummary.in_progress}</span>
+              <span className="ceo-kpi-label">진행 중</span>
+              <span className="ceo-kpi-value purple">{ceoCount.in_progress}</span>
             </div>
             <div className="ceo-kpi-sep" />
             <div className="ceo-kpi-item">
               <span className="ceo-kpi-label">완료</span>
-              <span className="ceo-kpi-value aqua">{taskSummary.done}</span>
+              <span className="ceo-kpi-value aqua">{ceoCount.done}</span>
             </div>
             <div className="ceo-kpi-sep" />
             <div className="ceo-kpi-item">
-              <span className="ceo-kpi-label">실패</span>
-              <span className="ceo-kpi-value red">{taskSummary.failed}</span>
+              <span className="ceo-kpi-label">중단</span>
+              <span className={`ceo-kpi-value ${ceoCount.failed ? 'amber' : 'aqua'}`}>
+                {ceoCount.failed}
+              </span>
             </div>
             <div className="ceo-kpi-sep" />
             <div className="ceo-kpi-item">
@@ -667,68 +724,44 @@ function MainScreen() {
             <ApprovalBox onOpenProjects={() => setActiveTab('projects')} />
           </Suspense>
 
-          {/* 칸반 보드 */}
+          {/* 현황판. 결재·프로젝트·태스크를 한 자로 잰다 — 셋은 생김새가
+              달라도 사장님이 묻는 것은 같다: 지금 어디에 무엇이 걸려 있나. */}
           <div className="ceo-kanban">
             {([
-              { status: 'pending',     label: '대기',   color: '#f59e0b', dot: '#f59e0b' },
-              { status: 'in_progress', label: '진행 중', color: '#8B5CF6', dot: '#8B5CF6' },
-              { status: 'done',        label: '완료',   color: '#2DD4BF', dot: '#2DD4BF' },
-              { status: 'failed',      label: '실패',   color: '#ef4444', dot: '#ef4444' },
-            ] as { status: TaskItem['status']; label: string; color: string; dot: string }[]).map(col => {
-              const colTasks = taskList.filter(t => t.status === col.status && !hiddenTasks.has(t.task_id));
-              const deptIcons: Record<string, string> = { orchestration_dept: '🧠', research_dept: '🔬', finance_dept: '📈', dev_dept: '⚙️', content_dept: '✍️' };
+              { col: 'pending',     label: '대기',   dot: '#f59e0b',
+                hint: '사람이 눌러야 다음으로 갑니다' },
+              { col: 'in_progress', label: '진행 중', dot: '#8B5CF6',
+                hint: '지금 돌고 있습니다' },
+              { col: 'done',        label: '완료',   dot: '#2DD4BF',
+                hint: '끝났습니다' },
+              { col: 'failed',      label: '중단',   dot: '#ef4444',
+                hint: '점수를 못 올렸거나 취소된 것' },
+            ] as const).map(c => {
+              const cards = ceoCards.filter(x => x.col === c.col);
               return (
-                <div key={col.status} className="ceo-col">
+                <div key={c.col} className="ceo-col">
                   <div className="ceo-col-header">
                     <span className="ceo-col-title">
-                      <span className="ceo-col-dot" style={{ background: col.dot }} />
-                      {col.label}
+                      <span className="ceo-col-dot" style={{ background: c.dot }} />
+                      {c.label}
                     </span>
-                    <span className="ceo-col-count">{colTasks.length.toString().padStart(2, '0')}</span>
+                    <span className="ceo-col-count">{cards.length.toString().padStart(2, '0')}</span>
                   </div>
                   <div className="ceo-col-scroll">
-                    {colTasks.length === 0 ? (
-                      <div className="ceo-task-empty">태스크 없음</div>
-                    ) : colTasks.map(t => (
-                      <div key={t.task_id} className="ceo-task-card">
-                        <div className="ceo-task-top" onClick={() => setDrawerTaskId(t.task_id)} style={{ cursor: 'pointer' }}>
-                          <span className={`ceo-task-priority ${t.status}`}>
-                            {t.status === 'pending' ? '대기' : t.status === 'in_progress' ? '처리중' : t.status === 'done' ? '완료' : '실패'}
-                          </span>
-                          <span className="ceo-task-dept">{deptIcons[t.target_dept] ?? '📋'}</span>
+                    {cards.length === 0 ? (
+                      <div className="ceo-task-empty">{c.hint}</div>
+                    ) : cards.map(x => (
+                      <div key={x.key}
+                        className={`ceo-task-card ${x.onOpen ? 'clickable' : ''}`}
+                        onClick={x.onOpen}>
+                        <div className="ceo-card-top">
+                          <span className={`ceo-card-kind k-${x.kind}`}>{x.icon} {x.kind}</span>
+                          {x.meta && <span className="ceo-card-meta">{x.meta}</span>}
                         </div>
-                        <div className="ceo-task-text" onClick={() => setDrawerTaskId(t.task_id)} style={{ cursor: 'pointer' }}>{t.instruction}</div>
-                        {/* 실패 사유. 예전에는 카드를 열어야만 볼 수 있어서, 목록만
-                            보면 '왜 실패했는지'를 알 방법이 없었다. */}
-                        {t.status === 'failed' && t.result && (
-                          <div className="ceo-task-reason" title={t.result}>
-                            <span className="ceo-task-reason-mark">!</span>
-                            {t.result}
-                          </div>
-                        )}
-                        <div className="ceo-task-footer">
-                          <span className="ceo-task-time">
-                            {new Date(t.updated_at).toLocaleDateString('ko-KR', { month: 'short', day: 'numeric' })}
-                          </span>
-                          <div className="ceo-task-actions">
-                            {t.status !== 'done' && (
-                              <button className="ceo-task-override-btn"
-                                onClick={e => { e.stopPropagation(); setOverrideTask(t); }}
-                                title="CEO 개입">⚠</button>
-                            )}
-                            <button className="ceo-task-hide-btn"
-                              onClick={e => { e.stopPropagation(); setHiddenTasks(prev => new Set([...prev, t.task_id])); }}
-                              title="숨기기">⊘</button>
-                            <button className="ceo-task-del-btn"
-                              onClick={async e => {
-                                e.stopPropagation();
-                                await fetch(`/api/tasks/${t.task_id}`, { method: 'DELETE' });
-                                setTaskList(prev => prev.filter(x => x.task_id !== t.task_id));
-                                pushNotif('info', `태스크 삭제: ${t.instruction.slice(0, 30)}…`);
-                              }}
-                              title="삭제">🗑</button>
-                          </div>
-                        </div>
+                        <div className="ceo-card-title">{x.title}</div>
+                        {/* 멈춘 이유·실패 사유는 카드에서 바로 읽혀야 한다.
+                            열어 봐야 알면 현황판이 아니다. */}
+                        {x.sub && <div className="ceo-card-sub" title={x.sub}>{x.sub}</div>}
                       </div>
                     ))}
                   </div>

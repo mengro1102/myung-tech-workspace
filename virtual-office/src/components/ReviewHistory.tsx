@@ -62,7 +62,7 @@ export default function ReviewHistory({ p }: { p: ProjectRow }) {
     }));
     let i = 0;                       // 지금 어느 산출물을 만들고 있나
     for (const s of p.steps ?? []) {
-      if (s.phase === 'plan') continue;
+      if (s.phase === 'plan' || s.phase === 'narrow') continue;
       const b = out[Math.min(i, out.length - 1)];
       if (!b) break;
       if (s.phase === 'draft') {
@@ -120,6 +120,7 @@ export default function ReviewHistory({ p }: { p: ProjectRow }) {
             : b.drafts.length ? { label: '작성 중', cls: 'now' }
             : { label: '미착수', cls: 'off' };
           const isOpen = open === b.id;
+          const narrowed = p.narrowed?.[b.id];
 
           return (
             <div key={b.id} className={`rh-card ${state.cls}`}>
@@ -150,6 +151,20 @@ export default function ReviewHistory({ p }: { p: ProjectRow }) {
                       {r.score >= 0 ? r.score : '—'}
                     </span>
                   ))}
+                </div>
+              )}
+
+              {/* 좁혔다는 것은 사장님이 시킨 것보다 덜 만들었다는 뜻이다.
+                  점수 옆에 조용히 두면 안 되고, 눈에 걸리게 둔다. */}
+              {narrowed && (
+                <div className="rh-narrow">
+                  <b>✂️ 범위를 좁혔습니다</b>
+                  {narrowed.why && <div className="rh-narrow-why">{narrowed.why}</div>}
+                  {narrowed.dropped?.length > 0 && (
+                    <ul className="rh-dropped">
+                      {narrowed.dropped.map((x, i) => <li key={i}>{x}</li>)}
+                    </ul>
+                  )}
                 </div>
               )}
 

@@ -262,6 +262,28 @@ def spend(p: dict, n: int = 1) -> dict:
     return b
 
 
+def can_narrow(p: dict) -> bool:
+    """멈추는 대신 스스로 범위를 좁혀 볼 수 있는가.
+
+    좁히기는 사장님이 시킨 것보다 덜 만드는 일이다. 그래서 **점수가 안 오르거나
+    같은 지적이 반복될 때만** 쓴다 — 그 둘은 요구가 과했다는 신호다.
+    예산·할당량·안전망·분량 초과는 좁혀도 풀리지 않거나(예산) 이미 그 자체가
+    범위 이야기라(분량) 해당하지 않는다.
+
+    그리고 산출물마다 딱 한 번이다. 될 때까지 깎으면 껍데기가 남는다.
+    """
+    stall = p.get("stall") or {}
+    stuck = (int(stall.get("repeat", 0)) >= REPEAT_LIMIT
+             or int(stall.get("no_improve", 0)) >= NO_IMPROVE_LIMIT)
+    if not stuck:
+        return False
+    ds = (p.get("plan") or {}).get("deliverables") or []
+    cursor = int(p.get("cursor", 0))
+    if cursor >= len(ds):
+        return False
+    return ds[cursor].get("id") not in (p.get("narrowed") or {})
+
+
 def stop_reason(p: dict, top_model_exhausted: bool = False) -> str:
     """지금 멈춰야 하는가. 멈춰야 하면 사람이 읽을 이유, 아니면 빈 문자열.
 

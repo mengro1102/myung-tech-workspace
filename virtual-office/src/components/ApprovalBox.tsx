@@ -173,37 +173,9 @@ export default function ApprovalBox({ onOpenProjects }: { onOpenProjects: () => 
         </div>
       )}
 
-      {/* 프로젝트는 태스크와 다른 것이라 칸반에 안 나온다. 여기서 한 줄씩. */}
-      {live.length > 0 && (
-        <div className="ceo-proj">
-          <div className="ceo-sec-head">
-            <span className="ceo-sec-title">
-              🚀 진행 중인 프로젝트
-              <span className="ceo-sec-count">{live.length}건</span>
-            </span>
-          </div>
-          <div className="ceo-proj-list">
-            {live.map(p => {
-              const st = PSTATUS[p.status] ?? { label: p.status, cls: 'off' };
-              return (
-                <button key={p.id} className="ceo-proj-row" onClick={onOpenProjects}>
-                  <span className={`ceo-proj-dot ${st.cls}`} />
-                  <span className="ceo-proj-title">
-                    {p.title || p.idea?.slice(0, 50) || p.id}
-                    {/* 멈춘 이유는 목록에서 바로 보여야 한다. 안 그러면
-                        "왜 안 도는지" 를 프로젝트 탭까지 들어가 찾게 된다. */}
-                    {p.status === 'paused' && p.pause_reason && (
-                      <span className="ceo-proj-why"> — {p.pause_reason}</span>
-                    )}
-                  </span>
-                  <span className={`ceo-proj-state ${st.cls}`}>{st.label}</span>
-                  {p.progress && <span className="ceo-proj-prog">{p.progress}</span>}
-                </button>
-              );
-            })}
-          </div>
-        </div>
-      )}
+      {/* 진행 중인 프로젝트 목록은 아래 현황판이 맡는다. 여기서 또 보여
+          주면 같은 것을 두 번 그리게 되고, 둘이 어긋나면 어느 쪽이 맞는지
+          알 수 없게 된다. */}
     </div>
   );
 }

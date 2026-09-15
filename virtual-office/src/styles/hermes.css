@@ -4121,3 +4121,35 @@ button.pj-deliv-item[aria-expanded="true"] { background: var(--glass-hi); border
   .rh-title { flex-basis: 100%; order: 3; }
   .rh-reviews li { flex-wrap: wrap; }
 }
+
+/* 범위를 좁힌 산출물. 시킨 것보다 작아졌다는 뜻이라 조용히 두면 안 된다. */
+.rh-narrow {
+  margin-top: 8px; padding: 9px 11px; border-radius: 8px; font-size: 11.5px;
+  line-height: 1.6; background: rgba(139, 92, 246, .12);
+  border: 1px solid rgba(139, 92, 246, .4); color: var(--text);
+}
+.rh-narrow-why { margin-top: 4px; color: var(--muted); }
+.rh-dropped { margin: 6px 0 0; padding-left: 18px; color: var(--muted); }
+.rh-dropped li { margin: 2px 0; }
+
+/* 현황판 카드 — 결재·프로젝트·태스크를 한 자로 잰다. */
+.ceo-task-card.clickable { cursor: pointer; }
+.ceo-card-top { display: flex; align-items: center; gap: 6px; margin-bottom: 5px; }
+.ceo-card-kind {
+  flex: none; padding: 2px 7px; border-radius: 5px;
+  font-size: 10px; font-weight: 700;
+  background: var(--glass-bg); border: 1px solid var(--border); color: var(--muted);
+}
+.ceo-card-kind.k-결재     { color: #f472b6; border-color: rgba(244,114,182,.4); }
+.ceo-card-kind.k-프로젝트 { color: var(--primary); border-color: rgba(139,92,246,.4); }
+.ceo-card-meta { margin-left: auto; font-size: 10.5px; color: var(--muted); }
+.ceo-card-title {
+  font-size: 12px; font-weight: 600; line-height: 1.45; word-break: break-word;
+  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
+}
+/* 멈춘 이유가 카드에서 바로 읽혀야 현황판이다. 열어 봐야 알면 목록일 뿐이다. */
+.ceo-card-sub {
+  margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--border);
+  font-size: 10.5px; line-height: 1.5; color: var(--muted);
+  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
+}

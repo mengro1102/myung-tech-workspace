@@ -130,7 +130,7 @@ export interface Deliverable {
 export interface ProjectStep {
   n: number;
   /** draft = 초안, review1 = 부서 1차, review2 = 오케스트레이터 2차 */
-  phase: 'plan' | 'draft' | 'review1' | 'review2';
+  phase: 'plan' | 'draft' | 'review1' | 'review2' | 'narrow';
   dept: string;
   ok: boolean;
   /** 리뷰 점수. 초안 단계는 -1 */
@@ -157,6 +157,9 @@ export interface ProjectRow {
   artifacts?: Record<string, string>;
   budget?: { calls: number; day: string };
   pause_reason?: string;
+  /** 정체를 만나 스스로 줄인 산출물. 시킨 것보다 작아졌다는 뜻이므로
+   *  화면에서 반드시 드러내야 한다. */
+  narrowed?: Record<string, { dropped: string[]; why: string; at: number }>;
   progress: string;
   step_count?: number;
   budget_left: number;
