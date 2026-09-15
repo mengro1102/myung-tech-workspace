@@ -66,6 +66,7 @@ PHASES = ("draft", "review1", "review2")
 REPEAT_LIMIT = 3        # 같은 지적 3번째 → 정지
 NO_IMPROVE_LIMIT = 3    # 점수가 3회 연속 안 오름 → 정지
 STEP_SAFETY_NET = 50    # 마지막 그물. 여기까지 오면 설계가 잘못된 것이다
+TRUNCATE_LIMIT = 3      # 연속 잘림 3번 → 분량 문제로 정지
 DAILY_CALL_BUDGET = int(os.environ.get("MYUNGTECH_DAILY_CALLS", "300"))
 BUDGET_SHARE = 0.5      # 그중 프로젝트가 쓸 수 있는 몫
 
@@ -208,12 +209,23 @@ def similarity(a: str, b: str) -> float:
 SAME_COMPLAINT = 0.5
 
 
+def note_truncation(p: dict, reset: bool = False) -> dict:
+    """초안이 잘렸다 / 안 잘렸다를 기록한다.
+
+    리뷰가 아니므로 점수 정체(no_improve)와 섞지 않는다. 길이 문제는 길이
+    문제로 세야 "요구를 좁혀라" 와 "산출물을 쪼개라" 를 구분해 말할 수 있다.
+    """
+    stall = dict(p.get("stall") or {})
+    stall["truncate"] = 0 if reset else int(stall.get("truncate", 0)) + 1
+    return stall
+
+
 def note_review(p: dict, passed: bool, score: int, feedback: str) -> dict:
     """리뷰 한 번의 결과를 진전 기록에 반영한다. 갱신된 stall 을 돌려준다."""
     stall = dict(p.get("stall") or {"seen": [], "repeat": 0, "no_improve": 0, "best": -1})
     if passed:
         # 통과했으면 정체가 아니다. 다음 산출물을 위해 깨끗이 비운다.
-        return {"seen": [], "repeat": 0, "no_improve": 0, "best": -1}
+        return {"seen": [], "repeat": 0, "no_improve": 0, "best": -1, "truncate": 0}
 
     fp = fingerprint(feedback)
     seen = list(stall.get("seen") or [])
@@ -256,11 +268,17 @@ def stop_reason(p: dict, top_model_exhausted: bool = False) -> str:
     횟수가 아니라 진전을 본다 — 모듈 설명 참고.
     """
     stall = p.get("stall") or {}
-    steps = len(p.get("steps") or [])
+    # 잘린 초안은 세지 않는다. 이 그물은 "계획이 잘못됐다" 를 잡으려고 있는데,
+    # 길이를 못 맞춰 다시 쓴 횟수까지 세면 엉뚱한 이유로 먼저 걸린다.
+    steps = sum(1 for s in (p.get("steps") or []) if not s.get("trunc"))
 
     if int(stall.get("repeat", 0)) >= REPEAT_LIMIT:
         return (f"같은 지적이 {stall['repeat']}번 반복됐습니다. "
                 "모델이 이 지적을 이해하지 못하는 상태라 더 돌려도 고쳐지지 않습니다.")
+    if int(stall.get("truncate", 0)) >= TRUNCATE_LIMIT:
+        return (f"초안이 {stall['truncate']}번 연속으로 분량을 넘겨 잘렸습니다. "
+                "글이 나쁜 게 아니라 이 산출물 하나에 담으라는 양이 많습니다. "
+                "산출물을 쪼개거나 요구 범위를 줄여 다시 시작해 주세요.")
     if int(stall.get("no_improve", 0)) >= NO_IMPROVE_LIMIT:
         return (f"리뷰 점수가 {stall['no_improve']}회 연속 오르지 않았습니다 "
                 f"(최고 {stall.get('best', 0)}점). 나아지지 않는 반복입니다.")

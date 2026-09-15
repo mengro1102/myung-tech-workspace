@@ -174,10 +174,15 @@ def _emit(pid: str, dept: str, text: str) -> None:
 
 
 def _log(p: dict, phase: str, dept: str, ok: bool, note: str,
-         score: int = -1) -> list[dict]:
+         score: int = -1, trunc: bool = False) -> list[dict]:
     steps = list(p.get("steps") or [])
-    steps.append({"n": len(steps) + 1, "phase": phase, "dept": dept,
-                  "ok": ok, "score": score, "note": note[:400], "at": time.time()})
+    row = {"n": len(steps) + 1, "phase": phase, "dept": dept,
+           "ok": ok, "score": score, "note": note[:400], "at": time.time()}
+    # 잘림은 품질 실패가 아니라 길이 실패다. 표시해 두면 안전망 계산과
+    # 화면이 둘을 구분할 수 있다.
+    if trunc:
+        row["trunc"] = True
+    steps.append(row)
     return steps
 
 
@@ -603,26 +608,38 @@ def _do_draft(p: dict) -> dict:
 
     if _truncated(out):
         # 리뷰어에게 물어볼 것도 없다. 원인이 분명하므로 바로 되먹인다.
-        # 이 되먹임은 리뷰가 아니므로 정체 카운터를 건드리지 않는다.
+        # 이 되먹임은 리뷰가 아니므로 점수 정체 카운터를 건드리지 않는다 —
+        # 대신 길이 전용 카운터를 올린다.
+        stall = projects.note_truncation(p)
+        n = int(stall.get("truncate", 1))
+        # 숫자 없이 "줄여라" 라고만 하면 모델이 몇백 자씩 깎는다. 실측으로
+        # 7003 → 6696 → 6140 → 5989 → 5770 을 지나 다섯 번째에야 통과했다.
+        # 매번 확실히 줄어드는 목표치를 준다.
+        target = max(1500, int(len(out) * (0.7 ** n)))
         arts = dict(p.get("artifacts") or {})
         arts[d["id"]] = out
         steps = _log(p, "draft", d["dept"], False,
-                     f"{d['title']} 출력이 잘림 ({len(out)}자)")
+                     f"{d['title']} 출력이 잘림 ({len(out)}자, {n}번째)", trunc=True)
         projects.update(pid, {
-            "artifacts": arts, "steps": steps, "phase": "draft",
+            "artifacts": arts, "steps": steps, "phase": "draft", "stall": stall,
             "last_feedback": (
-                f"직전 초안이 {len(out)}자에서 중간에 끊겼습니다. 분량이 한 번에 낼 수 "
-                "있는 양을 넘었습니다. **범위를 줄여서 끝까지 완결된 글**을 쓰세요 — "
-                "설명을 덜어 내고 핵심만, 코드는 동작에 필요한 부분만. "
+                f"직전 초안이 {len(out)}자에서 중간에 끊겼습니다({n}번째). 한 번에 낼 수 "
+                f"있는 양을 넘었습니다.\n\n**{target}자 안에서 끝까지 완결된 글**을 "
+                "쓰세요. 분량을 맞추는 방법은 내용을 덜어 내는 것입니다 — 설명과 "
+                "예시를 줄이고 결론과 근거만, 코드는 동작에 필요한 부분만 남기세요. "
                 "끊기느니 짧은 편이 낫습니다."),
         })
-        _emit(pid, d["dept"], f"초안 잘림 — 범위를 줄여 재작성 ({len(out)}자)")
+        _emit(pid, d["dept"],
+              f"초안 잘림 {n}번째 — {target}자로 줄여 재작성 ({len(out)}자)")
         return projects.get(pid) or p
 
     arts = dict(p.get("artifacts") or {})
     arts[d["id"]] = out
     steps = _log(p, "draft", d["dept"], True, f"{d['title']} ({len(out)}자)")
-    projects.update(pid, {"artifacts": arts, "steps": steps, "phase": "review1"})
+    # 완결된 초안이 나왔으니 길이 카운터를 비운다. 안 비우면 다음 산출물이
+    # 앞 산출물의 잘림을 물려받아 억울하게 멈춘다.
+    projects.update(pid, {"artifacts": arts, "steps": steps, "phase": "review1",
+                          "stall": projects.note_truncation(p, reset=True)})
     _say(pid, d["dept"], "maker", d["dept"], "reviewer",
          memo or f"초안 제출 — {d['title']}", kind="submit",
          detail=(memo + "\n\n" if memo else "") + f"「{d['title']}」 초안 {len(out)}자를 제출합니다.")

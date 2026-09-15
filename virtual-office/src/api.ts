@@ -137,6 +137,9 @@ export interface ProjectStep {
   score: number;
   note: string;
   at: number;
+  /** 분량 초과로 잘려 다시 쓴 초안. 품질 실패가 아니라 길이 실패라
+   *  안전망 계산에서도 빼고 화면에서도 따로 센다. */
+  trunc?: boolean;
 }
 
 export interface ProjectRow {

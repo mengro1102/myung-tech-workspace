@@ -69,7 +69,8 @@ export default function ReviewHistory({ p }: { p: ProjectRow }) {
         b.drafts.push(s);
         // 잘림은 품질 문제가 아니라 분량 문제다. 따로 센다 — 예산을 이쪽이
         // 다 먹고 있는데 점수 얘기만 보면 원인을 놓친다.
-        if ((s.note ?? '').includes('잘림')) b.truncated += 1;
+        // trunc 플래그는 나중에 붙었다. 그 전 프로젝트는 노트로 알아본다.
+        if (s.trunc || (s.note ?? '').includes('잘림')) b.truncated += 1;
       } else {
         b.reviews.push(s);
         if (s.phase === 'review2' && s.ok) { b.passed = true; i += 1; }
