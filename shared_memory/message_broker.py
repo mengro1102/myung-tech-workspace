@@ -56,6 +56,49 @@ def fetch_events() -> list[dict]:
     return events
 
 
+def purge_events(contains: str) -> int:
+    """payload 에 이 문자열이 든 이벤트 파일을 지운다. 지운 개수를 돌려준다.
+
+    프로젝트를 지워도 그 프로젝트의 이벤트는 남아 있어서, 실시간 활동에
+    "없는 프로젝트가 멈췄습니다" 가 계속 떴다. 지운 것은 화면에서도 사라져야 한다.
+    """
+    if not contains or not SHARED_MEMORY_DIR.is_dir():
+        return 0
+    n = 0
+    for item in SHARED_MEMORY_DIR.glob("evt-*.json"):
+        try:
+            data = json.loads(item.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        if contains in str(data.get("payload") or ""):
+            try:
+                item.unlink()
+                n += 1
+            except OSError:
+                pass
+    return n
+
+
+def prune_events(keep: int = 400) -> int:
+    """오래된 이벤트 파일을 줄인다. 지운 개수.
+
+    이벤트를 파일 하나씩 쌓는 구조라 지우는 사람이 없으면 무한정 늘어난다
+    (실측 274개 · 1.2MB). 화면은 최근 50건만 쓰므로 그보다 넉넉히 남긴다.
+    """
+    if not SHARED_MEMORY_DIR.is_dir():
+        return 0
+    files = sorted(SHARED_MEMORY_DIR.glob("evt-*.json"),
+                   key=lambda p: p.stat().st_mtime if p.exists() else 0)
+    n = 0
+    for f in files[:-keep] if len(files) > keep else []:
+        try:
+            f.unlink()
+            n += 1
+        except OSError:
+            pass
+    return n
+
+
 if __name__ == "__main__":
     # simple self-test: publish and then fetch
     pub = publish_event("orchestrator", "bridge", "broker self-test heartbeat")

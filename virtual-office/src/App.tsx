@@ -61,16 +61,29 @@ function saveChatHistory(msgs: ChatMsg[]) {
   try { localStorage.setItem(CHAT_HISTORY_KEY, JSON.stringify(msgs.slice(-100))); } catch { /* ignore */ }
 }
 
-const MORNING_BRIEFING = `■ 아침 브리핑
+/* 브리핑은 서버가 실제 상태로 만든다(GET /api/briefing).
+ *
+ * 예전에는 여기에 고정 문구가 있었다. 항상 "오전 02:20" 이고, 항상 같은 세
+ * 줄이고, "GitHub 리포지토리를 연결하면" 이라고 권하는데 이미 연결돼 있었다.
+ * 첫 화면에서 처음 읽는 글이 거짓이면 그 아래 숫자도 믿을 수 없게 된다.
+ *
+ * 아래 문구는 서버에 닿지 못했을 때만 쓴다 — 그때는 아무 말도 하지 않는 편이
+ * 낫다. 없는 사실을 지어내느니 연결이 안 됐다고 말한다. */
+const BRIEFING_OFFLINE = `■ 브리핑
 
-안녕하세요 사장님,
+백엔드에 닿지 못해 지금 상태를 읽을 수 없습니다.
+START.bat 이 떠 있는지 확인해 주세요.`;
 
-오늘의 핵심 3가지는 다음과 같습니다:
-• 팀 상태를 확인하고 오늘의 주요 태스크를 에이전트에게 시작하세요.
-• 에이전트 간 통신 흐름을 실시간으로 확인할 수 있습니다.
-• 지식 네트워크에 GitHub 리포지토리를 연결하면 에이전트 두뇌가 강화됩니다.
-
-추천 액션: "오늘 할 일을 정리하고 각 부서에 지시해줘" 라고 입력해보세요.`;
+async function fetchBriefing(): Promise<string> {
+  try {
+    const r = await fetch('/api/briefing');
+    if (!r.ok) return BRIEFING_OFFLINE;
+    const d = await r.json();
+    return (d.text as string) || BRIEFING_OFFLINE;
+  } catch {
+    return BRIEFING_OFFLINE;
+  }
+}
 
 const QUICK_CHIPS = [
   { icon: '🚀', label: '운영 시작 — AI 팀에게 오늘 일 시키기', dept: 'orchestration_dept' },
@@ -90,7 +103,7 @@ function MainScreen() {
     const saved = loadChatHistory();
     return saved.length > 0 ? saved : [{
       id: 'init', role: 'assistant', sender: '명테크 AI',
-      text: MORNING_BRIEFING, ts: nowStr(),
+      text: '■ 브리핑\n\n지금 상태를 읽고 있습니다…', ts: nowStr(),
     }];
   });
   const [input,       setInput]       = useState('');
@@ -150,6 +163,18 @@ function MainScreen() {
   const [globalModel, setGlobalModelState] = useState('');
   useEffect(() => {
     api.getGlobalModel().then(d => { if (d?.global_model) setGlobalModelState(d.global_model); });
+  }, []);
+
+  /* 자리만 잡아 둔 브리핑을 진짜 내용으로 바꾼다. 사장님이 이미 대화를
+   * 하고 계셨다면 건드리지 않는다 — 읽던 자리가 밀리면 안 된다. */
+  useEffect(() => {
+    let stop = false;
+    void fetchBriefing().then(text => {
+      if (stop) return;
+      setMessages(prev => (prev.length === 1 && prev[0].id === 'init')
+        ? [{ ...prev[0], text, ts: nowStr() }] : prev);
+    });
+    return () => { stop = true; };
   }, []);
   const setGlobalModel = useCallback(async (model: string) => {
     const prev = globalModel;
@@ -387,10 +412,11 @@ function MainScreen() {
     if (!ea?.onMenuCommand) return;
     ea.onMenuCommand((_e: any, cmd: string) => {
       if (cmd === 'new-chat' || cmd === 'briefing') {
-        setMessages(prev => {
-          const briefing = { id: Date.now().toString(), role: 'assistant' as const, sender: '명테크 AI', text: MORNING_BRIEFING, ts: nowStr() };
+        void fetchBriefing().then(text => setMessages(prev => {
+          const briefing = { id: Date.now().toString(), role: 'assistant' as const,
+                             sender: '명테크 AI', text, ts: nowStr() };
           return cmd === 'new-chat' ? [briefing] : [...prev, briefing];
-        });
+        }));
       }
     });
   }, []);
@@ -599,7 +625,10 @@ function MainScreen() {
                     icon: '✨', label: '새 대화', active: false,
                     bg: 'rgba(167,243,208,0.15)', color: '#6EE7B7',
                     action: () => {
-                      const fresh: ChatMsg[] = [{ id: Date.now().toString(), role: 'assistant', sender: '명테크 AI', text: MORNING_BRIEFING, ts: nowStr() }];
+                      const fresh: ChatMsg[] = [{ id: 'init', role: 'assistant', sender: '명테크 AI', text: '■ 브리핑\n\n지금 상태를 읽고 있습니다…', ts: nowStr() }];
+                      void fetchBriefing().then(text => setMessages(p2 =>
+                        p2.length === 1 && p2[0].id === 'init'
+                          ? [{ ...p2[0], text, ts: nowStr() }] : p2));
                       setMessages(fresh);
                       saveChatHistory(fresh);
                       pushNotif('info', '새 대화를 시작했습니다');

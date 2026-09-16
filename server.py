@@ -608,6 +608,113 @@ threading.Thread(target=_project_runner_loop, daemon=True).start()
 
 # ── HTTP 핸들러 ───────────────────────────────────────────────
 
+
+def _briefing() -> str:
+    """지금 무엇이 막혀 있고 무엇이 돌고 있는지. 사실만 쓴다.
+
+    예전 브리핑은 하드코딩이라 항상 같은 말을 했다. 사장님이 첫 화면에서
+    처음 읽는 글이 거짓이면, 그 아래 숫자도 믿을 수 없게 된다.
+    """
+    from collections import Counter
+    now = datetime.now()
+    hour = now.hour
+    greet = ("새벽입니다" if hour < 6 else "좋은 아침입니다" if hour < 12
+             else "좋은 오후입니다" if hour < 18 else "저녁입니다")
+
+    lines = [f"■ 브리핑 · {now:%m월 %d일 %H:%M}", "", f"{greet}, 사장님."]
+
+    # ── 막힌 것부터. 사장님이 아니면 아무도 못 푸는 일이다.
+    blocked: list[str] = []
+    try:
+        appr = [a for a in workspace_store.load("approvals")
+                if (a.get("status") or "pending") == "pending"]
+    except Exception:  # noqa: BLE001
+        appr = []
+    if appr:
+        kinds: dict[str, int] = {}
+        for a in appr:
+            k = {"file": "파일 저장", "action": "외부 실행",
+                 "project": "프로젝트 착수"}.get(a.get("kind") or "", "결재")
+            kinds[k] = kinds.get(k, 0) + 1
+        detail = ", ".join(f"{k} {v}건" for k, v in kinds.items())
+        blocked.append(f"결재 {len(appr)}건이 승인을 기다립니다 ({detail}). "
+                       "CEO 룸 결재함에서 처리하실 수 있습니다.")
+
+    paused, running, done_today = [], [], 0
+    try:
+        for p in projects.load():
+            st = p.get("status")
+            if st == "paused":
+                paused.append(p)
+            elif st in ("running", "intake", "planning"):
+                running.append(p)
+            elif st == "done" and (now.timestamp() - float(p.get("updated_at") or 0)) < 86400:
+                done_today += 1
+    except Exception:  # noqa: BLE001
+        pass
+
+    for p in paused:
+        blocked.append(f"{p.get('title', '프로젝트')} 가 멈췄습니다 — "
+                       f"{(p.get('pause_reason') or '이유 미기록')[:90]}")
+
+    if blocked:
+        lines += ["", "[ 지금 막힌 것 ]"] + [f"• {b}" for b in blocked]
+    else:
+        lines += ["", "막혀 있는 일은 없습니다."]
+
+    # ── 돌고 있는 것
+    moving = []
+    if running:
+        moving += [f"{p.get('title', '')} ({p.get('progress', '')})" for p in running]
+    try:
+        # task_queue 에는 summary() 가 없다 — 목록에서 직접 센다.
+        tq = Counter(t.get("status") for t in task_queue.list_tasks())
+        if tq.get("in_progress"):
+            moving.append(f"태스크 {tq['in_progress']}건 처리 중")
+    except Exception:  # noqa: BLE001
+        pass
+    if moving:
+        lines += ["", "[ 돌고 있는 것 ]"] + [f"• {m}" for m in moving]
+
+    # ── 어제오늘 끝난 것
+    finished = []
+    if done_today:
+        finished.append(f"프로젝트 {done_today}건 완료")
+    try:
+        # task_queue 에는 summary() 가 없다 — 목록에서 직접 센다.
+        tq = Counter(t.get("status") for t in task_queue.list_tasks())
+        if tq.get("done"):
+            finished.append(f"태스크 {tq['done']}건 완료")
+        if tq.get("failed"):
+            finished.append(f"태스크 {tq['failed']}건 실패")
+    except Exception:  # noqa: BLE001
+        pass
+    if finished:
+        lines += ["", "[ 최근 결과 ]", "• " + " · ".join(finished)]
+
+    # ── 시스템에 문제가 있으면 그것부터 알아야 한다
+    warns = []
+    ok, err = _probe_ollama_cached()
+    if not ok:
+        warns.append(f"AI 모델에 닿지 않습니다 ({err or OLLAMA_HOST})")
+    if knowledge_base is not None and not knowledge_base.available():
+        warns.append(f"지식 베이스 경로를 찾지 못합니다 ({knowledge_base.KB_PATH})")
+    if warns:
+        lines += ["", "[ 점검 필요 ]"] + [f"• {w}" for w in warns]
+
+    # ── 다음 한 걸음. 상황에 따라 다르게 권한다.
+    if appr:
+        nxt = "CEO 룸에서 결재부터 처리하시면 막힌 일이 풀립니다."
+    elif paused:
+        nxt = "멈춘 프로젝트의 심사 이력을 보시면 왜 막혔는지 나옵니다."
+    elif running:
+        nxt = "돌고 있는 것이 있으니 결과를 기다리시면 됩니다."
+    else:
+        nxt = '프로젝트 탭에 아이디어를 한 줄 던지면 오케스트레이터가 계획을 세웁니다.'
+    lines += ["", f"→ 다음 한 걸음: {nxt}"]
+    return "\n".join(lines)
+
+
 def _json_resp(handler, status: int, data: dict | list):
     body = json.dumps(data, ensure_ascii=False).encode("utf-8")
     handler.send_response(status)
@@ -1106,6 +1213,9 @@ class Handler(BaseHTTPRequestHandler):
                 _json_resp(self, 200, {"hits": [], "error": str(e)})
 
         # ── GET /api/knowledge/read?slug=concepts/transformer
+        elif path == "/api/briefing":
+            _json_resp(self, 200, {"text": _briefing()})
+
         elif path == "/api/knowledge/read":
             slug = (parse_qs(parsed.query).get("slug") or [""])[0]
             try:
@@ -1210,7 +1320,11 @@ class Handler(BaseHTTPRequestHandler):
 
         elif path.startswith("/api/projects/"):
             pid = path.split("/api/projects/")[1]
-            _json_resp(self, 200, {"ok": projects.remove(pid)})
+            ok = projects.remove(pid)
+            # 지운 프로젝트의 이벤트도 함께 지운다. 안 지우면 실시간 활동에
+            # "없는 프로젝트가 멈췄습니다" 가 계속 뜬다.
+            purged = message_broker.purge_events(pid) if ok else 0
+            _json_resp(self, 200, {"ok": ok, "purged_events": purged})
 
         elif path.startswith("/api/tasks/"):
             task_id = path.split("/api/tasks/")[1]

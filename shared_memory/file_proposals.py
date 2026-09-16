@@ -19,6 +19,10 @@ from pathlib import Path
 WORKSPACE_ROOT = (Path(__file__).resolve().parent.parent / "workspace").resolve()
 
 FILE_MARK = "[파일]"
+
+import re as _re
+_BACKTICKED = _re.compile(r"`([^`]+)`")
+_TRAILING_NOTE = _re.compile(r"\s*[（(][^)）]*[)）]\s*$")
 # ```lang 다음 줄부터 ``` 앞까지. lang 은 있어도 없어도 된다.
 _FENCE = re.compile(r"^```[^\n]*\n(.*?)^```", re.S | re.M)
 MAX_BYTES = 256 * 1024
@@ -38,7 +42,17 @@ def clean_rel(rel: str) -> str:
     workspace/etc/passwd 가 된다. 어차피 workspace 밖으로는 못 나가므로
     안전하고, 모델이 절대경로를 적었다고 제안 전체를 버릴 이유는 없다.
     """
-    rel = (rel or "").strip().strip("`").strip().replace("\\", "/").lstrip("/")
+    rel = (rel or "").strip()
+    # 백틱이 양끝에만 있는 게 아니다. `_layouts/default.html` (제안) 처럼
+    # 뒤에 설명이 붙으면 strip 으로는 안 떨어져, 디스크에 "default.html` (제안)"
+    # 이라는 이름의 파일이 실제로 생겼다. 따옴표 안쪽을 경로로 본다.
+    m = _BACKTICKED.search(rel)
+    if m:
+        rel = m.group(1)
+    else:
+        # 백틱이 없으면 뒤에 붙은 괄호 주석만 떼어 낸다 — "(제안)", "(신규)" 등.
+        rel = _TRAILING_NOTE.sub("", rel)
+    rel = rel.strip().strip("`").strip().replace("\\", "/").lstrip("/")
     # 프롬프트가 "workspace 기준 상대경로"라고 일러 줘도 모델은 workspace/ 를
     # 붙여 쓴다. 그대로 두면 workspace/workspace/... 가 된다. 한 겹만 벗긴다.
     if rel.lower().startswith("workspace/"):
