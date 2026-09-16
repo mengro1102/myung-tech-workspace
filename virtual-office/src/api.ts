@@ -7,6 +7,9 @@ export interface AgentSummary {
   role: string;
   department: string;
   status: string;
+  /** 지금 무엇을 하는 중인지. 부서 단위 활동에서 서버가 계산한다 —
+   *  에이전트 개인이 뭘 하는지는 시스템이 모른다. */
+  doing?: string;
 }
 
 export interface AgentDetail extends AgentSummary {

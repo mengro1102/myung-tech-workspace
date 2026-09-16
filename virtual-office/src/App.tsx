@@ -392,7 +392,10 @@ function MainScreen() {
   }), [ceoCards]);
 
   useEffect(() => {
-    if (activeTab !== 'ceo') return;          // 안 보는 화면을 폴링하지 않는다
+    // 결재는 사이드바의 "지금 막힌 것" 도 쓴다. CEO 탭에서만 받아 오면
+    // 메인 화면에서는 늘 0 으로 보여, 브리핑이 "결재 1건" 이라고 말하는데
+    // 바로 옆 사이드바는 "막혀 있는 일 없음" 이라고 하는 상태가 된다.
+    if (activeTab !== 'ceo' && activeTab !== 'main') return;
     let stop = false;
     const tick = async () => {
       const [a, p] = await Promise.all([
@@ -561,13 +564,16 @@ function MainScreen() {
             if (cycleStatus !== 'stopped') {
               await fetch('/api/cycle/stop', { method: 'POST' });
               setCycleStatus('stopped');
-              pushMsg({ role: 'assistant', sender: '명테크 AI', text: '⏹ 24시간 에이전틱 사이클이 중지됐습니다.' });
+              pushMsg({ role: 'assistant', sender: '명테크 AI', text: '⏹ 운영 사이클을 중지했습니다.\n\n새 지시는 더 내려가지 않습니다. 이미 돌고 있던 프로젝트와 태스크는 그대로 끝까지 갑니다.' });
               pushNotif('warning', '운영 사이클이 중지됐습니다');
             } else {
               const r = await fetch('/api/cycle/run_once', { method: 'POST' });
               const d = await r.json().catch(() => ({}));
               setCycleStatus(d.status ?? 'analyzing');
-              pushMsg({ role: 'assistant', sender: '명테크 AI', text: '🚀 사이클 시작 — 분석 → 작전 검토 → 실행 순서로 진행됩니다.\n\n디스패처가 실행 중이어야 에이전트가 실제로 동작합니다.\n(WSL: python3 run.py dispatch daemon)' });
+              // "사이클" 이 무엇인지 화면 어디에도 없었다. 헤더 버튼·시스템
+              // 현황·토스트 세 군데서 쓰면서 뜻은 아무도 알려 주지 않았다.
+              // 시작할 때 한 번 제대로 말한다.
+              pushMsg({ role: 'assistant', sender: '명테크 AI', text: '🚀 운영 사이클을 시작했습니다.\n\n사이클은 사장님이 하나하나 시키지 않아도 AI 팀이 스스로 한 바퀴 도는 것입니다.\n\n1. 분석 — 지금 회사 상태와 밀린 일을 훑습니다\n2. 작전 검토 — 무엇부터 할지 오케스트레이터가 정합니다\n3. 실행 — 각 부서에 지시가 내려갑니다\n\n되돌릴 수 없는 일(파일 저장·외부 실행)은 결재함으로 올라옵니다. 사장님이 승인하기 전에는 아무것도 나가지 않습니다.' });
               pushNotif('success', '🚀 운영 사이클 시작 — 분석 중', () => setActiveTab('ceo'));
             }
           }}
@@ -915,6 +921,23 @@ function MainScreen() {
             </div>
           )}
 
+          {/* 지금 막힌 것 — 사장님이 아니면 아무도 못 푸는 일.
+              자세한 현황은 CEO 룸이 맡는다. 여기까지 숫자를 늘어놓으면
+              같은 것을 두 군데서 세게 되고, 어긋나면 둘 다 못 믿는다. */}
+          <div className="hs-sidebar-section-title">지금 막힌 것</div>
+          <button className={`hs-blocked ${ceoApprovals.length ? 'on' : ''}`}
+            onClick={() => setActiveTab('ceo')}
+            title="CEO 룸 결재함으로">
+            {ceoApprovals.length > 0 ? (
+              <>
+                <span className="hs-blocked-n">{ceoApprovals.length}</span>
+                <span className="hs-blocked-t">결재 대기<br /><b>눌러서 처리 →</b></span>
+              </>
+            ) : (
+              <span className="hs-blocked-t none">막혀 있는 일 없음</span>
+            )}
+          </button>
+
           {/* 상태보고 */}
           <div className="hs-sidebar-section-title">상태보고</div>
           <div className="hs-dept-list">
@@ -925,18 +948,25 @@ function MainScreen() {
               ['dev_dept',           '⚙️', '개발'],
               ['content_dept',       '✍️', '콘텐츠생산'],
             ] as [string, string, string][]).map(([d, icon, label]) => {
-              const cnt    = agents.filter(a => a.department === d).length;
-              const active = agents.filter(a => a.department === d && a.status !== 'Idle').length;
+              const mine   = agents.filter(a => a.department === d);
+              const busy   = mine.find(a => a.status !== 'Idle');
+              // 숫자만 있으면 무엇의 개수인지 알 수 없었다(인원? 태스크?).
+              // 일하는 중이면 무엇을 하는지까지 쓴다.
               return (
                 <button
                   key={d}
-                  className="hs-dept-card"
+                  className={`hs-dept-card ${busy ? 'busy' : ''}`}
                   onClick={() => { setDept(d); send(`${label}팀 현재 상태와 진행 중인 태스크를 보고해줘.`, d); }}
-                  title={`${label}팀 상태보고 요청`}
+                  title={busy ? `${label}팀 — ${busy.doing || '작업 중'}` : `${label}팀 상태보고 요청`}
                 >
                   <span className="hs-dept-icon">{icon}</span>
-                  <span className="hs-dept-name">{label}</span>
-                  <span className={`hs-dept-count ${active > 0 ? 'active' : ''}`}>{cnt}</span>
+                  <span className="hs-dept-name">
+                    {label}
+                    {busy?.doing && <span className="hs-dept-doing">{busy.doing}</span>}
+                  </span>
+                  <span className={`hs-dept-count ${busy ? 'active' : ''}`}>
+                    {mine.length}<span className="hs-dept-unit">명</span>
+                  </span>
                 </button>
               );
             })}

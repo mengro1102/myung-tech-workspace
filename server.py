@@ -715,6 +715,54 @@ def _briefing() -> str:
     return "\n".join(lines)
 
 
+
+def _dept_activity() -> dict[str, dict]:
+    """부서마다 지금 무엇을 하고 있나. {dept: {tasks, project, label}}
+
+    에이전트 개인이 무엇을 하는지는 시스템이 모른다 — 일은 부서로 간다.
+    아는 만큼만 말하고 지어내지 않는다.
+    """
+    out: dict[str, dict] = {}
+
+    try:
+        for t in task_queue.list_tasks():
+            if t.get("status") != "in_progress":
+                continue
+            d = t.get("target_dept") or ""
+            if not d:
+                continue
+            e = out.setdefault(d, {"tasks": 0, "project": "", "label": ""})
+            e["tasks"] += 1
+    except Exception:  # noqa: BLE001
+        pass
+
+    try:
+        for p in projects.load():
+            if p.get("status") not in ("running", "intake", "planning"):
+                continue
+            ds = (p.get("plan") or {}).get("deliverables") or []
+            cur = int(p.get("cursor", 0))
+            phase = p.get("phase") or ""
+            # 지금 만들고 있는 산출물의 부서. 2차 검토는 오케스트레이터가 본다.
+            if phase == "review2":
+                d = "orchestration_dept"
+            elif cur < len(ds):
+                d = ds[cur].get("dept") or ""
+            else:
+                d = ""
+            if not d:
+                continue
+            e = out.setdefault(d, {"tasks": 0, "project": "", "label": ""})
+            e["project"] = p.get("title") or ""
+            e["label"] = {"draft": "초안 작성", "review1": "1차 검토",
+                          "review2": "2차 검토", "plan": "계획 수립",
+                          "narrow": "범위 조정"}.get(phase, phase)
+    except Exception:  # noqa: BLE001
+        pass
+
+    return out
+
+
 def _json_resp(handler, status: int, data: dict | list):
     body = json.dumps(data, ensure_ascii=False).encode("utf-8")
     handler.send_response(status)
@@ -949,14 +997,27 @@ class Handler(BaseHTTPRequestHandler):
         # ── GET /api/agents
         elif path == "/api/agents":
             agents = _load_all_agents()
-            summary = [{
-                "agent_id":       a.get("agent_id"),
-                "character_name": a.get("character_name", ""),
-                "role":           a.get("role", ""),
-                "department":     a.get("department", ""),
-                "status":         a.get("status", "Idle"),
-            } for a in agents]
-            _json_resp(self, 200, {"total": len(summary), "agents": summary})
+            # status 는 파일에 적힌 값이라 아무도 갱신하지 않는다 — 12명이
+            # 늘 Idle 이었다. 부서가 실제로 일하는 중이면 Working 으로 본다.
+            act = _dept_activity()
+            summary = []
+            for a in agents:
+                dept = a.get("department", "")
+                busy = act.get(dept)
+                summary.append({
+                    "agent_id":       a.get("agent_id"),
+                    "character_name": a.get("character_name", ""),
+                    "role":           a.get("role", ""),
+                    "department":     dept,
+                    "status":         "Working" if busy else a.get("status", "Idle"),
+                    # 무엇을 하고 있는지까지 준다. "일하는 중" 만으로는
+                    # 화면이 또 한 번 "그래서 뭘?" 을 못 답한다.
+                    "doing":          (f"{busy['label']} · {busy['project']}"[:60]
+                                       if busy and busy.get("project")
+                                       else (f"태스크 {busy['tasks']}건" if busy else "")),
+                })
+            _json_resp(self, 200, {"total": len(summary), "agents": summary,
+                                   "dept_activity": act})
 
         # ── GET /api/agents/:id
         elif path.startswith("/api/agents/"):

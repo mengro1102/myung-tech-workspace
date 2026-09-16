@@ -4181,3 +4181,45 @@ button.pj-deliv-item[aria-expanded="true"] { background: var(--glass-hi); border
 
 /* 프로젝트 제목줄의 부연 — "3건" 이 전부 돌고 있다는 뜻이 아님을 말해 준다. */
 .pj-h-sub { margin-left: 8px; font-size: 11px; font-weight: 500; color: var(--muted); }
+
+/* ⑥ 모바일에서 탭이 잘렸다. 375px 에서 노트·CEO 룸이 화면 밖으로 나가
+   스크롤이 되긴 하지만, 잘린 줄 모르면 탭이 있는 줄도 모른다.
+   가로 스크롤을 명시하고, 끝에 그라데이션을 둬서 "더 있다" 를 보이게 한다. */
+@media (max-width: 767px) {
+  .hs-tabs {
+    overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+    /* 오른쪽 끝을 흐리게 — 잘린 게 아니라 더 있다는 신호. */
+    -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent);
+            mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent);
+  }
+  .hs-tabs::-webkit-scrollbar { display: none; }
+  .hs-tab { flex: none; white-space: nowrap; }
+}
+
+/* ③⑦ 부서 카드 — 숫자가 무엇의 개수인지, 지금 무엇을 하는지. */
+.hs-dept-unit { margin-left: 1px; font-size: 9px; font-weight: 500; opacity: .7; }
+.hs-dept-doing {
+  display: block; margin-top: 1px; font-size: 9.5px; font-weight: 500;
+  color: var(--primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.hs-dept-card.busy { border-color: rgba(139, 92, 246, .45); }
+
+/* ④ 사이드바는 "지금 내가 손대야 할 것" 만. 자세한 현황은 CEO 룸이 맡는다. */
+.hs-blocked {
+  display: flex; align-items: center; gap: 10px; width: 100%;
+  padding: 10px 12px; margin-bottom: 4px; border-radius: 10px; text-align: left;
+  background: var(--glass-bg); border: 1px solid var(--border); color: var(--text);
+  cursor: pointer; transition: var(--t-ui) .15s;
+}
+.hs-blocked:hover { background: var(--glass-hi); }
+.hs-blocked.on { background: rgba(244,114,182,.12); border-color: rgba(244,114,182,.45); }
+.hs-blocked-n {
+  flex: none; font-size: 22px; font-weight: 800; line-height: 1;
+  color: #f472b6; font-variant-numeric: tabular-nums;
+}
+.hs-blocked-t { font-size: 11px; line-height: 1.45; color: var(--muted); }
+.hs-blocked-t b { color: var(--text); font-weight: 600; }
+.hs-blocked-t.none { color: var(--muted); }
