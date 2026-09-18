@@ -4223,3 +4223,6 @@ button.pj-deliv-item[aria-expanded="true"] { background: var(--glass-hi); border
 .hs-blocked-t { font-size: 11px; line-height: 1.45; color: var(--muted); }
 .hs-blocked-t b { color: var(--text); font-weight: 600; }
 .hs-blocked-t.none { color: var(--muted); }
+
+/* 대화 시각이 YYYY-MM-DD HH:mm 으로 길어졌다. 눌리거나 줄바꿈되지 않게. */
+.ac-time { flex: none; white-space: nowrap; }

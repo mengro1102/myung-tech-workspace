@@ -563,11 +563,35 @@ def _broadcast_event(event: dict):
             _sse_clients.remove(d)
 
 
+# 이벤트는 파일 하나씩 쌓인다. 지우는 사람이 없으면 무한정 늘고, 아래 감시
+# 루프가 1.5초마다 그 전부를 스캔하므로 쌓일수록 느려진다(실측 274개·1.2MB).
+# 화면은 최근 50건만 쓰므로 그보다 넉넉히 남긴다.
+EVENT_KEEP = 400
+
+
 def _event_watcher():
     """shared_memory 이벤트를 감시해서 SSE로 브로드캐스트."""
-    seen = set()
+    seen: set[str] = set()
+    last_prune = ""
+    try:
+        n = message_broker.prune_events(EVENT_KEEP)
+        if n:
+            print(f"[events] 시작 정리: 오래된 이벤트 {n}건 삭제")
+    except Exception:  # noqa: BLE001
+        pass
     while True:
         try:
+            today = datetime.now().strftime("%Y-%m-%d")
+            if today != last_prune:
+                last_prune = today
+                n = message_broker.prune_events(EVENT_KEEP)
+                if n:
+                    print(f"[events] 일일 정리: 오래된 이벤트 {n}건 삭제")
+                # 지운 파일의 id 는 seen 에 영원히 남는다. 하루에 한 번
+                # 지금 있는 것만 남겨 메모리가 계속 늘지 않게 한다.
+                if len(seen) > EVENT_KEEP * 2:
+                    seen = {e.get("event_id") for e in message_broker.fetch_events()
+                            if e.get("event_id")}
             events = message_broker.fetch_events()
             for evt in events:
                 eid = evt.get("event_id")

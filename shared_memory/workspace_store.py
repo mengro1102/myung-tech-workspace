@@ -24,7 +24,7 @@ STORE_DIR = Path(__file__).resolve().parent / "store"
 STORE_DIR.mkdir(parents=True, exist_ok=True)
 
 # 컬렉션마다 파일 하나. 이름을 화이트리스트로 두어 경로 이탈을 원천 차단한다.
-COLLECTIONS = ("tasks", "services", "approvals", "notes")
+COLLECTIONS = ("tasks", "services", "approvals", "notes", "notif_state")
 
 
 def _path(collection: str) -> Path:

@@ -25,10 +25,14 @@ const KIND: Record<string, { label: string; cls: string }> = {
   say:      { label: '',        cls: 'muted' },
 };
 
-function hhmm(at: number): string {
+/** YYYY-MM-DD HH:mm (24시간). toLocaleString 은 로캘에 따라 '오전 1:05' 처럼
+ *  나와 정렬도 안 되고 폭도 들쭉날쭉하다. 직접 만든다. */
+function stamp(at: number): string {
   if (!at) return '';
-  return new Date(at * 1000).toLocaleTimeString('ko-KR',
-    { hour: '2-digit', minute: '2-digit', hour12: false });
+  const d = new Date(at * 1000);
+  const p = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} `
+       + `${p(d.getHours())}:${p(d.getMinutes())}`;
 }
 
 export default function AgentChat({ entries, showProject = false, emptyText }: {
@@ -76,7 +80,7 @@ export default function AgentChat({ entries, showProject = false, emptyText }: {
                       {k.label}{e.score != null ? ` ${e.score}점` : ''}
                     </span>
                   )}
-                  <span className="ac-time">{hhmm(e.at)}</span>
+                  <span className="ac-time">{stamp(e.at)}</span>
                 </div>
                 {expandable ? (
                   <button className={`ac-bubble ${isOpen ? 'open' : ''}`}

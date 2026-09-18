@@ -134,11 +134,44 @@ function MainScreen() {
   const [drawerTaskId, setDrawerTaskId] = useState<string | null>(null);
   const [toasts,       setToasts]     = useState<ToastItem[]>([]);
   const [notifications, setNotifications] = useState<Notification[]>([]);
+  /* 알림의 읽음·삭제는 서버에 남긴다.
+   *
+   * 알림 자체는 이벤트에서 매번 다시 만들어진다. 읽음·삭제가 React 상태에만
+   * 있으면 새로고침할 때마다 되살아난다 — 실제로 "모두 읽음·모두 삭제" 를
+   * 눌러도 새로고침하면 그대로 돌아왔다.
+   *
+   * localStorage 에 두면 폰과 PC 가 각자 다른 상태를 갖는다. 밖에서 폰으로
+   * 읽은 알림이 PC 에서 다시 안 읽음으로 뜨면 같은 문제가 된다. */
+  const notifSeenRef = useRef<{ read: string[]; dismissed: string[] }>({ read: [], dismissed: [] });
+  const [notifSeen, setNotifSeen] = useState<{ read: Set<string>; dismissed: Set<string> }>(
+    { read: new Set(), dismissed: new Set() });
+
+  const saveNotifSeen = useCallback((next: { read: string[]; dismissed: string[] }) => {
+    // 무한정 쌓이지 않게 최근 것만 남긴다. 오래된 알림은 어차피 목록에서
+    // 밀려나므로 그 id 를 계속 들고 있을 이유가 없다.
+    const trim = (a: string[]) => a.slice(-300);
+    const body = { read: trim(next.read), dismissed: trim(next.dismissed) };
+    notifSeenRef.current = body;
+    setNotifSeen({ read: new Set(body.read), dismissed: new Set(body.dismissed) });
+    void api.storeUpdate('notif_state', 'state', body).then(r => {
+      // 행이 아직 없으면 만든다. 서버에 없는 걸 PUT 하면 404 가 온다.
+      if (!r?.ok) void api.storeAdd('notif_state', { id: 'state', ...body });
+    });
+  }, []);
+
+  useEffect(() => {
+    void api.storeList<{ id: string; read?: string[]; dismissed?: string[] }>('notif_state')
+      .then(r => {
+        const row = (r?.items ?? []).find(x => x.id === 'state');
+        const body = { read: row?.read ?? [], dismissed: row?.dismissed ?? [] };
+        notifSeenRef.current = body;
+        setNotifSeen({ read: new Set(body.read), dismissed: new Set(body.dismissed) });
+      });
+  }, []);
   const [showNotifications, setShowNotifications] = useState(false);
   const [recentNotif,  setRecentNotif] = useState<Notification | null>(null);
   const notifRef = useRef<HTMLDivElement>(null);
   const recentNotifTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const [hiddenTasks,  setHiddenTasks] = useState<Set<string>>(new Set());
   const [showTeam,    setShowTeam]    = useState(false);
   const [showMemory,  setShowMemory]  = useState(false);
   const [showModel,   setShowModel]   = useState(false);
@@ -289,19 +322,34 @@ function MainScreen() {
         if (isError) {
           const msg = p.replace(/#{1,4}\s+/g, '').replace(/\*\*/g, '').replace(/\n/g, ' ').slice(0, 80);
           const n: Notification = { id: `notif-${e.event_id}`, type: 'error', message: `[${e.sender}] ${msg}`, time: new Date(e.timestamp ?? Date.now()), read: false };
-          setNotifications(prev => { if (prev.some(x => x.id === n.id)) return prev; return [n, ...prev].slice(0, 50); });
+          setNotifications(prev => {
+            if (notifSeenRef.current.dismissed.includes(n.id)) return prev;   // 지운 것은 다시 만들지 않는다
+            if (prev.some(x => x.id === n.id)) return prev;
+            const row = notifSeenRef.current.read.includes(n.id) ? { ...n, read: true } : n;
+            return [row, ...prev].slice(0, 50);
+          });
           setRecentNotif(n);
           if (recentNotifTimerRef.current) clearTimeout(recentNotifTimerRef.current);
           recentNotifTimerRef.current = setTimeout(() => setRecentNotif(null), 5000);
         } else if (isDone) {
           const n: Notification = { id: `notif-${e.event_id}`, type: 'success', message: `사이클 완료 — ${e.sender}`, time: new Date(e.timestamp ?? Date.now()), read: false, link: () => setActiveTab('ceo') };
-          setNotifications(prev => { if (prev.some(x => x.id === n.id)) return prev; return [n, ...prev].slice(0, 50); });
+          setNotifications(prev => {
+            if (notifSeenRef.current.dismissed.includes(n.id)) return prev;   // 지운 것은 다시 만들지 않는다
+            if (prev.some(x => x.id === n.id)) return prev;
+            const row = notifSeenRef.current.read.includes(n.id) ? { ...n, read: true } : n;
+            return [row, ...prev].slice(0, 50);
+          });
           setRecentNotif(n);
           if (recentNotifTimerRef.current) clearTimeout(recentNotifTimerRef.current);
           recentNotifTimerRef.current = setTimeout(() => setRecentNotif(null), 5000);
         } else if (isWarn) {
           const n: Notification = { id: `notif-${e.event_id}`, type: 'warning', message: `[${e.sender}] ${p.slice(0, 70)}`, time: new Date(e.timestamp ?? Date.now()), read: false };
-          setNotifications(prev => { if (prev.some(x => x.id === n.id)) return prev; return [n, ...prev].slice(0, 50); });
+          setNotifications(prev => {
+            if (notifSeenRef.current.dismissed.includes(n.id)) return prev;   // 지운 것은 다시 만들지 않는다
+            if (prev.some(x => x.id === n.id)) return prev;
+            const row = notifSeenRef.current.read.includes(n.id) ? { ...n, read: true } : n;
+            return [row, ...prev].slice(0, 50);
+          });
           setRecentNotif(n);
           if (recentNotifTimerRef.current) clearTimeout(recentNotifTimerRef.current);
           recentNotifTimerRef.current = setTimeout(() => setRecentNotif(null), 5000);
@@ -372,7 +420,6 @@ function MainScreen() {
     }
 
     for (const t of taskList) {
-      if (hiddenTasks.has(t.task_id)) continue;
       out.push({
         key: `t-${t.task_id}`, col: t.status, kind: '태스크', icon: '📋',
         title: t.instruction,
@@ -382,7 +429,7 @@ function MainScreen() {
       });
     }
     return out;
-  }, [ceoApprovals, ceoProjectList, taskList, hiddenTasks]);
+  }, [ceoApprovals, ceoProjectList, taskList]);
 
   const ceoCount = useMemo(() => ({
     pending: ceoCards.filter(c => c.col === 'pending').length,
@@ -586,10 +633,27 @@ function MainScreen() {
           notifications={notifications}
           open={showNotifications}
           onToggle={() => setShowNotifications(v => !v)}
-          onRead={id => setNotifications(prev => prev.map(n => n.id === id ? { ...n, read: true } : n))}
-          onReadAll={() => setNotifications(prev => prev.map(n => ({ ...n, read: true })))}
-          onRemove={id => setNotifications(prev => prev.filter(n => n.id !== id))}
-          onClearAll={() => setNotifications([])}
+          onRead={id => {
+            setNotifications(prev => prev.map(n => n.id === id ? { ...n, read: true } : n));
+            saveNotifSeen({ read: [...notifSeenRef.current.read, id],
+                            dismissed: notifSeenRef.current.dismissed });
+          }}
+          onReadAll={() => {
+            setNotifications(prev => prev.map(n => ({ ...n, read: true })));
+            saveNotifSeen({ read: [...notifSeenRef.current.read, ...notifications.map(n => n.id)],
+                            dismissed: notifSeenRef.current.dismissed });
+          }}
+          onRemove={id => {
+            setNotifications(prev => prev.filter(n => n.id !== id));
+            saveNotifSeen({ read: notifSeenRef.current.read,
+                            dismissed: [...notifSeenRef.current.dismissed, id] });
+          }}
+          onClearAll={() => {
+            saveNotifSeen({ read: notifSeenRef.current.read,
+                            dismissed: [...notifSeenRef.current.dismissed,
+                                        ...notifications.map(n => n.id)] });
+            setNotifications([]);
+          }}
           containerRef={notifRef}
         />
 
@@ -761,12 +825,6 @@ function MainScreen() {
               <span className="ceo-kpi-label">에이전트</span>
               <span className="ceo-kpi-value purple">{agents.length}</span>
             </div>
-            {hiddenTasks.size > 0 && (
-              <button className="ceo-new-btn" style={{ background: 'rgba(148,163,184,0.15)', color: '#94A3B8', border: '1px solid rgba(148,163,184,0.3)' }}
-                onClick={() => setHiddenTasks(new Set())}>
-                👁 숨김 {hiddenTasks.size}개 표시
-              </button>
-            )}
             <button
               className="ceo-new-btn"
               onClick={() => { setActiveTab('main'); setTimeout(() => textareaRef.current?.focus(), 100); }}
