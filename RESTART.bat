@@ -28,8 +28,14 @@ REM  A restart is a deliberate start - clear the watchdog stand-down flag.
 del /q "%WS%\logs\watchdog.stop" 2>/dev/null
 
 echo  [1/4] Closing backend windows...
+REM  창 없이 뜨므로 제목으로는 못 찾는다. 명령줄로 찾아 죽인다.
 for %%W in (mt-server mt-dispatch mt-telegram) do (
     taskkill /FI "WINDOWTITLE eq %%W*" /T /F > nul 2>&1
+)
+for %%P in ("server.py" "telegram_gateway.py") do (
+    for /f "tokens=2 delims=," %%a in ('wmic process where "name='python.exe'" get processid^,commandline /format:csv 2^>nul ^| findstr /C:%%P') do (
+        taskkill /PID %%a /T /F > nul 2>&1
+    )
 )
 
 REM  The daemon polls forever, so a stray one keeps draining the queue and
@@ -50,8 +56,8 @@ ping -n 4 127.0.0.1 > nul
 
 echo.
 echo  [3/4] Starting backend...
-start "mt-server" /min cmd /c "cd /d %WS% && python server.py"
-start "mt-dispatch" /min cmd /c "cd /d %WS% && python run.py dispatch daemon"
+wscript //nologo "%WS%\scripts\runbg.vbs" "cmd /c cd /d %WS% && python -u server.py >> logs\server.log 2>&1"
+wscript //nologo "%WS%\scripts\runbg.vbs" "cmd /c cd /d %WS% && python -u run.py dispatch daemon >> logs\dispatch.log 2>&1"
 REM  -u + 로그 리다이렉트: 예전에는 창에만 찍혀서, 게이트웨이가 죽으면
 REM  이유가 아무 데도 남지 않았다. 버퍼링을 끄지 않으면 로그가 비어 보인다.
 if not exist "%WS%\logs" mkdir "%WS%\logs"
@@ -71,7 +77,7 @@ REM  127.0.0.1, not localhost: on Windows localhost can resolve to ::1 first
 REM  and the check reports failure even though the service is up on IPv4.
 powershell -NoProfile -Command "try{$h=Invoke-RestMethod 'http://127.0.0.1:9000/api/health' -TimeoutSec 10; ('        server {0} / AI model {1} / KB {2}' -f $h.server.ok, $h.vllm.ok, $h.knowledge_base.ok)}catch{'        API no response - see the mt-server window'}" 2>nul
 
-tasklist /FI "WINDOWTITLE eq mt-dispatch*" 2>nul | findstr "cmd.exe" > nul && (
+wmic process where "name='python.exe'" get commandline 2>nul | findstr /C:"dispatch daemon" > nul && (
     echo         dispatcher running
 ) || (
     echo         dispatcher NOT running - see the mt-dispatch window

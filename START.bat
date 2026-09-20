@@ -46,7 +46,7 @@ curl -s -o nul --max-time 3 http://127.0.0.1:3001/ && (
     echo         already running - skipped.
 ) || (
     if exist "D:\AI_Workspace\freellmapi\server\dist\index.js" (
-        start "mt-router" /min cmd /c "cd /d D:\AI_Workspace\freellmapi && node server\dist\index.js"
+        wscript //nologo "%WS%\scripts\runbg.vbs" "cmd /c cd /d D:\AI_Workspace\freellmapi && node server\dist\index.js >> router.log 2>&1"
         echo         launched.
     ) else (
         echo         router build missing - departments will use local Ollama.
@@ -58,7 +58,7 @@ echo  [3/7] API server (port 9000)...
 netstat -ano | findstr ":9000 " | findstr LISTENING > nul && (
     echo         already running - skipped.
 ) || (
-    start "mt-server" /min cmd /c "cd /d %WS% && python server.py"
+    wscript //nologo "%WS%\scripts\runbg.vbs" "cmd /c cd /d %WS% && python -u server.py >> logs\server.log 2>&1"
     echo         launched.
 )
 
@@ -66,10 +66,10 @@ echo.
 echo  [4/7] Agent dispatcher (daemon)...
 REM  Without this nobody drains the task queue, so the 2D office and the live
 REM  feed stay empty. Running it as a daemon is what makes the screen move.
-tasklist /FI "WINDOWTITLE eq mt-dispatch*" 2>nul | findstr "cmd.exe" > nul && (
+wmic process where "name='python.exe'" get commandline 2>nul | findstr /C:"dispatch daemon" > nul && (
     echo         already running - skipped.
 ) || (
-    start "mt-dispatch" /min cmd /c "cd /d %WS% && python run.py dispatch daemon"
+    wscript //nologo "%WS%\scripts\runbg.vbs" "cmd /c cd /d %WS% && python -u run.py dispatch daemon >> logs\dispatch.log 2>&1"
     echo         launched.
 )
 
@@ -90,7 +90,7 @@ echo  [6/7] UI dev server (port 5174)...
 netstat -ano | findstr ":5174 " | findstr LISTENING > nul && (
     echo         already running - skipped.
 ) || (
-    start "mt-vite" /min cmd /c "cd /d %WS%\virtual-office && npm run dev"
+    wscript //nologo "%WS%\scripts\runbg.vbs" "cmd /c cd /d %WS%\virtual-office && npm run dev >> ..\logs\vite.log 2>&1"
     echo         launched.
 )
 

@@ -20,8 +20,21 @@ if not exist "%WS%\logs" mkdir "%WS%\logs" 2>/dev/null
 echo stopped-by-user > "%WS%\logs\watchdog.stop"
 
 echo  [1/3] Closing service windows...
-for %%W in (mt-server mt-dispatch mt-vite) do (
+REM  서비스는 이제 창 없이 뜬다(runbg.vbs). 창 제목이 없으니 제목으로는
+REM  찾을 수 없다 - 명령줄로 찾아 죽인다. 제목 방식도 남겨 둔다: 예전
+REM  방식으로 띄운 것이 아직 떠 있을 수 있다.
+for %%W in (mt-server mt-dispatch mt-vite mt-telegram) do (
     taskkill /FI "WINDOWTITLE eq %%W*" /T /F > nul 2>&1
+)
+for %%P in ("server.py" "dispatch daemon" "telegram_gateway.py") do (
+    for /f "tokens=2 delims=," %%a in ('wmic process where "name='python.exe'" get processid^,commandline /format:csv 2^>nul ^| findstr /C:%%P') do (
+        taskkill /PID %%a /T /F > nul 2>&1
+    )
+)
+REM  Vite 는 node 로 돈다. 명령줄에 vite 가 안 보이는 경우가 있어 포트로
+REM  주인을 찾는 편이 확실하다.
+for /f "tokens=5" %%a in ('netstat -ano ^| findstr ":5174 " ^| findstr LISTENING') do (
+    taskkill /PID %%a /T /F > nul 2>&1
 )
 echo         done.
 

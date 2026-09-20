@@ -82,9 +82,18 @@ def dispatcher_alive() -> bool:
 
 
 def start(title: str, command: str) -> None:
-    """START.BAT 과 같은 모양으로 띄운다 — 창 제목이 같아야 STOP.BAT 이 끈다."""
-    subprocess.Popen(f'start "{title}" /min cmd /c "{command}"',
-                     shell=True, cwd=str(ROOT))
+    """창 없이 띄운다. START.BAT 과 같은 방식이어야 한다.
+
+    예전에는 start "제목" /min 으로 띄웠다. 최소화일 뿐 작업 표시줄에는
+    그대로 남아, 워치독이 되살릴 때마다 창이 하나씩 늘었다. 이제 둘 다
+    runbg.vbs 로 띄우므로 창이 생기지 않는다 — 대신 제목이 없으니
+    STOP 은 명령줄로 찾아 죽인다(STOP.bat 참고).
+    """
+    vbs = ROOT / "scripts" / "runbg.vbs"
+    log = f'>> {ROOT}\logs\{title}.log 2>&1'
+    subprocess.Popen(
+        f'wscript //nologo "{vbs}" "cmd /c {command} {log}"',
+        shell=True, cwd=str(ROOT))
 
 
 def load_state() -> dict:
