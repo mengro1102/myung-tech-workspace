@@ -12,6 +12,13 @@ echo   myung-tech Agent Studio  STOP
 echo  ==========================================
 echo.
 
+set "WS=D:\myung-tech-workspace"
+
+REM  Tell the watchdog to stand down. Without this it revives everything
+REM  5 minutes later and the studio looks like it refuses to stay off.
+if not exist "%WS%\logs" mkdir "%WS%\logs" 2>/dev/null
+echo stopped-by-user > "%WS%\logs\watchdog.stop"
+
 echo  [1/3] Closing service windows...
 for %%W in (mt-server mt-dispatch mt-vite) do (
     taskkill /FI "WINDOWTITLE eq %%W*" /T /F > nul 2>&1

@@ -17,6 +17,9 @@ echo   myung-tech Agent Studio  START
 echo  ==========================================
 echo.
 
+REM  Clear the watchdog stand-down flag - we are deliberately starting.
+del /q "%WS%\logs\watchdog.stop" 2>/dev/null
+
 echo  [1/7] Ollama (port 11434)...
 REM  Ollama is the last-resort backend: when the router is down every
 REM  department falls back to it. Health-checking it at the end was not

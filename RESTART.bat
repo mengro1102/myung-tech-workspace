@@ -24,6 +24,9 @@ echo   myung-tech Agent Studio  RESTART
 echo  ==========================================
 echo.
 
+REM  A restart is a deliberate start - clear the watchdog stand-down flag.
+del /q "%WS%\logs\watchdog.stop" 2>/dev/null
+
 echo  [1/4] Closing backend windows...
 for %%W in (mt-server mt-dispatch mt-telegram) do (
     taskkill /FI "WINDOWTITLE eq %%W*" /T /F > nul 2>&1

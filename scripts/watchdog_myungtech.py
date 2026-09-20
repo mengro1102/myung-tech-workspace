@@ -27,6 +27,11 @@ ROOT = Path(__file__).resolve().parent.parent
 LOG = ROOT / "logs" / "watchdog.log"
 STATE = ROOT / "logs" / "watchdog.state.json"
 
+# 사람이 일부러 내렸다는 표시. STOP.bat 이 만들고 START.bat 이 지운다.
+# 이게 없으면 "전체 종료" 를 눌러도 5분 뒤 워치독이 그대로 되살려서,
+# 끈 것이 계속 다시 켜지는 것처럼 보인다.
+STOP_FLAG = ROOT / "logs" / "watchdog.stop"
+
 for _s in (sys.stdout, sys.stderr):
     try:
         _s.reconfigure(encoding="utf-8", errors="replace")
@@ -111,6 +116,11 @@ def main() -> int:
     ap.add_argument("--check", action="store_true", help="상태만 보고 되살리지 않는다")
     args = ap.parse_args()
 
+    if STOP_FLAG.exists() and not args.check:
+        # 사람이 내린 것은 되살리지 않는다. 조용히 빠진다 — 5분마다
+        # "내려가 있습니다" 를 알리면 그게 더 성가시다.
+        return 0
+
     state = load_state()
     fails = dict(state.get("fails") or {})
     down: list[str] = []
@@ -140,6 +150,8 @@ def main() -> int:
 
     if args.check:
         print("정지:", ", ".join(down) if down else "없음")
+        if STOP_FLAG.exists():
+            print("(사람이 내린 상태 — 되살리지 않습니다. 켜려면 1. 전체 시작.bat)")
         return 0
 
     if gave_up:
