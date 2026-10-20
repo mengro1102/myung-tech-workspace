@@ -117,6 +117,15 @@ export interface ApprovalRow extends StoreItem {
   result?: string;
   file_path?: string;
   file_content?: string;
+  /** 서버가 읽을 때 계산해 붙인다 — 되돌릴 수 있는 정도.
+   *  1 내부(태스크 하나) · 2 쓰기(workspace·프로젝트) · 3 바깥(업로드·PR).
+   *  저장된 값이 아니라 응답에만 있다. 규칙이 바뀌면 옛 행도 새 등급으로 온다. */
+  tier?: 1 | 2 | 3;
+  tier_name?: string;
+  tier_tone?: 'muted' | 'write' | 'danger';
+  tier_why?: string;
+  /** 3등급은 false — 일괄 승인에 넣지 않는다. 서버도 거부한다. */
+  batchable?: boolean;
 }
 
 /* ── 자율 프로젝트 ─────────────────────────────────────────────────────────
@@ -143,6 +152,12 @@ export interface ProjectStep {
   /** 분량 초과로 잘려 다시 쓴 초안. 품질 실패가 아니라 길이 실패라
    *  안전망 계산에서도 빼고 화면에서도 따로 센다. */
   trunc?: boolean;
+  /** 끝나지 못한 호출인지. 프로세스가 죽어 응답을 못 받은 것이라
+   *  품질 실패도 길이 실패도 아니다 — 안전망 계산에서 빠진다. */
+  dead?: boolean;
+  /** 이 단계의 모델 호출에 걸린 초. "왜 오래 걸리지" 와 "어느 단계가
+   *  비싼가" 는 이것 없이는 답할 수 없다. */
+  secs?: number;
 }
 
 export interface ProjectRow {
@@ -158,8 +173,21 @@ export interface ProjectRow {
   /** 목록 응답에는 없다 — 산출물이 수만 자라 따로 받는다 */
   steps?: ProjectStep[];
   artifacts?: Record<string, string>;
+  /** 러너가 실제로 조회한 자료 이름들. 비어 있으면 **맞춰 볼 자료가 없었던
+   *  것**이므로, 검토 점수는 사실 확인이 아니라 그럴듯함에 대한 평가다.
+   *  확신·공백 패널이 이 하나로 검증됨/가정함을 갈라 세운다. */
+  source_names?: string[];
+  /** 지금 돌고 있는 모델 호출. 호출 **직전**에 서버가 적고 끝나면 지운다.
+   *  단계 기록은 호출이 끝난 뒤에 남으므로, 이것이 없으면 2분짜리 호출이
+   *  도는 동안 화면에는 아무 줄도 나타나지 않는다. */
+  inflight?: { phase: string; dept: string; deliverable: string;
+               model: string; at: number } | null;
   budget?: { calls: number; day: string };
   pause_reason?: string;
+  /** 사장님의 방향 전환 지시. 멈춘 프로젝트를 "이렇게 바꿔서" 이어 갈 때
+   *  받아 두고, 다음 초안부터 프롬프트에 **검토 지적보다 위**로 들어간다 —
+   *  검토자는 원래 계획을 기준으로 말하는데 이 지시가 그 기준을 바꾼다. */
+  steer?: string;
   /** 정체를 만나 스스로 줄인 산출물. 시킨 것보다 작아졌다는 뜻이므로
    *  화면에서 반드시 드러내야 한다. */
   narrowed?: Record<string, { dropped: string[]; why: string; at: number }>;
@@ -300,6 +328,17 @@ export const api = {
         body: JSON.stringify(patch),
       })
     ),
+  /** 2등급까지 한 번에 승인한다. 3등급(바깥으로 나가는 것)은 ids 에 넣어도
+   *  서버가 거부하고 skipped 로 돌려준다 — 화면을 믿지 않는다. */
+  batchApprove: (ids: string[]) =>
+    safeJson<{ ok: boolean;
+               approved: { id: string; label: string; tier: number }[];
+               skipped: { id: string; why: string; tier?: number; label?: string }[] }>(
+      fetch(`${API_BASE}/approvals/batch`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids }),
+      })
+    ),
   storeRemove: (collection: StoreCollection, id: string) =>
     safeJson<{ ok: boolean }>(
       fetch(`${API_BASE}/store/${collection}/${id}`, { method: 'DELETE' })
@@ -370,9 +409,25 @@ export const api = {
       })
     ),
   /** approve = 착수 승인, resume = 정지 해제, cancel = 접기 */
-  projectAction: (id: string, action: 'approve' | 'resume' | 'cancel') =>
+  /** 착수 전 계획 수정. 산출물의 제목·설명·부서, 완료 조건을 고치거나
+   *  산출물을 지운다. **추가는 안 된다** — 추가는 수정이 아니라 계획
+   *  수립이고, 러너가 잡은 의도·부서 배정과 어긋난 채 실행되게 된다.
+   *  서버가 착수 승인 대기 상태에서만 받는다. */
+  revisePlan: (id: string, patch: { deliverables?: Deliverable[]; done_when?: string[] }) =>
     safeJson<{ ok: boolean; project: ProjectRow; error?: string }>(
-      fetch(`${API_BASE}/projects/${id}/${action}`, { method: 'POST' })
+      fetch(`${API_BASE}/projects/${id}/plan`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(patch),
+      })
+    ),
+  /** steer 를 주면 "이렇게 바꿔서 이어가기" 가 된다. 그냥 이어 가면
+   *  정체 기록만 비워지고 조건은 그대로라, 같은 자리에서 다시 막힌다. */
+  projectAction: (id: string, action: 'approve' | 'resume' | 'cancel', steer?: string) =>
+    safeJson<{ ok: boolean; project: ProjectRow; error?: string }>(
+      fetch(`${API_BASE}/projects/${id}/${action}`, steer
+        ? { method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ steer }) }
+        : { method: 'POST' })
     ),
   deleteProject: (id: string) =>
     safeJson<{ ok: boolean }>(fetch(`${API_BASE}/projects/${id}`, { method: 'DELETE' })),

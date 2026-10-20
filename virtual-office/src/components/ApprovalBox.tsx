@@ -21,6 +21,26 @@ const KIND: Record<string, { icon: string; label: string }> = {
   project: { icon: '📋', label: '프로젝트 착수' },
 };
 
+/** 묶음 머리글. 서버의 tier 를 그대로 받아 쓴다 — 여기서 다시 판정하지
+ *  않는다. 규칙이 두 곳에 있으면 화면과 서버가 다른 말을 하게 된다. */
+const TIER_HEAD: Record<number, { title: string; note: string; cls: string }> = {
+  3: {
+    title: '바깥으로 나갑니다',
+    note: '실행되면 되돌릴 수 없습니다. 하나씩 읽고 누르세요 — 일괄 승인에 들어가지 않습니다.',
+    cls: 'danger',
+  },
+  2: {
+    title: 'workspace 쓰기 · 프로젝트 착수',
+    note: '파일은 지우면 되고 프로젝트는 중단할 수 있습니다.',
+    cls: 'write',
+  },
+  1: {
+    title: '내부 처리',
+    note: '부서에 태스크를 넣습니다. 언제든 지울 수 있습니다.',
+    cls: 'muted',
+  },
+};
+
 const DEPT: Record<string, string> = {
   orchestration_dept: '오케스트레이션', research_dept: '리서치',
   finance_dept: '재무', dev_dept: '개발', content_dept: '콘텐츠',
@@ -52,6 +72,7 @@ export default function ApprovalBox({ open: boxOpen, onToggle, focusId,
   const [open, setOpen] = useState<string | null>(null);
   const [busy, setBusy] = useState('');
   const [msg, setMsg] = useState('');
+  const [batching, setBatching] = useState(false);
 
   const load = useCallback(async () => {
     const [a, p] = await Promise.all([
@@ -70,6 +91,35 @@ export default function ApprovalBox({ open: boxOpen, onToggle, focusId,
   }, [load]);
 
   const pending = rows.filter(r => (r.status ?? 'pending') === 'pending');
+
+  // 등급이 높은 것(되돌릴 수 없는 것)부터. 아래로 내려갈수록 가벼워진다.
+  // tier 가 없으면(옛 서버) 1 로 본다 — 화면이 비는 것보다 낫다.
+  const groups = [3, 2, 1]
+    .map(t => ({ tier: t, rows: pending.filter(r => (r.tier ?? 1) === t) }))
+    .filter(g => g.rows.length > 0);
+  const batchable = pending.filter(r => r.batchable ?? ((r.tier ?? 1) <= 2));
+
+  async function approveAll() {
+    if (batchable.length === 0) return;
+    const outward = pending.length - batchable.length;
+    if (!window.confirm(
+      `${batchable.length}건을 한 번에 승인합니다.\n\n`
+      + batchable.slice(0, 8).map(r => `· ${r.label}`).join('\n')
+      + (batchable.length > 8 ? `\n· … 외 ${batchable.length - 8}건` : '')
+      + (outward
+        ? `\n\n바깥으로 나가는 ${outward}건은 제외됩니다 — 하나씩 확인하세요.`
+        : '')
+      + '\n\n진행할까요?')) return;
+    setBatching(true);
+    setMsg('');
+    const r = await api.batchApprove(batchable.map(x => x.id));
+    setBatching(false);
+    if (!r?.ok) { setMsg('일괄 승인에 실패했습니다. 백엔드가 떠 있는지 보세요.'); return; }
+    const skipped = (r.skipped ?? []).length;
+    setMsg(`${(r.approved ?? []).length}건 승인했습니다.`
+      + (skipped ? ` ${skipped}건은 건너뛰었습니다 — ${r.skipped[0].why}` : ''));
+    void load();
+  }
 
   // 현황판에서 넘어온 카드로 스크롤하고 잠깐 강조한다. 눌렀는데 목록 어딘가에
   // 있기만 하면 어느 것인지 알 수 없다.
@@ -121,6 +171,14 @@ export default function ApprovalBox({ open: boxOpen, onToggle, focusId,
           🗂️ 결재함
           <span className="ceo-sec-count">{pending.length ? `${pending.length}건 대기` : '비어 있음'}</span>
         </button>
+        <span className="ceo-sec-spacer" />
+        {boxOpen && batchable.length > 1 && (
+          <button className="ceo-appr-btn batch" disabled={batching}
+            onClick={() => void approveAll()}
+            title="바깥으로 나가는 안건은 제외됩니다">
+            {batching ? '처리 중…' : `되돌릴 수 있는 ${batchable.length}건 일괄 승인`}
+          </button>
+        )}
         {live.length > 0 && (
           <button className="ceo-sec-link" onClick={onOpenProjects}>
             프로젝트 {live.length}건 진행 중 →
@@ -137,7 +195,16 @@ export default function ApprovalBox({ open: boxOpen, onToggle, focusId,
         </div>
       ) : (
         <div className="ceo-appr-list">
-          {pending.map(a => {
+          {groups.map(g => {
+          const head = TIER_HEAD[g.tier] ?? TIER_HEAD[1];
+          return (
+          <div key={g.tier} className={`ceo-appr-group ${head.cls}`}>
+            <div className="ceo-appr-group-head">
+              <b>{head.title}</b>
+              <span className="ceo-appr-group-n">{g.rows.length}건</span>
+              <span className="ceo-appr-group-note">{head.note}</span>
+            </div>
+          {g.rows.map(a => {
             const k = KIND[a.kind ?? ''] ?? { icon: '📌', label: '결재' };
             const body = a.file_content
               ?? (a.action_args ? JSON.stringify(a.action_args, null, 2) : '');
@@ -147,9 +214,11 @@ export default function ApprovalBox({ open: boxOpen, onToggle, focusId,
               ? (a.file_path.split('/').pop() || a.label)
               : a.label;
             return (
-              <div key={a.id} className="ceo-appr-card"
+              <div key={a.id} className={`ceo-appr-card t${a.tier ?? 1}`}
                 ref={el => { cardRefs.current[a.id] = el; }}>
                 <div className="ceo-appr-top">
+                  <span className={`ceo-appr-tier ${a.tier_tone ?? 'muted'}`}
+                    title={a.tier_why ?? ''}>{a.tier_name ?? '내부'}</span>
                   <span className="ceo-appr-kind">{k.icon} {k.label}</span>
                   {a.department && (
                     <span className="ceo-appr-dept">{DEPT[a.department] ?? a.department}</span>
@@ -197,6 +266,9 @@ export default function ApprovalBox({ open: boxOpen, onToggle, focusId,
                 </div>
               </div>
             );
+          })}
+          </div>
+          );
           })}
         </div>
       ))}

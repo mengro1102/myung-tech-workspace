@@ -1,5 +1,9 @@
 @echo off
 setlocal
+REM  UTF-8. The watchdog log is written in UTF-8 Korean; without this the
+REM  last-lines section prints mojibake. Everything above this line must
+REM  stay ASCII - cmd reads each line in the CURRENT codepage as it runs.
+chcp 65001 > nul
 title myung-tech Agent Studio - STATUS
 
 REM  Windows-native, matching START.bat / STOP.bat / RESTART.bat.
@@ -19,12 +23,12 @@ echo.
 echo  [ Processes ]
 REM  Match on the command line, not the window title: a service started from
 REM  a terminal (or by the watchdog) has no matching title but is running.
-wmic process where "name='python.exe'" get commandline 2>nul | findstr /C:"server.py" > nul && echo         mt-server             : running || echo         mt-server             : stopped
-wmic process where "name='python.exe'" get commandline 2>nul | findstr /C:"dispatch daemon" > nul && echo         mt-dispatch           : running || echo         mt-dispatch           : stopped
+powershell -NoProfile -Command "if (Get-CimInstance Win32_Process -Filter \"Name='python.exe'\" | Where-Object { $_.CommandLine -like '*server.py*' }) { exit 0 } else { exit 1 }" && echo         mt-server             : running || echo         mt-server             : stopped
+powershell -NoProfile -Command "if (Get-CimInstance Win32_Process -Filter \"Name='python.exe'\" | Where-Object { $_.CommandLine -like '*dispatch daemon*' }) { exit 0 } else { exit 1 }" && echo         mt-dispatch           : running || echo         mt-dispatch           : stopped
 REM  mt-telegram is off by design - the boss approves from the Mengbiseo
 REM  window via the myungtech-approvals skill. Reporting it as "stopped"
 REM  every time would be a false alarm, so say what is actually true.
-wmic process where "name='python.exe'" get commandline 2>nul | findstr /C:"telegram_gateway.py" > nul && echo         mt-telegram           : running || echo         mt-telegram           : off ^(by design - use Mengbiseo^)
+powershell -NoProfile -Command "if (Get-CimInstance Win32_Process -Filter \"Name='python.exe'\" | Where-Object { $_.CommandLine -like '*telegram_gateway.py*' }) { exit 0 } else { exit 1 }" && echo         mt-telegram           : running || echo         mt-telegram           : off ^(by design - use Mengbiseo^)
 REM  Vite by port, not by window title: npm spawns node as a child, so the
 REM  title check said "stopped" while 5174 was serving the UI.
 netstat -ano 2>nul | findstr ":5174 " | findstr "LISTENING" > nul && echo         mt-vite               : running || echo         mt-vite               : stopped
@@ -48,7 +52,7 @@ if errorlevel 1 echo         not registered
 
 echo.
 echo  [ Last 5 watchdog lines ]
-powershell -NoProfile -Command "$p='D:\myung-tech-workspace\logs\watchdog.log'; if(Test-Path $p){Get-Content $p -Tail 5 | ForEach-Object {'        ' + $_}}else{'        no log yet'}" 2>nul
+powershell -NoProfile -Command "$p='D:\myung-tech-workspace\logs\watchdog.log'; if(Test-Path $p){Get-Content $p -Tail 5 -Encoding UTF8 | ForEach-Object {'        ' + $_}}else{'        no log yet'}" 2>nul
 
 echo.
 echo  START = start  ^|  RESTART = restart  ^|  STOP = stop

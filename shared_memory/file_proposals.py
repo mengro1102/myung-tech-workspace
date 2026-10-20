@@ -14,7 +14,14 @@
 from __future__ import annotations
 
 import re
+import sys
 from pathlib import Path
+
+_ROOT = Path(__file__).resolve().parent.parent
+if str(_ROOT) not in sys.path:
+    sys.path.insert(0, str(_ROOT))
+
+from shared_memory import secrets_guard  # noqa: E402
 
 WORKSPACE_ROOT = (Path(__file__).resolve().parent.parent / "workspace").resolve()
 
@@ -69,6 +76,11 @@ def safe_path(rel: str) -> Path:
     rel = clean_rel(rel)
     if not rel:
         raise ProposalError("경로가 비어 있습니다")
+    # workspace 안인지와 별개의 층이다. workspace/.env 는 경로 검사를
+    # 통과하지만 쓰게 두면 안 된다 — 같은 판단에 둘을 걸지 않는다.
+    why = secrets_guard.check_name(rel)
+    if why:
+        raise ProposalError(why)
     p = (WORKSPACE_ROOT / rel).resolve()
     if p != WORKSPACE_ROOT and WORKSPACE_ROOT not in p.parents:
         raise ProposalError(f"workspace 밖으로 나가는 경로입니다: {rel}")

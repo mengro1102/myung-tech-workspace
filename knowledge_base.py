@@ -31,6 +31,8 @@ related/wikilink 엣지를 따라 이웃까지 확장한다. 어휘 검색만으
 from __future__ import annotations
 
 import os
+import re      # 최신성 질의 판정용 정규식 상수가 모듈 수준에 있다.
+               # 다른 함수들은 안에서 지역 import 하지만 상수는 그럴 수 없다.
 from pathlib import Path
 
 # 기본 위치 우선순위:
@@ -285,6 +287,82 @@ def _score_meta(terms: list[str], slug: str, meta: dict) -> float:
     return s
 
 
+# ── 최신성 질의 ──────────────────────────────────────────────────────
+#
+# "최근 동향" 은 의미 질의가 아니라 **시간 질의**다. 코사인 유사도에는 시간
+# 축이 없으므로, 일반적인 질의에 가장 가까운 것은 특정 논문이 아니라 일반적인
+# 개념 노트가 된다 — 검색이 틀린 게 아니라 맞게 동작한 결과다.
+#
+# 실측: "2026년 10월 LLM 동향" 으로 물었을 때 색인된 arXiv 논문 49편 중
+# **0편**이 걸리고 `llm`, `llm-engineering`, `slm-vs-llm`, `korean-llm-training`
+# 같은 개념 노트만 올라왔다. 그 상태로 "최근 동향 보고서" 를 쓰게 하면 근거
+# 없이 쓰거나 반려를 반복한다.
+_RECENCY_RE = re.compile(
+    r"최근|요즘|동향|근황|트렌드|신규|새로\s*나온|최신|"
+    r"recent|latest|trend|state[-\s]of[-\s]the[-\s]art|sota|"
+    r"20\d\d\s*년|20\d\d-\d\d")
+
+
+def is_recency_query(query: str) -> bool:
+    """이 질문이 '새로 나온 것' 을 묻고 있는가."""
+    return bool(_RECENCY_RE.search(query or ""))
+
+
+def _ref_yymm(meta: dict) -> str:
+    """arXiv ID 에서 연월을 뽑는다. 없으면 빈 문자열.
+
+    `http://arxiv.org/abs/2606.25960v1` 의 `2606` 이 2026년 6월이다. 노드
+    메타에 수집 날짜 필드가 따로 없어 이것이 유일하게 믿을 만한 시간 정보다.
+    """
+    for src in meta.get("sources") or []:
+        m = re.search(r"arxiv\.org/abs/(\d{2})(\d{2})\.", str(src))
+        if m:
+            return m.group(1) + m.group(2)
+    return ""
+
+
+def recent_refs(limit: int = 40) -> list[tuple[str, str]]:
+    """최신순 arXiv 참고문헌 [(slug, yymm), ...]."""
+    out = []
+    for slug, meta in (load_graph().get("nodes") or {}).items():
+        if "arxiv" not in [str(t).lower() for t in (meta.get("tags") or [])]:
+            continue
+        ym = _ref_yymm(meta)
+        if ym:
+            out.append((slug, ym))
+    out.sort(key=lambda x: x[1], reverse=True)
+    return out[:limit]
+
+
+def recent_relevant(query: str, *, pool: int = 40, limit: int = 4) -> dict[str, float]:
+    """최신 논문 중에서 질의와 뜻이 가까운 것.
+
+    순서가 중요하다 — **최신성으로 먼저 좁히고, 그 안에서 관련성으로 고른다.**
+    반대로 하면 전체 코퍼스에서 관련성으로 좁히게 되어 다시 개념 노트가
+    올라온다(그게 고치려는 증상이다).
+
+    임베딩을 쓸 수 없으면 최신순 그대로 돌려준다 — "최근 것" 이라는 요구는
+    그래도 지켜지고, 관련성은 하류의 근거 강제가 거른다.
+    """
+    cand = recent_refs(pool)
+    if not cand:
+        return {}
+    try:
+        import kb_embed
+        ranked = kb_embed.rank(KB_PATH, query, limit=pool * 2, min_sim=0.0)
+        scored = [(ranked.get(sl, 0.0), sl) for sl, _ in cand]
+        scored.sort(reverse=True)
+        return {sl: round(sc, 4) for sc, sl in scored[:limit]}
+    except Exception:  # noqa: BLE001
+        return {sl: 0.0 for sl, _ in cand[:limit]}
+
+
+# 임베딩 몫으로 떼어 두는 자리 수. 어휘가 잡음으로 전부를 채우는 것을 막는다.
+EMBED_SEATS = 2
+# 최신성 질의일 때 최신 논문에 떼어 주는 자리 수.
+RECENT_SEATS = 3
+
+
 def _seed_scores(query: str, *, max_seeds: int = 6) -> dict[str, float]:
     """어휘 매칭으로 씨앗 노드와 점수를 뽑는다.
 
@@ -310,7 +388,64 @@ def _seed_scores(query: str, *, max_seeds: int = 6) -> dict[str, float]:
             for relpath, _line in search(t, limit=12):
                 key = relpath.split("/")[-1]
                 scores[key] = scores.get(key, 0.0) + 1.0
-    return dict(sorted(scores.items(), key=lambda kv: -kv[1])[:max_seeds])
+
+    # ── 자리 배분 ────────────────────────────────────────────────────
+    #
+    # 후보가 셋이고, 셋 다 혼자서는 못 믿는다.
+    #
+    #   어휘   저자가 "이 문서의 주제" 라고 선언한 것. 가장 강한 신호지만,
+    #          질의가 한국어고 코퍼스가 영어면 0점이 나기 일쑤다. 실측 —
+    #          "로봇 조작 정책 학습" 에 `korean-llm-training`(틀림)을 집었다.
+    #   최신   "최근 동향" 은 시간 질의다(위 주석 참고).
+    #   임베딩 뜻으로 찾지만 **관련성을 판정하지는 못한다** — kb_embed.MIN_SIM
+    #          주석의 측정에서 무관 질의가 관련 질의보다 높게 나왔다.
+    #
+    # 어휘가 **하나도** 못 찾았으면 나머지도 쓰지 않는다. 무조건 빈 자리를
+    # 채웠더니 "식당 메뉴판 디자인" 에 `muzero-2020` 같은 6건이 올라왔고,
+    # 그게 "[근거 자료 — 실제로 조회한 데이터]" 로 프롬프트에 들어갔다.
+    # 없는 근거를 만들어 내는 것이다 — 자료 0건이 정직하다.
+    if not scores:
+        return {}
+
+    lex = sorted(scores.items(), key=lambda kv: -kv[1])
+
+    # 중복 판정은 **뽑고 나서** 한다. 처음엔 `slug not in scores` 로 걸렀는데,
+    # 최신 논문이 어휘 후보 40건 안에 이미 들어 있어서 전부 탈락했다. 후보에
+    # 있다는 것과 선정됐다는 것은 다르다 — 어휘가 찾아 놓고 떨어뜨린 것을
+    # "이미 찾았으니 됐다" 로 읽으면 안 된다.
+    recent = list(recent_relevant(query, limit=RECENT_SEATS)) \
+        if is_recency_query(query) else []
+
+    emb: list[tuple[str, float]] = []
+    try:
+        import kb_embed
+        emb = sorted(kb_embed.rank(KB_PATH, query, limit=EMBED_SEATS * 2).items(),
+                     key=lambda kv: -kv[1])
+    except Exception:  # noqa: BLE001
+        pass      # 임베딩이 없으면 어휘와 최신만으로 간다
+
+    # 최신성 질의면 자리를 **더한다**. "최근 동향" 에 개념 노트("LLM 이란
+    # 무엇인가") 다섯 건은 아무것도 보태지 않는다 — 그 질문의 답은 새로
+    # 나온 논문에 있다. 빼앗아 끼우면 맥락이 사라지므로 늘린다. 분량 상한은
+    # build_context 의 budget_chars 가 따로 지킨다.
+    cap = max_seeds + (RECENT_SEATS if recent else 0)
+    out: dict[str, float] = {}
+
+    def take(items, n: int) -> None:
+        got = 0
+        for item in items:
+            if got >= n or len(out) >= cap:
+                break
+            slug, val = item if isinstance(item, tuple) else (item, 0.002)
+            if slug in out:
+                continue
+            out[slug] = val
+            got += 1
+
+    take(recent, RECENT_SEATS)                               # 새로 나온 것
+    take([(sl, 0.001 * v) for sl, v in emb], EMBED_SEATS)    # 뜻이 가까운 것
+    take(lex, cap)                                           # 나머지는 어휘가
+    return out
 
 
 def _strip_front(text: str) -> str:

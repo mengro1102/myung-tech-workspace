@@ -16,7 +16,7 @@ set "WS=D:\myung-tech-workspace"
 
 REM  Tell the watchdog to stand down. Without this it revives everything
 REM  5 minutes later and the studio looks like it refuses to stay off.
-if not exist "%WS%\logs" mkdir "%WS%\logs" 2>/dev/null
+if not exist "%WS%\logs" mkdir "%WS%\logs" 2>nul
 echo stopped-by-user > "%WS%\logs\watchdog.stop"
 
 echo  [1/3] Closing service windows...
@@ -26,11 +26,8 @@ REM  방식으로 띄운 것이 아직 떠 있을 수 있다.
 for %%W in (mt-server mt-dispatch mt-vite mt-telegram) do (
     taskkill /FI "WINDOWTITLE eq %%W*" /T /F > nul 2>&1
 )
-for %%P in ("server.py" "dispatch daemon" "telegram_gateway.py") do (
-    for /f "tokens=2 delims=," %%a in ('wmic process where "name='python.exe'" get processid^,commandline /format:csv 2^>nul ^| findstr /C:%%P') do (
-        taskkill /PID %%a /T /F > nul 2>&1
-    )
-)
+REM  명령줄로 찾아 끝낸다. 자세한 사정은 kill-by-cmdline.ps1 머리말에.
+powershell -NoProfile -ExecutionPolicy Bypass -File "%WS%\scripts\kill-by-cmdline.ps1" -Patterns "server.py;dispatch daemon;telegram_gateway.py"
 REM  Vite 는 node 로 돈다. 명령줄에 vite 가 안 보이는 경우가 있어 포트로
 REM  주인을 찾는 편이 확실하다.
 for /f "tokens=5" %%a in ('netstat -ano ^| findstr ":5174 " ^| findstr LISTENING') do (
@@ -42,9 +39,7 @@ echo.
 echo  [2/3] Stopping any dispatcher daemon left behind...
 REM  The daemon polls forever, so a stray one keeps draining the queue after
 REM  a stop. Match it by command line rather than window title.
-for /f "tokens=2 delims=," %%a in ('wmic process where "name='python.exe'" get processid^,commandline /format:csv 2^>nul ^| findstr "dispatch"') do (
-    taskkill /PID %%a /T /F > nul 2>&1
-)
+powershell -NoProfile -ExecutionPolicy Bypass -File "%WS%\scripts\kill-by-cmdline.ps1" -Patterns "dispatch daemon;dispatch"
 echo         done.
 
 echo.

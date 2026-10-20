@@ -74,6 +74,12 @@ else:
     OLLAMA_BASE_URL = _ollama_raw or "http://localhost:11434"
 
 OPENROUTER_CHAT_URL = "https://openrouter.ai/api/v1/chat/completions"
+
+# 마지막 응답이 왜 끝났는가. "stop" | "length" | "" (프로바이더가 안 줌).
+# 호출마다 덮어쓰이므로 **직후에** 읽어야 한다 — 러너는 _ask 가 돌아온 자리에서
+# 바로 읽는다. 반환값에 끼워 넣지 않은 것은 _ask 를 부르는 자리가 여럿이고
+# 전부 (본문, 소진) 두 값을 기대하기 때문이다.
+LAST_FINISH = ""
 OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY", "")
 
 # 로컬 모델은 세 군데에서 정해졌다 — 여기 하드코딩, UI 의 '공통 두뇌', 그리고
@@ -251,7 +257,17 @@ def _post_chat(url: str, body: dict, headers: dict, label: str) -> str:
     try:
         with urllib.request.urlopen(req, timeout=REQUEST_TIMEOUT) as resp:
             data = json.loads(resp.read().decode("utf-8"))
-        content = (data.get("choices") or [{}])[0].get("message", {}).get("content")
+        choice = (data.get("choices") or [{}])[0]
+        # 왜 끝났는지를 기록해 둔다. "length" 면 max_tokens 에 걸려 잘린 것이고,
+        # "stop" 이면 모델이 할 말을 다 한 것이다.
+        #
+        # 예전에는 이 값을 읽고도 버렸고, 러너는 글 끝 글자로 잘림을
+        # 추측했다. 그래서 `*(참고: … 유지함)*` 처럼 멀쩡히 끝난 글을
+        # 잘렸다고 판정해 호출 셋을 버리고 프로젝트를 틀린 이유로 멈췄다.
+        # 한국어 종결형을 전부 나열할 수는 없다 — 프로바이더에게 묻는 것이 맞다.
+        global LAST_FINISH
+        LAST_FINISH = str(choice.get("finish_reason") or "")
+        content = choice.get("message", {}).get("content")
         if not content:
             # 사고형 모델이 추론 토큰만 쓰고 본문을 못 낸 경우가 실제로 있다.
             raise RuntimeError(f"{label}: 빈 응답 (모델이 본문을 내지 않음)")

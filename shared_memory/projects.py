@@ -66,6 +66,20 @@ PHASES = ("draft", "review1", "review2")
 REPEAT_LIMIT = 3        # 같은 지적 3번째 → 정지
 NO_IMPROVE_LIMIT = 3    # 점수가 3회 연속 안 오름 → 정지
 STEP_SAFETY_NET = 50    # 마지막 그물. 여기까지 오면 설계가 잘못된 것이다
+# 통과한 산출물마다 더 주는 여유.
+#
+# 안전망이 단계 수만 세면, 산출물 하나에서 50단계를 맴도는 프로젝트와 넷을
+# 통과시키며 50단계를 쓴 프로젝트가 같은 취급을 받는다. 앞은 설계가 잘못된
+# 것이고 뒤는 그냥 큰 일이다.
+#
+# 실제로 겪은 것 — 서베이 2차가 산출물 넷을 모두 쓰고 셋을 통과시킨 뒤,
+# 마지막 2차 검토 한 걸음을 남기고 50단계에서 멈췄다. "계획 자체를 다시
+# 봐야 합니다" 라는 문구가 무색했다.
+#
+# 진전이 없으면 기본값 그대로다 — 느슨해지는 것은 실제로 나아가는
+# 프로젝트뿐이고, 안전망이 지키려던 경우는 그대로 지킨다.
+STEP_PER_DONE = 15
+STEP_SAFETY_CAP = 150   # 아무리 통과해도 여기까지. 안 그러면 안전망이 아니다
 TRUNCATE_LIMIT = 3      # 연속 잘림 3번 → 분량 문제로 정지
 DAILY_CALL_BUDGET = int(os.environ.get("MYUNGTECH_DAILY_CALLS", "300"))
 BUDGET_SHARE = 0.5      # 그중 프로젝트가 쓸 수 있는 몫
@@ -74,6 +88,67 @@ _WORD = re.compile(r"[0-9A-Za-z가-힣]+")
 
 
 # ── 파일 입출력 ─────────────────────────────────────────────────────────
+# 부서 목록은 여기 한 곳에만 둔다.
+#
+# 원래는 project_runner 안에 있었다. 그런데 계획을 화면에서 고칠 수 있게
+# 하면서 서버도 같은 검증을 해야 했고, 목록을 양쪽에 두면 "UI 로 고친
+# 계획만 검증을 빠져나가는" 상태가 된다. 데이터를 다루는 쪽에 둔다.
+ORCHESTRATOR = "orchestration_dept"
+KNOWN_DEPTS = ("research_dept", "dev_dept", "content_dept",
+               "finance_dept", "orchestration_dept")
+
+
+def sanitize_deliverable(d: dict, fallback_id: str) -> dict:
+    """산출물 한 건을 규칙에 맞게 다듬는다. _do_plan 과 같은 자다."""
+    dept = d.get("dept") if d.get("dept") in KNOWN_DEPTS else ORCHESTRATOR
+    return {
+        "id": str(d.get("id") or fallback_id),
+        "title": str(d.get("title") or fallback_id)[:80],
+        "dept": dept,
+        "desc": str(d.get("desc") or "")[:600],
+    }
+
+
+def revise_plan(pid: str, patch: dict) -> tuple[dict | None, str]:
+    """착수 전 계획 수정. (프로젝트, 사유) — 사유가 있으면 거절된 것이다.
+
+    **착수 승인 대기일 때만** 받는다. 돌고 있는 프로젝트의 계획을 바꾸면
+    cursor 가 가리키는 산출물이 바뀌어, 이미 통과한 것이 다른 것의 자리에
+    들어간다. 돌던 것을 고치려면 멈추고 접은 뒤 다시 시작하는 편이 맞다.
+
+    산출물을 **추가하지는 못한다.** 추가는 수정이 아니라 계획 수립이다 —
+    러너가 잡은 의도·부서 배정과 어긋난 채로 실행되게 된다. 범위를 넓히는
+    쪽은 새 프로젝트로 받는 것이 정직하다.
+    """
+    p = get(pid)
+    if p is None:
+        return None, "프로젝트를 찾을 수 없습니다"
+    if p.get("status") != "awaiting_approval":
+        return p, "착수 승인 대기 중일 때만 계획을 고칠 수 있습니다"
+
+    plan = dict(p.get("plan") or {})
+    old = {d["id"]: d for d in (plan.get("deliverables") or [])}
+
+    if "deliverables" in patch:
+        incoming = [d for d in (patch.get("deliverables") or []) if isinstance(d, dict)]
+        kept = []
+        for d in incoming:
+            did = str(d.get("id") or "")
+            if did not in old:
+                continue          # 새로 만든 것은 조용히 버린다
+            kept.append(sanitize_deliverable({**old[did], **d}, did))
+        if not kept:
+            return p, "산출물이 하나도 남지 않습니다"
+        plan["deliverables"] = kept[:5]
+
+    if "done_when" in patch:
+        dw = [" ".join(str(c).split())[:200]
+              for c in (patch.get("done_when") or []) if str(c).strip()]
+        plan["done_when"] = dw[:8]
+
+    return update(pid, {"plan": plan}), ""
+
+
 def load() -> list[dict]:
     try:
         data = json.loads(FILE.read_text(encoding="utf-8"))
@@ -292,7 +367,11 @@ def stop_reason(p: dict, top_model_exhausted: bool = False) -> str:
     stall = p.get("stall") or {}
     # 잘린 초안은 세지 않는다. 이 그물은 "계획이 잘못됐다" 를 잡으려고 있는데,
     # 길이를 못 맞춰 다시 쓴 횟수까지 세면 엉뚱한 이유로 먼저 걸린다.
-    steps = sum(1 for s in (p.get("steps") or []) if not s.get("trunc"))
+    # 잘림도 죽은 호출도 "품질 실패" 가 아니다. 안전망은 "이만큼 돌렸는데도
+    # 안 되면 계획이 틀렸다" 를 재는 것이므로, 길이 문제와 프로세스 사고는
+    # 빼고 센다 — 넣으면 계획은 멀쩡한데 안전망에 먼저 걸린다.
+    steps = sum(1 for s in (p.get("steps") or [])
+                if not s.get("trunc") and not s.get("dead"))
 
     if int(stall.get("repeat", 0)) >= REPEAT_LIMIT:
         return (f"같은 지적이 {stall['repeat']}번 반복됐습니다. "
@@ -311,8 +390,13 @@ def stop_reason(p: dict, top_model_exhausted: bool = False) -> str:
         cap = int(DAILY_CALL_BUDGET * BUDGET_SHARE)
         return (f"오늘 이 프로젝트가 쓸 수 있는 호출 {cap}회를 모두 썼습니다. "
                 "라우터는 맹비서와 공유하므로 여기서 멈춥니다. 내일 이어집니다.")
-    if steps >= STEP_SAFETY_NET:
-        return (f"{STEP_SAFETY_NET}단계에 도달했습니다. 진전 판정에 걸리지 않고 "
+    # 통과한 산출물만큼 여유를 더한다(STEP_PER_DONE 주석 참고).
+    done_n = int(p.get("cursor") or 0)
+    net = min(STEP_SAFETY_CAP, STEP_SAFETY_NET + done_n * STEP_PER_DONE)
+    if steps >= net:
+        extra = (f" (산출물 {done_n}개 통과분 {done_n * STEP_PER_DONE}단계 포함)"
+                 if done_n else "")
+        return (f"{net}단계에 도달했습니다{extra}. 진전 판정에 걸리지 않고 "
                 "여기까지 왔다면 계획 자체를 다시 봐야 합니다.")
     return ""
 

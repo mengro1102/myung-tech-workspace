@@ -12,6 +12,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, deptLabels, type ApprovalRow, type DialogueEntry, type ProjectRow,
          type ProjectStatus } from '../api';
+import ConfidenceBox from './ConfidenceBox';
+import PlanEditor from './PlanEditor';
 import ReviewHistory from './ReviewHistory';
 import { Markdown } from './GuideModal';
 import AgentChat from './AgentChat';
@@ -50,6 +52,10 @@ export default function ProjectsTab({ focusId, onFocused }:
     { focusId?: string | null; onFocused?: () => void } = {}) {
   const [rows, setRows]       = useState<ProjectRow[]>([]);
   const [openId, setOpenId]   = useState<string | null>(null);
+  // 방향 전환 입력칸을 연 프로젝트. 한 번에 하나만 연다 — 여럿을 열어
+  // 두면 어느 칸이 어느 프로젝트의 것인지 헷갈린다.
+  const [steerFor, setSteerFor] = useState<string | null>(null);
+  const [steerText, setSteerText] = useState('');
   useEffect(() => {
     if (!focusId) return;
     setOpenId(focusId);
@@ -99,9 +105,9 @@ export default function ProjectsTab({ focusId, onFocused }:
     void refresh();
   }
 
-  async function act(id: string, action: 'approve' | 'resume' | 'cancel') {
+  async function act(id: string, action: 'approve' | 'resume' | 'cancel', steer?: string) {
     setBusy(true); setErr('');
-    const r = await api.projectAction(id, action);
+    const r = await api.projectAction(id, action, steer);
     setBusy(false);
     if (!r) { setErr('백엔드에 연결하지 못했습니다'); return; }
     if (r.error) { setErr(r.error); return; }
@@ -150,12 +156,24 @@ export default function ProjectsTab({ focusId, onFocused }:
         <h2 className="pj-h">
           프로젝트
           {rows.length > 0 && <span className="pj-count">{rows.length}</span>}
+          {/* 두 가지 건수를 나눠 센다. "진행 중" 과 "나를 기다리는 중" 은
+              성격이 다르다 — 뒤엣것은 내가 움직이지 않으면 영원히 그대로다.
+              같은 줄에 섞으면 급한 쪽이 묻힌다. */}
           {(() => {
             const live = rows.filter(r => r.status === 'running'
               || r.status === 'intake' || r.status === 'planning').length;
-            return <span className="pj-h-sub">
-              {live ? `${live}건 진행 중` : '지금 돌고 있는 것 없음'}
-            </span>;
+            const waits = rows.filter(r => r.status === 'awaiting_approval'
+              || r.status === 'paused').length;
+            return (
+              <>
+                <span className={`pj-pill work${live ? '' : ' idle'}`}>
+                  {live ? `작업 중 ${live}` : '작업 중 없음'}
+                </span>
+                {waits > 0 && (
+                  <span className="pj-pill wait">응답 대기 {waits}</span>
+                )}
+              </>
+            );
           })()}
         </h2>
 
@@ -186,6 +204,12 @@ export default function ProjectsTab({ focusId, onFocused }:
                 <p className="pj-pause">{p.pause_reason}</p>
               )}
 
+              {/* 지금 걸려 있는 지시는 접혀 있어도 보인다. 보이지 않으면
+                  "왜 계획과 다르게 가지?" 를 설명할 수 없게 된다. */}
+              {p.steer && (
+                <p className="pj-steer-on">↪ 지시: {p.steer}</p>
+              )}
+
               {needsMe && (
                 <div className="pj-actions">
                   {p.status === 'awaiting_approval' && (
@@ -195,10 +219,19 @@ export default function ProjectsTab({ focusId, onFocused }:
                     </button>
                   )}
                   {p.status === 'paused' && (
-                    <button className="pj-btn pj-btn-primary" disabled={busy}
-                            onClick={() => void act(p.id, 'resume')}>
-                      이어서 진행
-                    </button>
+                    <>
+                      <button className="pj-btn pj-btn-primary" disabled={busy}
+                              onClick={() => void act(p.id, 'resume')}>
+                        그대로 이어서
+                      </button>
+                      {/* 멈추는 이유는 대개 "같은 지적 3회" 나 "점수 정체" 다.
+                          그대로 이어 가면 정체 기록만 비워지고 조건은 그대로라
+                          같은 자리에서 다시 막힌다. 방향을 바꿀 길이 있어야 한다. */}
+                      <button className="pj-btn" disabled={busy}
+                              onClick={() => setSteerFor(steerFor === p.id ? null : p.id)}>
+                        {steerFor === p.id ? '방향 전환 닫기' : '↪ 이렇게 바꿔서'}
+                      </button>
+                    </>
                   )}
                   <button className="pj-btn" disabled={busy}
                           onClick={() => void act(p.id, 'cancel')}>
@@ -207,10 +240,49 @@ export default function ProjectsTab({ focusId, onFocused }:
                 </div>
               )}
 
+              {steerFor === p.id && (
+                <div className="pj-steer">
+                  <label className="pj-steer-label" htmlFor={`steer-${p.id}`}>
+                    무엇을 바꿔서 이어갈까요
+                  </label>
+                  <p className="pj-steer-note">
+                    이 한 줄은 다음 초안부터 <strong>검토 지적보다 위</strong>에
+                    들어갑니다 — 검토자는 원래 계획을 기준으로 말하는데, 이
+                    지시가 그 기준을 바꿉니다. 계획 자체는 건드리지 않습니다.
+                  </p>
+                  <textarea id={`steer-${p.id}`} className="pj-input" rows={2}
+                    value={steerText} maxLength={600}
+                    placeholder="예) 커널 지연 실측치는 빼고, 측정 방법 설계까지만 적어 주세요"
+                    onChange={e => setSteerText(e.target.value)} />
+                  <div className="pj-steer-actions">
+                    <button className="pj-btn" disabled={busy}
+                            onClick={() => { setSteerFor(null); setSteerText(''); }}>
+                      취소
+                    </button>
+                    <button className="pj-btn pj-btn-primary"
+                            disabled={busy || !steerText.trim()}
+                            onClick={() => {
+                              const t = steerText.trim();
+                              setSteerFor(null); setSteerText('');
+                              void act(p.id, 'resume', t);
+                            }}>
+                      이 지시로 이어가기
+                    </button>
+                  </div>
+                </div>
+              )}
+
               {open && (
                 <div className="pj-detail">
                   {!detail && <div className="pj-empty">불러오는 중…</div>}
-                  {detail && detail.id === p.id && <Detail p={detail} />}
+                  {detail && detail.id === p.id && (
+                    <Detail p={detail} onRefresh={() => {
+                      void refresh();
+                      void api.getProject(p.id).then(d => {
+                        if (d?.project) setDetail(d.project);
+                      });
+                    }} />
+                  )}
                 </div>
               )}
             </article>
@@ -252,7 +324,10 @@ function findProposal(rows: ApprovalRow[], pid: string, title: string) {
     && (a.detail ?? '').endsWith(title));
 }
 
-function Detail({ p }: { p: ProjectRow }) {
+// onRefresh 는 계획을 고친 뒤 목록과 상세를 다시 읽게 한다. 고친 결과가
+// 화면에 즉시 반영되지 않으면, 사장님은 저장이 됐는지 알 수 없는 채로
+// 착수 승인을 누르게 된다.
+function Detail({ p, onRefresh }: { p: ProjectRow; onRefresh: () => void }) {
   /* 산출물을 여기서 바로 읽는다. 예전에는 목록에 제목만 있고 본문을 볼 곳이
      없었다 — 결재함의 '내용 보기' 로 돌아가거나 파일을 찾아 열어야 했다. */
   const [openD,  setOpenD]  = useState<string | null>(null);
@@ -286,6 +361,13 @@ function Detail({ p }: { p: ProjectRow }) {
           <h3 className="pj-h3">읽어 낸 의도</h3>
           <p className="pj-text">{p.intent}</p>
         </div>
+      )}
+
+      {/* 착수 전에만 나온다. 고칠 대상(산출물 목록) 바로 위에 두는 것은,
+          무엇을 고치는지 보면서 고쳐야 하기 때문이다 — 승인 버튼은 카드
+          머리에 있어 목록과 떨어져 있다. */}
+      {p.status === 'awaiting_approval' && (p.plan?.deliverables?.length ?? 0) > 0 && (
+        <PlanEditor p={p} onSaved={onRefresh} />
       )}
 
       {ds.length > 0 && (
@@ -369,6 +451,11 @@ function Detail({ p }: { p: ProjectRow }) {
 
       <DialogueBlock pid={p.id} />
 
+      {/* 점수 100점이 "근거와 맞춰 봤다" 인지 "그럴듯하다" 인지 화면이
+          구분해 주지 않았다. 심사 이력보다 위에 둔다 — 점수를 읽기 전에
+          그 점수가 무엇에 대한 것인지 알아야 한다. */}
+      <ConfidenceBox p={p} steps={steps} />
+
       {/* 42단계 평면 목록만으로는 어느 산출물이 왜 막혔는지 사람이
           직접 재구성해야 한다. 그 재구성을 화면이 한다. */}
       <ReviewHistory p={p} />
@@ -379,14 +466,38 @@ function Detail({ p }: { p: ProjectRow }) {
             진행 기록
             <span className="pj-budget">오늘 남은 호출 {p.budget_left}회</span>
           </h3>
+          {/* 지금 돌고 있는 호출을 맨 위에 고정한다.
+              기록은 호출이 **끝난 뒤** 남으므로, 이 줄이 없으면 2분짜리
+              호출이 도는 동안 화면에는 아무것도 나타나지 않는다 — 12단계
+              까지만 보이고 13번째는 보이지 않는 채로 돈다. */}
+          {p.status === 'running' && p.inflight && (
+            <div className="pj-step now" aria-live="polite">
+              <span className="pj-step-n" aria-hidden="true">●</span>
+              <span className="pj-step-phase">{PHASE_LABEL[p.inflight.phase] ?? p.inflight.phase}</span>
+              <span className="pj-step-dept">
+                {deptLabels[p.inflight.dept] ?? p.inflight.dept}
+              </span>
+              <span className="pj-step-note">
+                {p.inflight.deliverable || '산출물'} — 응답을 기다리는 중
+                <span className="pj-step-model">{p.inflight.model}</span>
+              </span>
+            </div>
+          )}
           {/* 최근 것이 위로. 아래로 스크롤해서 최신을 찾게 하면 안 된다. */}
           <ol className="pj-steps">
             {[...steps].reverse().map(s => (
-              <li key={s.n} className={`pj-step ${s.ok ? 'ok' : 'no'}`}>
+              <li key={s.n} className={`pj-step ${s.dead ? 'dead' : s.ok ? 'ok' : 'no'}`}>
                 <span className="pj-step-n">{s.n}</span>
                 <span className="pj-step-phase">{PHASE_LABEL[s.phase] ?? s.phase}</span>
                 <span className="pj-step-dept">{deptLabels[s.dept] ?? s.dept}</span>
                 {s.score >= 0 && <span className="pj-step-score">{s.score}점</span>}
+                {/* 걸린 시간. 분 단위가 넘어가면 초로 쓰면 읽히지 않는다. */}
+                {!!s.secs && (
+                  <span className="pj-step-secs">
+                    {s.secs >= 60 ? `${Math.floor(s.secs / 60)}분 ${Math.round(s.secs % 60)}초`
+                      : `${s.secs}초`}
+                  </span>
+                )}
                 <span className="pj-step-note">{s.note}</span>
               </li>
             ))}

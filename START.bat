@@ -18,7 +18,7 @@ echo  ==========================================
 echo.
 
 REM  Clear the watchdog stand-down flag - we are deliberately starting.
-del /q "%WS%\logs\watchdog.stop" 2>/dev/null
+del /q "%WS%\logs\watchdog.stop" 2>nul
 
 echo  [1/7] Ollama (port 11434)...
 REM  Ollama is the last-resort backend: when the router is down every
@@ -66,7 +66,7 @@ echo.
 echo  [4/7] Agent dispatcher (daemon)...
 REM  Without this nobody drains the task queue, so the 2D office and the live
 REM  feed stay empty. Running it as a daemon is what makes the screen move.
-wmic process where "name='python.exe'" get commandline 2>nul | findstr /C:"dispatch daemon" > nul && (
+powershell -NoProfile -Command "if (Get-CimInstance Win32_Process -Filter \"Name='python.exe'\" | Where-Object { $_.CommandLine -like '*dispatch daemon*' }) { exit 0 } else { exit 1 }" && (
     echo         already running - skipped.
 ) || (
     wscript //nologo "%WS%\scripts\runbg.vbs" "cmd /c cd /d %WS% && python -u run.py dispatch daemon >> logs\dispatch.log 2>&1"

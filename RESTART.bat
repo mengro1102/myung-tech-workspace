@@ -25,25 +25,20 @@ echo  ==========================================
 echo.
 
 REM  A restart is a deliberate start - clear the watchdog stand-down flag.
-del /q "%WS%\logs\watchdog.stop" 2>/dev/null
+del /q "%WS%\logs\watchdog.stop" 2>nul
 
 echo  [1/4] Closing backend windows...
 REM  창 없이 뜨므로 제목으로는 못 찾는다. 명령줄로 찾아 죽인다.
 for %%W in (mt-server mt-dispatch mt-telegram) do (
     taskkill /FI "WINDOWTITLE eq %%W*" /T /F > nul 2>&1
 )
-for %%P in ("server.py" "telegram_gateway.py") do (
-    for /f "tokens=2 delims=," %%a in ('wmic process where "name='python.exe'" get processid^,commandline /format:csv 2^>nul ^| findstr /C:%%P') do (
-        taskkill /PID %%a /T /F > nul 2>&1
-    )
-)
+REM  명령줄로 찾아 끝낸다. 자세한 사정은 kill-by-cmdline.ps1 머리말에.
+powershell -NoProfile -ExecutionPolicy Bypass -File "%WS%\scripts\kill-by-cmdline.ps1" -Patterns "server.py;telegram_gateway.py"
 
 REM  The daemon polls forever, so a stray one keeps draining the queue and
 REM  spending quota alongside the new one. Match it by command line, not by
 REM  window title - a daemon started from a terminal has no matching title.
-for /f "tokens=2 delims=," %%a in ('wmic process where "name='python.exe'" get processid^,commandline /format:csv 2^>nul ^| findstr "dispatch"') do (
-    taskkill /PID %%a /F > nul 2>&1
-)
+powershell -NoProfile -ExecutionPolicy Bypass -File "%WS%\scripts\kill-by-cmdline.ps1" -Patterns "dispatch daemon;dispatch"
 echo         done.
 
 echo.
@@ -77,7 +72,7 @@ REM  127.0.0.1, not localhost: on Windows localhost can resolve to ::1 first
 REM  and the check reports failure even though the service is up on IPv4.
 powershell -NoProfile -Command "try{$h=Invoke-RestMethod 'http://127.0.0.1:9000/api/health' -TimeoutSec 10; ('        server {0} / AI model {1} / KB {2}' -f $h.server.ok, $h.vllm.ok, $h.knowledge_base.ok)}catch{'        API no response - see the mt-server window'}" 2>nul
 
-wmic process where "name='python.exe'" get commandline 2>nul | findstr /C:"dispatch daemon" > nul && (
+powershell -NoProfile -Command "if (Get-CimInstance Win32_Process -Filter \"Name='python.exe'\" | Where-Object { $_.CommandLine -like '*dispatch daemon*' }) { exit 0 } else { exit 1 }" && (
     echo         dispatcher running
 ) || (
     echo         dispatcher NOT running - see the mt-dispatch window

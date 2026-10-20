@@ -326,6 +326,7 @@ sys.path.insert(0, str(ROOT / "orchestrator"))
 import task_queue
 import message_broker
 import workspace_store
+import approval_tiers
 import file_proposals
 import projects
 try:
@@ -1232,7 +1233,12 @@ class Handler(BaseHTTPRequestHandler):
             if collection not in workspace_store.COLLECTIONS:
                 _json_resp(self, 404, {"error": f"알 수 없는 컬렉션: {collection}"})
                 return
-            _json_resp(self, 200, {"items": workspace_store.load(collection)})
+            items = workspace_store.load(collection)
+            if collection == "approvals":
+                # 등급은 저장하지 않고 읽을 때마다 계산한다. 저장하면 규칙이
+                # 바뀌어도 옛 행은 옛 등급을 그대로 들고 있게 된다.
+                items = [approval_tiers.annotate(r) for r in items]
+            _json_resp(self, 200, {"items": items})
 
         # ── GET /api/youtube/oauth/status
         elif path == "/api/youtube/oauth/status":
@@ -1554,15 +1560,62 @@ class Handler(BaseHTTPRequestHandler):
             except Exception as e:  # noqa: BLE001
                 _json_resp(self, 500, {"error": f"러너를 불러오지 못했습니다: {e}"})
                 return
-            if action == "approve":
+            # 착수 전 계획 수정. 승인/거절밖에 못 하던 것을 고칠 수 있게 한다 —
+            # VLA 사태는 "없는 자료를 요구하는 완료 조건" 한 줄에서 시작됐고,
+            # 52단계를 겪을 때까지 아무도 그 줄을 지울 수 없었다.
+            #
+            # 검증은 projects.revise_plan() 이 한다. 서버가 따로 규칙을 들면
+            # UI 로 고친 계획만 검증을 빠져나가게 된다.
+            if action == "plan":
+                proj, why = projects.revise_plan(pid, self._read_body())
+                if why:
+                    _json_resp(self, 400, {"ok": False, "error": why, "project": proj})
+                else:
+                    _json_resp(self, 200, {"ok": True, "project": proj})
+            elif action == "approve":
                 _json_resp(self, 200, {"ok": True, "project": project_runner.approve(pid)})
             elif action == "resume":
-                _json_resp(self, 200, {"ok": True, "project": project_runner.resume(pid)})
+                # steer 는 방향 전환 지시. 없으면 예전처럼 그냥 이어 간다.
+                body = self._read_body() if self.headers.get("Content-Length") else {}
+                _json_resp(self, 200, {"ok": True, "project": project_runner.resume(
+                    pid, str(body.get("steer") or ""))})
             elif action == "cancel":
                 _json_resp(self, 200, {"ok": True, "project": projects.update(
                     pid, {"status": "cancelled", "pause_reason": "사장님이 중단했습니다"})})
             else:
                 _json_resp(self, 404, {"error": f"알 수 없는 동작: {action}"})
+
+        # ── POST /api/approvals/batch  {ids: [...]}  (2등급까지 일괄 승인)
+        #
+        # 3등급(바깥으로 나가는 것)은 ids 에 들어와도 거부한다. 화면이 안 보낸다는
+        # 것을 믿지 않는다 — 이 끝점은 Tailscale 로 바깥에서도 열리고, 되돌릴 수
+        # 없는 행위를 막는 판단은 서버에 있어야 한다.
+        elif path == "/api/approvals/batch":
+            body = self._read_body()
+            ids = [str(x) for x in (body.get("ids") or [])][:50]
+            rows = {r["id"]: r for r in workspace_store.load("approvals")}
+            done, skipped = [], []
+            for i in ids:
+                row = rows.get(i)
+                # status 가 없는 행은 대기로 본다. 화면이 그렇게 읽기
+                # 때문이다(`r.status ?? 'pending'`). 여기서만 다르게 보면
+                # 목록에는 대기로 떠 있는데 일괄 승인은 조용히 건너뛴다.
+                if row is None or (row.get("status") or "pending") != "pending":
+                    skipped.append({"id": i, "why": "대기 중이 아닙니다"})
+                    continue
+                t = approval_tiers.tier(row)
+                if t > approval_tiers.BATCHABLE_MAX:
+                    skipped.append({"id": i, "why": "바깥으로 나가는 안건은 "
+                                                    "하나씩만 승인할 수 있습니다",
+                                    "tier": t, "label": row.get("label", "")})
+                    continue
+                updated = workspace_store.update("approvals", i, {"status": "approved"})
+                if updated is None:
+                    skipped.append({"id": i, "why": "행을 찾지 못했습니다"})
+                    continue
+                done.append({"id": i, "label": row.get("label", ""), "tier": t,
+                             "followup": _approval_followup(updated)})
+            _json_resp(self, 200, {"ok": True, "approved": done, "skipped": skipped})
 
         elif path.startswith("/api/store/"):
             collection = path.split("/api/store/")[1]

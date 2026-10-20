@@ -4226,3 +4226,292 @@ button.pj-deliv-item[aria-expanded="true"] { background: var(--glass-hi); border
 
 /* 대화 시각이 YYYY-MM-DD HH:mm 으로 길어졌다. 눌리거나 줄바꿈되지 않게. */
 .ac-time { flex: none; white-space: nowrap; }
+
+/* ── 결재 등급 ───────────────────────────────────────────────────────────
+   결재함에 등급이 없었다. 파일 저장과 유튜브 업로드가 같은 모양의 버튼
+   하나로 보였다 — 한쪽은 workspace 에 파일을 하나 쓰는 것이고, 다른 쪽은
+   공개 채널에 영상을 올려 되돌릴 수 없는데.
+
+   그리고 실제로 일어난 일 — 결재 11건을 1분 안에 연달아 누르셨다. 여섯
+   번째쯤이면 누르는 것이 반사가 되고, 그 반사는 안건을 읽고 나오는 것이
+   아니다. 그래서 색만 입히지 않고 **묶음을 갈라** 놓는다. 색은 반사를
+   멈추지 못하지만 묶음 사이의 빈 줄은 손을 멈춘다. */
+.ceo-appr-group { display: flex; flex-direction: column; gap: 8px; }
+.ceo-appr-group + .ceo-appr-group {
+  margin-top: 14px; padding-top: 14px; border-top: 1px dashed var(--border);
+}
+.ceo-appr-group-head {
+  display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap;
+  font-size: 12px;
+}
+.ceo-appr-group-head b { font-size: 12.5px; }
+.ceo-appr-group-n {
+  flex: none; padding: 1px 7px; border-radius: 99px; font-size: 10.5px;
+  font-weight: 700; background: var(--glass-bg); border: 1px solid var(--border);
+}
+.ceo-appr-group-note {
+  flex: 1 1 100%; font-size: 11px; line-height: 1.5; color: var(--muted);
+}
+.ceo-appr-group.danger > .ceo-appr-group-head b { color: #f87171; }
+.ceo-appr-group.write  > .ceo-appr-group-head b { color: #60a5fa; }
+.ceo-appr-group.muted  > .ceo-appr-group-head b { color: var(--muted); }
+
+/* 꼬리표. 등급 숫자가 아니라 이름을 쓴다 — "2등급" 은 판단에 쓰이지
+   않지만 "쓰기" 는 쓰인다. 왜 그 등급인지는 title 로 붙는다. */
+.ceo-appr-tier {
+  flex: none; padding: 2px 8px; border-radius: 99px; font-size: 10.5px;
+  font-weight: 700; letter-spacing: .02em; cursor: help;
+}
+.ceo-appr-tier.danger {
+  background: rgba(248, 113, 113, .16); border: 1px solid rgba(248, 113, 113, .5);
+  color: #fca5a5;
+}
+.ceo-appr-tier.write {
+  background: rgba(96, 165, 250, .14); border: 1px solid rgba(96, 165, 250, .45);
+  color: #93c5fd;
+}
+.ceo-appr-tier.muted {
+  background: var(--glass-bg); border: 1px solid var(--border); color: var(--muted);
+}
+
+/* 카드 테두리도 등급을 따른다. 전부 분홍이던 것을 등급색으로 — 분홍 열한
+   줄은 "열한 건 다 급하다" 로 읽혀서 결국 아무것도 급하지 않게 된다. */
+.ceo-appr-card.t3 { border-color: rgba(248, 113, 113, .45); }
+.ceo-appr-card.t2 { border-color: rgba(96, 165, 250, .35); }
+.ceo-appr-card.t1 { border-color: var(--border); }
+
+.ceo-sec-spacer { flex: 1; }
+/* 일괄 승인은 2등급까지만 받는다. 버튼 글자에 "되돌릴 수 있는" 을 넣은
+   것은, 누르기 전에 무엇이 빠졌는지 알게 하려는 것이다. */
+.ceo-appr-btn.batch {
+  padding: 5px 12px; font-size: 11.5px;
+  background: rgba(96, 165, 250, .14); border-color: rgba(96, 165, 250, .45);
+  color: #93c5fd;
+}
+.ceo-appr-btn.batch:hover:not(:disabled) { background: rgba(96, 165, 250, .24); }
+
+@media (max-width: 640px) {
+  /* 좁은 화면에서 머리글이 버튼과 겹쳐 눌리는 것을 막는다. */
+  .ceo-sec-head { flex-wrap: wrap; }
+  .ceo-sec-spacer { flex: 1 1 100%; height: 0; }
+  .ceo-appr-btn.batch { width: 100%; }
+  .ceo-appr-actions { flex-wrap: wrap; }
+}
+
+/* ── 확신과 공백 ─────────────────────────────────────────────────────────
+   점수만 있었다. 100점이 떠 있으면 다 된 것처럼 보이는데, 그 100점은
+   "근거와 맞춰 봤다" 가 아니라 "그럴듯하다" 일 수도 있다. 첫 실전
+   테스트에서 영상 데이터가 프롬프트에 없는 채로 색상 코드와 효과 수치가
+   적혔고, 리뷰어도 그 영상을 못 봤으니 100점을 줬다.
+
+   세 칸으로 나눈다. 넓은 화면에서는 나란히, 좁은 화면에서는 위에서
+   아래로 — 순서가 검증됨 → 가정함 → 못 함 이므로 쌓여도 읽힌다. */
+.pj-block.conf { display: flex; flex-direction: column; gap: 10px; }
+.conf-sub { margin-left: 8px; font-size: 11px; font-weight: 500; color: var(--muted); }
+
+.conf-grid {
+  display: grid; gap: 10px;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+}
+.conf-col {
+  display: flex; flex-direction: column; gap: 7px;
+  padding: 11px 12px; border-radius: 10px;
+  background: var(--glass-bg); border: 1px solid var(--border);
+}
+/* 왼쪽 띠로 성격을 표시한다. 칸 전체를 물들이면 "못 함" 칸이 경고처럼
+   보여서, 정상적으로 범위를 좁힌 것까지 사고로 읽힌다. */
+.conf-col { border-left-width: 3px; }
+.conf-col.ok     { border-left-color: #34d399; }
+.conf-col.assume { border-left-color: #fbbf24; }
+.conf-col.gap    { border-left-color: #94a3b8; }
+
+.conf-col-head { display: flex; align-items: baseline; gap: 7px; flex-wrap: wrap; }
+.conf-col-head b { font-size: 12.5px; }
+.conf-col.ok     > .conf-col-head b { color: #34d399; }
+.conf-col.assume > .conf-col-head b { color: #fbbf24; }
+.conf-col.gap    > .conf-col-head b { color: #cbd5e1; }
+.conf-n {
+  flex: none; min-width: 20px; padding: 1px 6px; border-radius: 99px;
+  font-size: 10.5px; font-weight: 700; text-align: center;
+  background: var(--bg3); border: 1px solid var(--border);
+  font-variant-numeric: tabular-nums;
+}
+.conf-hint { flex: 1 1 100%; font-size: 10.5px; color: var(--muted); }
+
+.conf-list { margin: 0; padding-left: 16px; display: flex; flex-direction: column; gap: 7px; }
+.conf-list li { font-size: 12px; line-height: 1.55; }
+.conf-note {
+  display: block; margin-top: 3px; font-size: 10.5px; line-height: 1.5;
+  color: var(--muted);
+}
+.conf-none { margin: 0; font-size: 11.5px; color: var(--muted); }
+
+/* 어떻게 계산한 것인지 적어 둔다. 적어 두지 않으면 이 표도 점수와 같은
+   "믿어야 하는 숫자" 가 된다. */
+.conf-basis {
+  margin: 0; padding: 8px 11px; border-radius: 8px;
+  font-size: 10.5px; line-height: 1.6; color: var(--muted);
+  background: var(--bg3); border: 1px dashed var(--border);
+}
+
+/* ── 고칠 수 있는 계획 ───────────────────────────────────────────────────
+   할 수 있는 것이 전체 승인 아니면 전체 거절뿐이었다. VLA 사태는 계획에
+   들어간 "OS 커널 스케줄링 지연 실측치" 한 줄에서 시작됐고, 52단계를
+   겪을 때까지 아무도 그 줄을 지울 수 없었다.
+
+   접힌 상태를 기본으로 둔다. 대부분의 계획은 손댈 것이 없고, 매번 편집
+   양식을 펼쳐 두면 "고쳐야 하는 것" 처럼 보여서 오히려 승인을 망설이게
+   한다. 다만 접힌 줄에도 **왜 여기서 고치는 편이 싼지**는 적어 둔다. */
+.pj-plan-edit {
+  display: flex; flex-direction: column; gap: 11px;
+  padding: 12px 14px; border-radius: 11px;
+  background: var(--glass-bg); border: 1px solid rgba(139, 92, 246, .35);
+}
+.pj-plan-edit.closed { flex-direction: row; align-items: center; gap: 10px; flex-wrap: wrap; }
+.pj-plan-why { flex: 1; min-width: 180px; font-size: 11px; line-height: 1.5; color: var(--muted); }
+
+.pj-plan-head { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.pj-plan-head b { font-size: 12.5px; }
+.pj-plan-note { flex: 1 1 100%; font-size: 10.5px; line-height: 1.55; color: var(--muted); }
+
+.pj-plan-list { margin: 0; padding: 0; list-style: none;
+  display: flex; flex-direction: column; gap: 10px; }
+.pj-plan-item {
+  display: flex; flex-direction: column; gap: 6px;
+  padding: 9px 10px; border-radius: 9px;
+  background: var(--bg3); border: 1px solid var(--border);
+}
+.pj-plan-row { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
+.pj-plan-n {
+  flex: none; width: 20px; height: 20px; border-radius: 99px;
+  display: grid; place-items: center; font-size: 10.5px; font-weight: 700;
+  background: var(--glass-bg); border: 1px solid var(--border);
+  font-variant-numeric: tabular-nums;
+}
+.pj-plan-input, .pj-plan-sel, .pj-plan-area {
+  font: inherit; font-size: 12px; color: var(--text);
+  background: var(--bg); border: 1px solid var(--border);
+  border-radius: 7px; padding: 6px 9px;
+}
+.pj-plan-input { flex: 1; min-width: 140px; }
+.pj-plan-sel { flex: none; }
+.pj-plan-area { width: 100%; resize: vertical; line-height: 1.6; }
+.pj-plan-input:focus-visible, .pj-plan-sel:focus-visible, .pj-plan-area:focus-visible {
+  outline: 2px solid var(--primary); outline-offset: 1px;
+}
+.pj-plan-del {
+  flex: none; padding: 5px 10px; font-size: 11px; border-radius: 7px; cursor: pointer;
+  background: transparent; color: #fca5a5; border: 1px solid rgba(248, 113, 113, .4);
+}
+.pj-plan-del:hover { background: rgba(248, 113, 113, .12); }
+
+.pj-plan-removed {
+  margin: 0; padding: 7px 10px; border-radius: 7px; font-size: 11px;
+  background: rgba(248, 113, 113, .1); border: 1px solid rgba(248, 113, 113, .3);
+  color: #fca5a5;
+}
+.pj-plan-dw { margin: 0; padding: 0; list-style: none;
+  display: flex; flex-direction: column; gap: 6px; }
+.pj-plan-dw .pj-plan-input { width: 100%; }
+
+.pj-plan-msg {
+  margin: 0; padding: 8px 11px; border-radius: 8px; font-size: 11.5px;
+  background: var(--primary-dim); border: 1px solid var(--primary);
+}
+.pj-plan-actions { display: flex; justify-content: flex-end; gap: 7px; }
+
+@media (max-width: 640px) {
+  /* 좁은 화면에서는 제목·부서·빼기가 한 줄에 못 들어간다. 세로로 쌓되
+     "빼기" 는 오른쪽 끝에 붙여 실수로 눌리지 않게 한다. */
+  .pj-plan-row { align-items: stretch; }
+  .pj-plan-input { flex: 1 1 100%; }
+  .pj-plan-sel { flex: 1 1 auto; }
+  .pj-plan-del { margin-left: auto; }
+  .pj-plan-actions { flex-wrap: wrap; }
+  .pj-plan-actions .pj-btn { flex: 1; }
+}
+
+/* ── 지금 돌고 있는 호출 · 끊긴 호출 ─────────────────────────────────────
+   기록은 호출이 **끝난 뒤** 남는다. 그래서 2분짜리 호출이 도는 동안
+   화면에는 아무 줄도 나타나지 않았다 — 12단계까지만 보이고 13번째는
+   보이지 않는 채로 돈다. 체크포인트가 그 자료를 만들어 줬다. */
+.pj-step.now {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  margin-bottom: 8px; padding: 9px 11px; border-radius: 9px;
+  background: var(--primary-dim); border: 1px solid var(--primary);
+}
+.pj-step.now .pj-step-n { color: var(--primary); animation: pj-now 1.8s ease-in-out infinite; }
+@keyframes pj-now { 0%, 100% { opacity: 1 } 50% { opacity: .35 } }
+@media (prefers-reduced-motion: reduce) {
+  .pj-step.now .pj-step-n { animation: none; }
+}
+.pj-step-model {
+  margin-left: 7px; padding: 1px 6px; border-radius: 5px; font-size: 10px;
+  background: var(--bg3); border: 1px solid var(--border); color: var(--muted);
+  font-family: 'JetBrains Mono', monospace;
+}
+
+/* 끊긴 호출. 반려(no)와 다른 색을 준다 — 반려는 모델이 판단한 것이고
+   끊김은 프로세스가 죽은 것이라, 같은 색이면 "품질이 나쁘다" 로 읽힌다. */
+.pj-step.dead { opacity: .75; }
+.pj-step.dead .pj-step-n,
+.pj-step.dead .pj-step-phase { color: #94a3b8; }
+.pj-step.dead .pj-step-note { font-style: italic; }
+
+/* ── 작업 중 / 응답 대기 알약 ────────────────────────────────────────────
+   "3건 진행 중" 은 돌고 있는 것만 셌다. 사장님이 알아야 하는 것은 둘이다 —
+   기계가 일하는 중인가, 나를 기다리는 중인가. 뒤엣것은 내가 움직이지
+   않으면 영원히 그대로이므로, 같은 줄에 섞으면 급한 쪽이 묻힌다. */
+.pj-pill {
+  flex: none; margin-left: 8px; padding: 2px 9px; border-radius: 99px;
+  font-size: 11px; font-weight: 600; letter-spacing: .01em;
+  font-variant-numeric: tabular-nums;
+}
+.pj-pill.work {
+  background: rgba(52, 211, 153, .14); border: 1px solid rgba(52, 211, 153, .45);
+  color: #6ee7b7;
+}
+.pj-pill.work.idle {
+  background: var(--glass-bg); border: 1px solid var(--border); color: var(--muted);
+}
+.pj-pill.wait {
+  background: rgba(251, 191, 36, .14); border: 1px solid rgba(251, 191, 36, .5);
+  color: #fcd34d;
+}
+
+/* ── 방향 전환 ───────────────────────────────────────────────────────────
+   멈춘 프로젝트에 할 수 있는 것이 "이어서 진행" 과 "접기" 뿐이었다. 그런데
+   멈추는 이유는 대개 같은 지적 3회나 점수 정체다. 그대로 이어 가면 정체
+   기록만 비워지고 조건은 그대로라, 같은 자리에서 다시 막힌다 — 증상만
+   지우는 것이다. */
+.pj-steer {
+  display: flex; flex-direction: column; gap: 8px;
+  margin-top: 10px; padding: 11px 13px; border-radius: 10px;
+  background: var(--glass-bg); border: 1px solid rgba(251, 191, 36, .4);
+}
+.pj-steer-label { font-size: 12px; font-weight: 700; }
+.pj-steer-note { margin: 0; font-size: 10.5px; line-height: 1.6; color: var(--muted); }
+.pj-steer .pj-input { width: 100%; }
+.pj-steer-actions { display: flex; justify-content: flex-end; gap: 7px; }
+
+/* 걸려 있는 지시는 접힌 카드에서도 보인다. 보이지 않으면 "왜 계획과
+   다르게 가지?" 를 설명할 길이 없다 — 숨은 자율성이 되어 버린다. */
+.pj-steer-on {
+  margin: 6px 0 0; padding: 6px 10px; border-radius: 7px;
+  font-size: 11.5px; line-height: 1.5;
+  background: rgba(251, 191, 36, .1); border: 1px solid rgba(251, 191, 36, .3);
+  color: #fcd34d;
+}
+
+@media (max-width: 640px) {
+  .pj-steer-actions { flex-wrap: wrap; }
+  .pj-steer-actions .pj-btn { flex: 1; }
+}
+
+/* 단계별 소요 시간. 숫자가 세로로 줄 맞게 tabular-nums 를 준다 — 목록에서
+   초 단위를 비교하려면 자릿수가 흔들리면 안 된다. */
+.pj-step-secs {
+  flex: none; padding: 1px 6px; border-radius: 5px; font-size: 10.5px;
+  background: var(--glass-bg); border: 1px solid var(--border); color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}

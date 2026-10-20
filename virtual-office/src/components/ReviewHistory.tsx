@@ -19,6 +19,9 @@ interface Bucket {
   drafts: ProjectStep[];
   reviews: ProjectStep[];
   truncated: number;
+  /** 끝나지 못한 호출. 잘림과 섞으면 "출력 잘림 N회" 가 거짓이 된다 —
+   *  한쪽은 글이 길어서, 다른 쪽은 프로세스가 죽어서 생긴 것이다. */
+  dead: number;
   passed: boolean;
 }
 
@@ -58,7 +61,7 @@ export default function ReviewHistory({ p }: { p: ProjectRow }) {
     if (!ds.length) return [];
     const out: Bucket[] = ds.map(d => ({
       id: d.id, title: d.title, dept: d.dept,
-      drafts: [], reviews: [], truncated: 0, passed: false,
+      drafts: [], reviews: [], truncated: 0, dead: 0, passed: false,
     }));
     let i = 0;                       // 지금 어느 산출물을 만들고 있나
     for (const s of p.steps ?? []) {
@@ -70,7 +73,8 @@ export default function ReviewHistory({ p }: { p: ProjectRow }) {
         // 잘림은 품질 문제가 아니라 분량 문제다. 따로 센다 — 예산을 이쪽이
         // 다 먹고 있는데 점수 얘기만 보면 원인을 놓친다.
         // trunc 플래그는 나중에 붙었다. 그 전 프로젝트는 노트로 알아본다.
-        if (s.trunc || (s.note ?? '').includes('잘림')) b.truncated += 1;
+        if (s.dead) b.dead += 1;
+        else if (s.trunc || (s.note ?? '').includes('잘림')) b.truncated += 1;
       } else {
         b.reviews.push(s);
         if (s.phase === 'review2' && s.ok) { b.passed = true; i += 1; }
@@ -134,6 +138,7 @@ export default function ReviewHistory({ p }: { p: ProjectRow }) {
               <div className="rh-meta">
                 초안 {b.drafts.length}회
                 {b.truncated > 0 && <span className="rh-waste"> (잘림 {b.truncated})</span>}
+                {b.dead > 0 && <span className="rh-waste"> (끊김 {b.dead})</span>}
                 {' · '}검토 {b.reviews.length}회
                 {scores.filter(s => s >= 0).length > 0 &&
                   <> · 최고 {Math.max(...scores.filter(s => s >= 0))}점</>}

@@ -66,6 +66,15 @@ def credentials() -> tuple[str, str]:
 
 
 def send(text: str, quiet: bool = False) -> bool:
+    # 텔레그램은 바깥 서버다. _ask 에서 한 번 가렸지만 정지 사유·예산
+    # 경고처럼 _ask 를 거치지 않는 문구도 여기로 온다. 나가는 문에서
+    # 한 번 더 본다 — 두 번 가려도 손해가 없다.
+    try:
+        from shared_memory import secrets_guard
+        text = secrets_guard.mask(text)
+    except Exception:  # noqa: BLE001
+        pass
+
     """보냈으면 True. 설정이 없거나 실패해도 예외를 올리지 않는다 —
     알림이 안 갔다고 프로젝트가 죽어서는 안 된다."""
     token, chat = credentials()

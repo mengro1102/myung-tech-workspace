@@ -11,7 +11,7 @@ import json
 import re
 
 from . import base  # noqa: F401
-from . import github, paypal, youtube, youtube_lookup  # noqa: F401  (import 하는 것만으로 등록된다)
+from . import github, paypal, research, youtube, youtube_lookup  # noqa: F401  (import 하는 것만으로 등록된다)
 from .base import (Action, Integration, IntegrationError, NotConfigured,  # noqa: F401
                    Probe, all_integrations, env, get, register)
 
@@ -26,6 +26,9 @@ _TRIGGERS: dict[str, tuple[str, ...]] = {
     "youtube_oauth": ("유튜브", "youtube", "시청", "지속률", "트래픽", "구독자", "애널리틱스"),
     "paypal":        ("페이팔", "paypal", "수익", "매출", "결제", "정산", "입금"),
     "github":        ("깃헙", "github", "레포", "repo", "웹사이트", "블로그", "배포", "커밋"),
+    # 서베이·동향 조사일 때만 바깥을 본다. 비워 두면 모든 프로젝트가 매번
+    # arXiv 를 두드리게 되고, 느릴뿐더러 arXiv 에 폐가 된다.
+    "research":      research.TRIGGERS,
 }
 
 
