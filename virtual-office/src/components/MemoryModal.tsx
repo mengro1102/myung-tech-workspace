@@ -14,6 +14,11 @@ const KB_CATS = [
 
 export default function MemoryModal({ onClose }: Props) {
   const [tab,       setTab]       = useState<'short' | 'long' | 'synthesis'>('short');
+  const [retrieval, setRetrieval] = useState<{
+    by_origin?: Record<string, number>;
+    embedding?: { model?: string; dim?: number; cached?: number;
+                  stale?: number; min_sim?: number; error?: string };
+  } | null>(null);
   const [hfModel,   setHfModel]   = useState('');
   const [hfToken,   setHfToken]   = useState('');
   const [syncing,   setSyncing]   = useState(false);
@@ -62,6 +67,8 @@ export default function MemoryModal({ onClose }: Props) {
   /* 합성 탭이 보여 줄 '실시간' 채널 — 실제로 연결 확인된 연동만 센다. */
   const [live, setLive] = useState<{ label: string }[]>([]);
   useEffect(() => {
+    fetch('/api/knowledge/retrieval').then(r => r.json())
+      .then(setRetrieval).catch(() => {});
     api.listIntegrations().then(r => {
       setLive((r?.integrations ?? []).filter(i => i.ok).map(i => ({ label: i.label })));
     });
@@ -128,6 +135,56 @@ export default function MemoryModal({ onClose }: Props) {
           <span className="hm-subtitle">{kb ? `${kb.total_nodes}개` : '…'}</span>
           <button className="hm-close" onClick={onClose}>✕</button>
         </div>
+
+        {/* 어떻게 찾는가 — 이 화면은 2026-09-10 에 멈춰 있었고 그 뒤로
+            임베딩이 들어왔다. "몇 개" 만 말하면 그 숫자가 검색에 어떻게
+            쓰이는지 알 수 없다. 특히 근거에 **이전 AI 출력이 섞인다**는
+            사실은 반드시 보여야 한다. */}
+        {retrieval && (
+          <div className="mem-retrieval">
+            <div className="mem-retrieval-title">조회 방식</div>
+            <div className="mem-retrieval-rows">
+              {([['node', '사람이 정리한 노드'],
+                 ['reference', '수집한 논문·문헌'],
+                 ['experience', '이전 프로젝트 산출물 (AI 출력)']] as const)
+                .map(([k, label]) => {
+                  const n = retrieval.by_origin?.[k] ?? 0;
+                  if (!n) return null;
+                  return (
+                    <div key={k} className="mem-retrieval-row">
+                      <span className={k === 'experience' ? 'mem-ret-warn' : ''}>{label}</span>
+                      <b>{n}건</b>
+                    </div>
+                  );
+                })}
+            </div>
+            {(retrieval.by_origin?.experience ?? 0) > 0 && (
+              <div className="mem-retrieval-note">
+                ⚠️ 근거에는 <b>이 시스템이 전에 쓴 글</b>도 섞입니다. 검토를
+                통과한 것만 쌓이지만, 사람이 사실 관계를 확인한 것은
+                아닙니다. 산출물의 「방법 보기」가 몇 건인지 적습니다.
+              </div>
+            )}
+            {retrieval.embedding && !retrieval.embedding.error && (
+              <div className="mem-retrieval-note">
+                뜻으로 찾기: <code>{retrieval.embedding.model}</code>{' '}
+                {retrieval.embedding.dim}차원 · {retrieval.embedding.cached}건 색인
+                {retrieval.embedding.stale ? ` · 갱신 필요 ${retrieval.embedding.stale}건` : ''}
+                <br />
+                최저 유사도 {retrieval.embedding.min_sim} 은 <b>바닥선이지
+                관련성 판정이 아닙니다</b> — 실측에서 관련 문서의 최소값이
+                무관 문서의 최대값보다 낮았습니다. 숫자로 관련성을 가를 수
+                없다는 뜻입니다.
+              </div>
+            )}
+            {retrieval.embedding?.error && (
+              <div className="mem-retrieval-note">
+                뜻으로 찾기 상태를 확인하지 못했습니다 — 꺼져 있다는 뜻이
+                아닙니다. ({retrieval.embedding.error})
+              </div>
+            )}
+          </div>
+        )}
 
         {/* tabs */}
         <div className="mem-tabs">

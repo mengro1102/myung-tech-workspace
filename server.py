@@ -32,6 +32,100 @@ except ImportError:
     HAS_PSUTIL = False
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
+def _activity() -> dict:
+    """지금 **실제로** 뭐가 돌고 있나. 화면의 `cycleStatus` 자리에 들어간다.
+
+    `status` 값은 기존 소비자들이 읽던 것과 같은 모양으로 둔다 — 여섯 군데가
+    `!== 'stopped'` 로 "살아 있나" 를 판정하고 있어서, 모양을 바꾸면 그 여섯을
+    한꺼번에 고쳐야 한다. 뜻만 바꾼다: **사장님이 버튼을 눌렀나 → 정말로
+    일이 돌고 있나.**
+
+    'waiting' 을 따로 두는 이유: 사람을 기다리는 것과 기계가 일하는 것은
+    사장님이 할 일이 다르다. 전자는 사장님 차례고 후자는 기다리면 된다.
+    """
+    try:
+        rows = projects.load()
+        running = [p for p in rows if p.get("status") == "running"]
+        paused = [p for p in rows if p.get("status") == "paused"]
+        tasks = task_queue.list_tasks()
+        # 정체된 것은 "도는 중" 으로 세지 않는다. 세면 화면이 거짓말한다 —
+        # 실측: 10시간 넘게 in_progress 로 박혀 있던 태스크 하나 때문에
+        # 헤더가 "일하는 중 1" 이라고 말하고 있었다(화면에서 부서에 물어본
+        # 질의가 끝나지 않은 것. 사이클과는 무관했다).
+        # 여기서는 읽기만 한다. 폴링이 상태를 바꾸면 창을 열어 둔 것만으로
+        # 데이터가 바뀐다.
+        busy = [t for t in tasks
+                if t.get("status") == "in_progress" and not task_queue.is_stale(t)]
+        stuck = task_queue.stale(tasks)
+        pending_appr = [a for a in workspace_store.load("approvals")
+                        if a.get("status") == "pending"]
+
+        if running or busy:
+            status = "executing"
+        elif paused or pending_appr:
+            status = "waiting"          # 사람 차례
+        else:
+            status = "stopped"
+
+        return {
+            "status": status,
+            "running": bool(running or busy),
+            "projects_running": len(running),
+            "projects_waiting": len(paused),
+            "tasks_busy": len(busy),
+            "tasks_stale": len(stuck),      # 숨기지 않는다 — 치워야 할 것이다
+            "approvals_pending": len(pending_appr),
+            # 옛 소비자들이 읽던 칸. 사이클이 없으니 늘 0 이지만, 키가
+            # 사라지면 화면이 undefined 를 읽는다.
+            "cycle_count": 0,
+            "last_cycle": None,
+            "logs": [],
+        }
+    except Exception as e:  # noqa: BLE001
+        # 활동을 모르는 것과 활동이 없는 것은 다르다. 섞지 않는다.
+        return {"status": "stopped", "running": False, "error": f"조회 실패: {e}",
+                "cycle_count": 0, "last_cycle": None, "logs": []}
+
+
+def _disk_block() -> dict:
+    """/api/system/stats 에 더할 볼륨 목록."""
+    try:
+        c = disk_guard.check()
+        return {
+            # 작업 볼륨만, 빠듯한 순. [0] 이 우리 일을 먼저 막을 볼륨이다.
+            "volumes": c["volumes"],
+            # 윈도우가 사는 볼륨. 우리가 쓰지 않으므로 칸을 따로 둔다 —
+            # 섞으면 늘 92% 인 C: 가 작업 볼륨 경고를 덮어 버린다.
+            "disk_system": c.get("system"),
+            "disk_level": c["level"],
+            "disk_notes": c["notes"],
+            "disk_thresholds": c["thresholds"],
+        }
+    except Exception as e:
+        return {"volumes": [], "disk_level": "unknown",
+                "disk_notes": [f"디스크 조회 실패: {e}"]}
+
+
+def _disk_health() -> dict:
+    """/api/health 에 더할 한 줄 판정. 맹비서가 이걸 읽는다."""
+    try:
+        c = disk_guard.check()
+        tight = c["volumes"][0] if c["volumes"] else None
+        return {
+            "ok": c["ok"],
+            "level": c["level"],
+            "summary": disk_guard.summary_md(),
+            "tightest": tight,              # 가장 빠듯한 **작업** 볼륨
+            "system": c.get("system"),      # 윈도우가 사는 볼륨
+            "notes": c["notes"],
+        }
+    except Exception as e:
+        # "조회 못 함" 과 "여유 있음" 을 섞지 않는다 — verify 에서 배운 것.
+        return {"ok": True, "level": "unknown",
+                "summary": f"디스크를 조회하지 못했습니다 ({e}) — 여유가 있다는 뜻이 아닙니다.",
+                "tightest": None, "notes": []}
+
+
 class ThreadingHTTPServer(socketserver.ThreadingMixIn, HTTPServer):
     daemon_threads = True
 from pathlib import Path
@@ -327,6 +421,8 @@ import task_queue
 import message_broker
 import workspace_store
 import approval_tiers
+import disk_guard
+import notify
 import file_proposals
 import projects
 try:
@@ -334,7 +430,6 @@ try:
 except Exception as _integ_exc:  # noqa: BLE001
     integrations = None
     print(f'[server] 연동 모듈 로드 실패: {_integ_exc}', file=sys.stderr)
-from cycle_runner import runner as cycle_runner
 
 # 단기기억 = GraphRAG 지식베이스 참조 (knowledge_base.py, repo 루트). import 실패해도 서버는 떠야 하므로 guard.
 try:
@@ -1011,6 +1106,7 @@ class Handler(BaseHTTPRequestHandler):
                 "vllm":   {"ok": vllm_ok, "host": OLLAMA_HOST, "error": vllm_err},
                 "knowledge_base": {"ok": kb_ok, "path": kb_path, "error": kb_err},
                 "workspace": {"ok": ws_ok, "path": str(WORKSPACE_ROOT)},
+                "disk": _disk_health(),
                 "tasks": {
                     "pending":     counts.get("pending", 0),
                     "in_progress": counts.get("in_progress", 0),
@@ -1088,9 +1184,91 @@ class Handler(BaseHTTPRequestHandler):
                     if self.wfile in _sse_clients:
                         _sse_clients.remove(self.wfile)
 
-        # ── GET /api/cycle/status
+        # ── GET /api/knowledge/retrieval  (무엇을 어떻게 찾는가)
+        #
+        # 지식 네트워크 화면이 2026-09-10 이후 멈춰 있었다. 그 뒤로 임베딩이
+        # 들어왔고 근거에 이전 AI 출력이 섞이게 됐는데 화면에는 그 말이 없다.
+        # 틀린 말은 아니지만 빠진 말이 있는 상태다.
+        elif path == "/api/knowledge/retrieval":
+            try:
+                import knowledge_base as _kb
+                import kb_embed as _emb
+                counts = {}
+                for cat in _kb.SEARCH_DIRS:
+                    try:
+                        counts[cat] = len(list((_kb.KB_PATH / cat).glob("*.md")))
+                    except OSError:
+                        counts[cat] = -1          # 모르는 것과 0 을 섞지 않는다
+                by_origin: dict[str, int] = {}
+                for cat, n in counts.items():
+                    if n < 0:
+                        continue
+                    k = _kb.origin_of(f"{cat}/x.md")
+                    by_origin[k] = by_origin.get(k, 0) + n
+                try:
+                    emb = _emb.stats(_kb.KB_PATH)
+                except Exception as e:  # noqa: BLE001
+                    emb = {"error": f"조회 실패: {e}"}
+                _json_resp(self, 200, {
+                    "dirs": counts,
+                    "by_origin": by_origin,
+                    "origin_ko": _kb.ORIGIN_KO,
+                    "embedding": emb,
+                    "seats": {"embed": getattr(_kb, "EMBED_SEATS", None),
+                              "recent": getattr(_kb, "RECENT_SEATS", None)},
+                })
+            except Exception as e:  # noqa: BLE001
+                _json_resp(self, 500, {"error": f"조회 실패: {e}"})
+
+        # ── GET /api/archive/<pid>[/<did>]  (보관된 프롬프트 전문)
+        #
+        # ISPOR ① 은 "전체 프롬프트 공개" 다. 보관만 하고 꺼내 볼 수 없으면
+        # 절반이다 — 그래서 읽는 길을 둔다. 기본은 목록(전문 제외)이고,
+        # ?full=1 일 때만 본문을 싣는다. 호출 하나가 1만 자 넘는 경우가
+        # 있어(실측 최대 16,102자) 목록까지 전문을 실으면 응답이 수 MB 가 된다.
+        elif path.startswith("/api/archive/"):
+            rest = [x for x in path.split("/api/archive/")[1].split("/") if x]
+            if not rest:
+                _json_resp(self, 400, {"error": "프로젝트 id 가 필요합니다"})
+                return
+            pid = rest[0]
+            did = rest[1] if len(rest) > 1 else ""
+            full = (parse_qs(parsed.query).get("full") or ["0"])[0] == "1"
+            try:
+                import archive as _archive
+                rows = [r for r in _archive.calls(pid, did=did) if not r.get("_broken")]
+                if not full:
+                    rows = [{k: v for k, v in r.items()
+                             if k not in ("system", "user")}
+                            | {"system_chars": len(r.get("system") or ""),
+                               "user_chars": len(r.get("user") or "")}
+                            for r in rows]
+                _json_resp(self, 200, {"calls": rows,
+                                       "stats": _archive.stats(pid),
+                                       "full": full})
+            except Exception as e:  # noqa: BLE001
+                _json_resp(self, 500, {"error": f"보관 조회 실패: {e}"})
+
+        # ── GET /api/notify/status  (어느 채널이 주인가)
+        #
+        # 관리 탭이 전에는 /api/config/load 의 키 목록으로 채널을 판단했다.
+        # 그 목록에 DISCORD_BOT_TOKEN 이 없고, 애초에 그 토큰은 명테크가
+        # 아니라 hermes 의 .env 에 산다 — 키 유무로 추정하면 영원히
+        # "미연결" 이라고 말한다. notify 가 이미 정답을 안다.
+        elif path == "/api/notify/status":
+            try:
+                _json_resp(self, 200, notify.status())
+            except Exception as e:  # noqa: BLE001
+                _json_resp(self, 200, {"error": f"조회 실패: {e}", "primary": None})
+
+        # ── GET /api/cycle/status  (이름은 유지 — 화면 6곳이 이 모양을 읽는다)
+        #
+        # 전에는 cycle_runner 의 깃발이었다. 그건 사장님이 "운영 시작" 을
+        # 눌렀을 때만 참이었고, 사이클을 들어낸 지금은 영원히 'stopped' 다.
+        # 같은 자리에 **실제 활동**을 넣는다 — 사무실 탭의 `● LIVE` 가
+        # 처음으로 사실을 가리키게 된다.
         elif path == "/api/cycle/status":
-            _json_resp(self, 200, cycle_runner.get_status())
+            _json_resp(self, 200, _activity())
 
         # ── GET /api/system/stats
         elif path == "/api/system/stats":
@@ -1113,9 +1291,20 @@ class Handler(BaseHTTPRequestHandler):
                     "disk_total_gb": round(disk.total / 1024**3, 2),
                     "net_sent_mb": round(net.bytes_sent / 1024**2, 2),
                     "net_recv_mb": round(net.bytes_recv / 1024**2, 2),
+                    # 위의 disk_* 는 ROOT 가 사는 볼륨 하나뿐이다(= D:).
+                    # 실측에서 차오르고 있던 쪽은 C: 였고 그게 안 보였다.
+                    # 아래가 볼륨 전부를 보여 준다. 위 키는 게이지가 읽고
+                    # 있어 그대로 둔다.
+                    **_disk_block(),
                 })
             else:
-                _json_resp(self, 200, {"error": "psutil not installed", "cpu_percent": 0, "mem_percent": 0})
+                # psutil 이 없어도 디스크는 shutil 로 잴 수 있다. 디스크
+                # 정보가 psutil 설치 여부에 묶여 있을 이유가 없다.
+                _json_resp(self, 200, {
+                    "error": "psutil not installed",
+                    "cpu_percent": 0, "mem_percent": 0,
+                    **_disk_block(),
+                })
 
         # ── GET /api/tasks/list?status=&limit=20&offset=0
         elif path == "/api/tasks/list":
@@ -1227,6 +1416,72 @@ class Handler(BaseHTTPRequestHandler):
             _json_resp(self, 200, {"project": p | {
                 "progress": projects.progress(p),
                 "budget_left": projects.budget_left(p)}})
+
+        # ── GET /api/verify/<pid>/<did>  (사람이 검증할 표본)
+        #
+        # 명테크의 검토는 모델끼리다. 사람의 눈은 승인 두 지점에만 있었고,
+        # ISPOR 의 8개 축 중 "인간 기준" 이 비어 있었다(평가 30건 중 23건이
+        # 이걸 뒀는데 우리는 0이었다).
+        #
+        # 기계가 실제 논문을 찾아 나란히 놓고, **사람은 "이 논문이 정말 그
+        # 말을 하는가" 만 판단한다.** 모델에게 물으면 맞다고 하므로 그 답은
+        # 점수와 같은 성질이라 아무것도 보태지 않는다.
+        elif path.startswith("/api/verify/"):
+            rest = path.split("/api/verify/")[1].split("/")
+            if len(rest) != 2:
+                _json_resp(self, 404, {"error": "Not found"})
+                return
+            proj = projects.get(rest[0])
+            if proj is None:
+                _json_resp(self, 404, {"error": f"없는 프로젝트: {rest[0]}"})
+                return
+            try:
+                import verify as _verify
+                out = _verify.build(proj, rest[1])
+                out["summary"] = _verify.summary(proj, rest[1])
+                _json_resp(self, 200, out)
+            except Exception as e:  # noqa: BLE001
+                _json_resp(self, 500, {"error": str(e), "claims": []})
+
+        # ── GET /api/lessons  (막힌 프로젝트에서 건진 교훈)
+        #
+        # 교훈은 쌓이고 계획에 주입되는데 **볼 수 있는 화면이 없었다.**
+        # 시스템이 배우고 있다는 것을 사장님이 확인할 길이 없으면, 그건
+        # 작동하는지 알 수 없는 기능이고 믿을 근거도 없다.
+        # ── GET /api/provenance/<pid>/<did>  (산출물의 '방법' 절)
+        #
+        # RAISE 가 요구하는 공개를 화면에서도 볼 수 있어야 한다. 파일과
+        # 위키에는 붙지만, 결재하기 전에 "이게 어떻게 나왔나" 를 보려면
+        # 화면에서도 읽혀야 한다.
+        elif path.startswith("/api/provenance/"):
+            rest = path.split("/api/provenance/")[1].split("/")
+            if len(rest) != 2:
+                _json_resp(self, 404, {"error": "Not found"})
+                return
+            pid, did = rest
+            proj = projects.get(pid)
+            if proj is None:
+                _json_resp(self, 404, {"error": f"없는 프로젝트: {pid}"})
+                return
+            d = next((x for x in (proj.get("plan") or {}).get("deliverables") or []
+                      if x.get("id") == did), None)
+            if d is None:
+                _json_resp(self, 404, {"error": f"없는 산출물: {did}"})
+                return
+            try:
+                import provenance
+                _json_resp(self, 200, {"markdown": provenance.methods_section(proj, d)})
+            except Exception as e:  # noqa: BLE001
+                _json_resp(self, 500, {"error": str(e), "markdown": ""})
+
+        elif path == "/api/lessons":
+            try:
+                import lessons as _lessons
+                rows = sorted(workspace_store.load("lessons"),
+                              key=lambda r: r.get("at") or "", reverse=True)
+                _json_resp(self, 200, {"items": rows, "stats": _lessons.stats()})
+            except Exception as e:  # noqa: BLE001
+                _json_resp(self, 500, {"error": str(e), "items": [], "stats": {}})
 
         elif path.startswith("/api/store/"):
             collection = path.split("/api/store/")[1]
@@ -1388,6 +1643,14 @@ class Handler(BaseHTTPRequestHandler):
             # 결재는 상태만 바뀌고 끝나면 결재가 아니다. 승인하면 올린 부서에게
             # "허락받았으니 진행하라"고 되돌려 준다.
             if rest[0] == "approvals" and patch.get("status") in ("approved", "rejected"):
+                # 누가 결정했는지를 남긴다. 이것이 없어서 결재 9건이 왜
+                # 승인됐는지 사후에 밝힐 수 없었다 — 승인이 곧 실행인
+                # 시스템에서 그건 감사 불가능을 뜻한다.
+                row = workspace_store.update(rest[0], rest[1], {
+                    "decided_by": str(patch.get("decided_by") or "ui"),
+                    "decided_at": time.time(),
+                }) or row
+                out["item"] = row
                 out["followup"] = _approval_followup(row)
             _json_resp(self, 200, out)
         else:
@@ -1472,25 +1735,13 @@ class Handler(BaseHTTPRequestHandler):
             self._login()
             return
 
-        # ── POST /api/cycle/start
-        if path == "/api/cycle/start":
-            body     = self._read_body()
-            interval = int(body.get("interval", 3600))
-            ok = cycle_runner.start(interval=interval)
-            _json_resp(self, 200, {"ok": ok, "interval": interval, **cycle_runner.get_status()})
-
-        # ── POST /api/cycle/stop
-        elif path == "/api/cycle/stop":
-            cycle_runner.stop()
-            _json_resp(self, 200, {"ok": True, **cycle_runner.get_status()})
-
-        # ── POST /api/cycle/run_once
-        elif path == "/api/cycle/run_once":
-            ok = cycle_runner.run_once()
-            _json_resp(self, 200, {"ok": ok, **cycle_runner.get_status()})
+        # /api/cycle/start · stop · run_once 는 제거했다 (2026-10-21).
+        # 근거 조회·검토·방법 절을 전부 우회하는 경로였다 — 자세한 사유는
+        # RAISE_COMPLIANCE.md 의 "운영 사이클을 들어낸 이유" 절.
+        # 아래가 POST 사슬의 첫 분기다. elif 로 두면 영원히 안 걸린다.
 
         # ── POST /api/business/ideas  (AI 비즈니스 아이디어 생성)
-        elif path == "/api/business/ideas":
+        if path == "/api/business/ideas":
             body = self._read_body()
             context = body.get("context", "명테크 멀티-에이전트 워크스페이스")
             task = task_queue.enqueue(
@@ -1544,6 +1795,13 @@ class Handler(BaseHTTPRequestHandler):
             if not idea:
                 _json_resp(self, 400, {"error": "아이디어를 적어 주세요"})
                 return
+            # 깨진 입력을 여기서 막는다. 통과시키면 계획 수립기가 "못
+            # 읽겠다" 고 하는 대신 **조회된 자료로 다른 프로젝트를 지어낸다**
+            # — 실제로 그랬고 승인 요청까지 보냈다.
+            _why = projects.unreadable(idea)
+            if _why:
+                _json_resp(self, 400, {"error": _why})
+                return
             # 계획 수립은 LLM 호출이라 수십 초가 걸린다. 여기서 기다리면 화면이
             # 멈추므로 만들어만 두고 돌려준다 — 러너 스레드가 집어 간다.
             _json_resp(self, 200, {"ok": True,
@@ -1585,6 +1843,41 @@ class Handler(BaseHTTPRequestHandler):
             else:
                 _json_resp(self, 404, {"error": f"알 수 없는 동작: {action}"})
 
+        # ── POST /api/verify/<pid>/<did>  {verdicts: {id: {verdict, note}}}
+        #
+        # 누가 언제 판정했는지를 함께 남긴다 — decided_by 와 같은 발상이다.
+        # 검증했다는 주장만 있고 누가 했는지가 없으면 사후에 "이건 사람이
+        # 본 것인가" 를 물을 수 없다.
+        elif path.startswith("/api/verify/"):
+            rest = path.split("/api/verify/")[1].split("/")
+            if len(rest) != 2:
+                _json_resp(self, 404, {"error": "Not found"})
+                return
+            body = self._read_body()
+            try:
+                import verify as _verify
+                _json_resp(self, 200, _verify.record(
+                    rest[0], rest[1], body.get("verdicts") or {},
+                    who=str(body.get("who") or "사장님")))
+            except Exception as e:  # noqa: BLE001
+                _json_resp(self, 500, {"error": str(e)})
+
+        # ── POST /api/consistency/<pid>/<did>  (반복 실행 일관성 시험)
+        #
+        # 같은 조건으로 한 번 더 쓰게 하고 사실 조각을 견준다. 호출 하나를
+        # 쓰므로 사장님이 원할 때만 돈다 — 모든 산출물에 자동으로 돌리면
+        # 예산이 두 배가 되고, 그만한 값을 늘 하지는 않는다.
+        elif path.startswith("/api/consistency/"):
+            rest = path.split("/api/consistency/")[1].split("/")
+            if len(rest) != 2:
+                _json_resp(self, 404, {"error": "Not found"})
+                return
+            try:
+                import consistency
+                _json_resp(self, 200, consistency.run(rest[0], rest[1]))
+            except Exception as e:  # noqa: BLE001
+                _json_resp(self, 500, {"error": str(e)})
+
         # ── POST /api/approvals/batch  {ids: [...]}  (2등급까지 일괄 승인)
         #
         # 3등급(바깥으로 나가는 것)은 ids 에 들어와도 거부한다. 화면이 안 보낸다는
@@ -1593,6 +1886,25 @@ class Handler(BaseHTTPRequestHandler):
         elif path == "/api/approvals/batch":
             body = self._read_body()
             ids = [str(x) for x in (body.get("ids") or [])][:50]
+
+            # 사람이 건수를 직접 적어 보내야 한다.
+            #
+            # 전에는 화면의 `window.confirm` 하나가 유일한 방어막이었다.
+            # 그런데 자동화로 띄운 브라우저에서 `confirm` 은 기본으로 true 를
+            # 돌려준다 — **사람이 읽고 누르는 것을 전제한 방어가 사람이 없을 때
+            # 그냥 통과한다.** 실제로 결재 9건이 그렇게 넘어갔고, 거기에 섞인
+            # 프로젝트 착수 결재까지 함께 승인돼 자율 실행이 시작됐다.
+            #
+            # 숫자를 맞춰 넣는 일은 우연히 일어나지 않는다. 한 건씩 누르는
+            # 길은 그대로 두므로 승인 피로를 다시 만들지도 않는다.
+            if int(body.get("confirm_count") or -1) != len(ids):
+                _json_resp(self, 400, {
+                    "ok": False,
+                    "error": (f"건수 확인이 맞지 않습니다. {len(ids)}건을 승인하려면 "
+                              f"confirm_count 에 {len(ids)} 를 보내세요."),
+                    "approved": [], "skipped": [],
+                })
+                return
             rows = {r["id"]: r for r in workspace_store.load("approvals")}
             done, skipped = [], []
             for i in ids:
@@ -1609,7 +1921,11 @@ class Handler(BaseHTTPRequestHandler):
                                                     "하나씩만 승인할 수 있습니다",
                                     "tier": t, "label": row.get("label", "")})
                     continue
-                updated = workspace_store.update("approvals", i, {"status": "approved"})
+                updated = workspace_store.update("approvals", i, {
+                    "status": "approved",
+                    "decided_by": "batch",
+                    "decided_at": time.time(),
+                })
                 if updated is None:
                     skipped.append({"id": i, "why": "행을 찾지 못했습니다"})
                     continue

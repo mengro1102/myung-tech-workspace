@@ -92,6 +92,21 @@ export default function ApprovalBox({ open: boxOpen, onToggle, focusId,
 
   const pending = rows.filter(r => (r.status ?? 'pending') === 'pending');
 
+  // 최근에 처리된 것 — 누가 결정했는지와 함께.
+  //
+  // 결재 9건이 승인 주체 기록 없이 승인된 일이 있었다. 추적했으나 밝히지
+  // 못했다 — 기록이 없었기 때문이다. 이제 남기고, 남긴 것을 **보여 준다.**
+  // 기록만 하고 화면에 없으면 사후에 누가 들여다볼 일이 생기지 않는다.
+  const recent = rows
+    .filter(r => (r.status ?? 'pending') !== 'pending' && r.decided_at)
+    .sort((a, b) => (b.decided_at ?? 0) - (a.decided_at ?? 0))
+    .slice(0, 5);
+
+  const WHO: Record<string, string> = {
+    ui: '화면에서 하나씩', batch: '화면에서 일괄', cli: '명령줄',
+    telegram: '텔레그램', runner: '러너 자동', api: 'API 직접',
+  };
+
   // 등급이 높은 것(되돌릴 수 없는 것)부터. 아래로 내려갈수록 가벼워진다.
   // tier 가 없으면(옛 서버) 1 로 본다 — 화면이 비는 것보다 낫다.
   const groups = [3, 2, 1]
@@ -110,11 +125,26 @@ export default function ApprovalBox({ open: boxOpen, onToggle, focusId,
         ? `\n\n바깥으로 나가는 ${outward}건은 제외됩니다 — 하나씩 확인하세요.`
         : '')
       + '\n\n진행할까요?')) return;
+    // `confirm` 만으로는 자동화 브라우저를 막지 못한다 — 자동화로 띄운
+    // 페이지에서 `confirm` 은 기본으로 true 를 돌려준다. 실제로 결재 9건이
+    // 그렇게 넘어갔고, 거기 섞인 프로젝트 착수 결재까지 승인돼 자율 실행이
+    // 시작됐다. 사람이 읽고 누르는 것을 전제한 방어가 사람이 없을 때 그냥
+    // 통과한 것이다. 그래서 **건수를 직접 적게** 한다 — 숫자를 맞춰 넣는
+    // 일은 우연히 일어나지 않는다. 서버도 같은 수를 받아 대조한다.
+    const typed = window.prompt(
+      `확인을 위해 승인할 건수를 숫자로 입력하세요: ${batchable.length}`);
+    if (String(typed ?? '').trim() !== String(batchable.length)) {
+      setMsg('건수가 맞지 않아 취소했습니다. 한 건씩 승인하셔도 됩니다.');
+      return;
+    }
     setBatching(true);
     setMsg('');
     const r = await api.batchApprove(batchable.map(x => x.id));
     setBatching(false);
-    if (!r?.ok) { setMsg('일괄 승인에 실패했습니다. 백엔드가 떠 있는지 보세요.'); return; }
+    if (!r?.ok) {
+      setMsg(r?.error ?? '일괄 승인에 실패했습니다. 백엔드가 떠 있는지 보세요.');
+      return;
+    }
     const skipped = (r.skipped ?? []).length;
     setMsg(`${(r.approved ?? []).length}건 승인했습니다.`
       + (skipped ? ` ${skipped}건은 건너뛰었습니다 — ${r.skipped[0].why}` : ''));
@@ -272,6 +302,28 @@ export default function ApprovalBox({ open: boxOpen, onToggle, focusId,
           })}
         </div>
       ))}
+
+      {boxOpen && recent.length > 0 && (
+        <div className="ceo-appr-audit">
+          <b>최근 처리</b>
+          {recent.map(r => (
+            <p key={r.id}>
+              <span className={r.status === 'approved' ? 'ok' : 'no'}>
+                {r.status === 'approved' ? '승인' : '거절'}
+              </span>
+              {' '}{(r.label ?? '').slice(0, 40)}
+              <span className="who">
+                {WHO[r.decided_by ?? ''] ?? r.decided_by ?? '기록 없음'}
+                {r.decided_at
+                  ? ` · ${new Date(r.decided_at * 1000).toLocaleString('ko-KR', {
+                      month: '2-digit', day: '2-digit',
+                      hour: '2-digit', minute: '2-digit', hour12: false })}`
+                  : ''}
+              </span>
+            </p>
+          ))}
+        </div>
+      )}
 
       {/* 진행 중인 프로젝트 목록은 아래 현황판이 맡는다. 여기서 또 보여
           주면 같은 것을 두 번 그리게 되고, 둘이 어긋나면 어느 쪽이 맞는지

@@ -18,6 +18,7 @@ const VirtualOffice = lazy(() => import('./pages/VirtualOffice'));
 const ProjectsTab = lazy(() => import('./components/ProjectsTab'));
 const NotesTab = lazy(() => import('./components/NotesTab'));
 const ApprovalBox = lazy(() => import('./components/ApprovalBox'));
+const LessonsBox = lazy(() => import('./components/LessonsBox'));
 import { api, AgentSummary, deptLabels, type ApprovalRow, type ProjectRow } from './api';
 import './styles/hermes.css';
 
@@ -86,7 +87,6 @@ async function fetchBriefing(): Promise<string> {
 }
 
 const QUICK_CHIPS = [
-  { icon: '🚀', label: '운영 시작 — AI 팀에게 오늘 일 시키기', dept: 'orchestration_dept' },
   { icon: '📊', label: '시장 트렌드 리포트 요청',              dept: 'research_dept' },
   { icon: '✍️', label: '콘텐츠 기획안 작성',                  dept: 'content_dept' },
   { icon: '💰', label: '매출·채널 현황 보고',                  dept: 'finance_dept' },
@@ -109,7 +109,14 @@ function MainScreen() {
   const [input,       setInput]       = useState('');
   const [dept,        setDept]        = useState('orchestration_dept');
   const [running,     setRunning]     = useState(false);
+  // 이름은 cycleStatus 그대로다 — 사무실·OpsMap·PixelOffice 등 여섯 곳이
+  // 이 문자열을 받아 '살아 있나' 를 판정한다. 뜻만 바뀌었다: 사장님이
+  // 버튼을 눌렀나 → **정말로 일이 돌고 있나**.
   const [cycleStatus, setCycleStatus] = useState<string>('stopped');
+  const [activity, setActivity] = useState<{
+    projects_running?: number; projects_waiting?: number;
+    tasks_busy?: number; approvals_pending?: number;
+  }>({});
   const [showSidebar, setShowSidebar] = useState(true);
   const [liveOpen,    setLiveOpen]    = useState(true);
   const [taskSummary, setTaskSummary] = useState({ pending: 0, in_progress: 0, done: 0, failed: 0 });
@@ -187,6 +194,8 @@ function MainScreen() {
   const [focusApproval, setFocusApproval] = useState<string | null>(null);
   const [focusProject, setFocusProject] = useState<string | null>(null);
   const [approvalOpen, setApprovalOpen] = useState(true);   // 결재함은 펼친 채 시작
+  // 배운 것은 접은 채 시작한다 — 지금 막고 있는 일이 아니라 배경이다.
+  const [lessonsOpen, setLessonsOpen] = useState(false);
   const [overrideTask, setOverrideTask] = useState<TaskItem | null>(null);
   const [showGridMenu, setShowGridMenu] = useState(false);
   const gridMenuRef = useRef<HTMLDivElement>(null);
@@ -286,7 +295,10 @@ function MainScreen() {
     const hc = setInterval(fetchHealth, 10000);
     const ts = setInterval(refreshTasks, 8000);
     const cs = setInterval(() => {
-      fetch('/api/cycle/status').then(r => r.json()).then(d => setCycleStatus(d.status)).catch(() => {});
+      fetch('/api/cycle/status')
+        .then(r => r.json())
+        .then(d => { setCycleStatus(d.status); setActivity(d); })
+        .catch(() => {});
     }, 5000);
     return () => { clearInterval(t); clearInterval(ag); clearInterval(hc); clearInterval(ts); clearInterval(cs); };
   }, [refreshTasks]);
@@ -332,7 +344,7 @@ function MainScreen() {
           if (recentNotifTimerRef.current) clearTimeout(recentNotifTimerRef.current);
           recentNotifTimerRef.current = setTimeout(() => setRecentNotif(null), 5000);
         } else if (isDone) {
-          const n: Notification = { id: `notif-${e.event_id}`, type: 'success', message: `사이클 완료 — ${e.sender}`, time: new Date(e.timestamp ?? Date.now()), read: false, link: () => setActiveTab('ceo') };
+          const n: Notification = { id: `notif-${e.event_id}`, type: 'success', message: `${e.sender} 보고`, time: new Date(e.timestamp ?? Date.now()), read: false, link: () => setActiveTab('ceo') };
           setNotifications(prev => {
             if (notifSeenRef.current.dismissed.includes(n.id)) return prev;   // 지운 것은 다시 만들지 않는다
             if (prev.some(x => x.id === n.id)) return prev;
@@ -604,28 +616,34 @@ function MainScreen() {
           ))}
         </div>
 
+        {/* 전에는 "🚀 운영 시작" 이 여기 있었다 — 누르면 1시간 주기로
+            하드코딩된 프롬프트가 돌며 근거 조회·검토·방법 절을 **전부
+            우회한** 산출물을 쏟아 냈다(2026-10-21 제거). 헤더에서 가장
+            눈에 띄는 자리라 비워 두지 않고, 지금 무슨 일이 있는지 말하고
+            그 일이 있는 탭으로 보내는 버튼으로 바꿨다. */}
         <button
           className="hs-start-btn"
-          style={cycleStatus === 'stopped' ? {} : { background: '#ef4444' }}
-          onClick={async () => {
-            if (cycleStatus !== 'stopped') {
-              await fetch('/api/cycle/stop', { method: 'POST' });
-              setCycleStatus('stopped');
-              pushMsg({ role: 'assistant', sender: '명테크 AI', text: '⏹ 운영 사이클을 중지했습니다.\n\n새 지시는 더 내려가지 않습니다. 이미 돌고 있던 프로젝트와 태스크는 그대로 끝까지 갑니다.' });
-              pushNotif('warning', '운영 사이클이 중지됐습니다');
+          style={cycleStatus === 'waiting' ? { background: '#f59e0b' }
+               : cycleStatus === 'executing' ? { background: '#14b8a6' } : {}}
+          title={cycleStatus === 'executing' ? '진행 중인 일을 봅니다'
+               : cycleStatus === 'waiting' ? '사장님 손이 필요한 것을 봅니다'
+               : '새 프로젝트를 시작합니다'}
+          onClick={() => {
+            // 사람을 기다리는 것이 있으면 그쪽이 먼저다 — 기계는 기다리면
+            // 되지만 사장님이 멈춰 있으면 아무것도 진행되지 않는다.
+            if (cycleStatus === 'waiting' && (activity.approvals_pending ?? 0) > 0
+                && (activity.projects_waiting ?? 0) === 0) {
+              setActiveTab('ceo');
             } else {
-              const r = await fetch('/api/cycle/run_once', { method: 'POST' });
-              const d = await r.json().catch(() => ({}));
-              setCycleStatus(d.status ?? 'analyzing');
-              // "사이클" 이 무엇인지 화면 어디에도 없었다. 헤더 버튼·시스템
-              // 현황·토스트 세 군데서 쓰면서 뜻은 아무도 알려 주지 않았다.
-              // 시작할 때 한 번 제대로 말한다.
-              pushMsg({ role: 'assistant', sender: '명테크 AI', text: '🚀 운영 사이클을 시작했습니다.\n\n사이클은 사장님이 하나하나 시키지 않아도 AI 팀이 스스로 한 바퀴 도는 것입니다.\n\n1. 분석 — 지금 회사 상태와 밀린 일을 훑습니다\n2. 작전 검토 — 무엇부터 할지 오케스트레이터가 정합니다\n3. 실행 — 각 부서에 지시가 내려갑니다\n\n되돌릴 수 없는 일(파일 저장·외부 실행)은 결재함으로 올라옵니다. 사장님이 승인하기 전에는 아무것도 나가지 않습니다.' });
-              pushNotif('success', '🚀 운영 사이클 시작 — 분석 중', () => setActiveTab('ceo'));
+              setActiveTab('projects');
             }
           }}
         >
-          {cycleStatus === 'stopped' ? '🚀 운영 시작' : cycleStatus === 'analyzing' ? '📊 분석 중…' : cycleStatus === 'strategizing' ? '🎯 작전 검토…' : cycleStatus === 'executing' ? '⚡ 실행 중…' : '⏹ 중지'}
+          {cycleStatus === 'executing'
+            ? `⚡ 일하는 중 ${(activity.projects_running ?? 0) + (activity.tasks_busy ?? 0)}`
+            : cycleStatus === 'waiting'
+            ? `✋ 사장님 차례 ${(activity.projects_waiting ?? 0) + (activity.approvals_pending ?? 0)}`
+            : '＋ 새 프로젝트'}
         </button>
 
         {/* ── 알림 벨 ── */}
@@ -844,6 +862,14 @@ function MainScreen() {
               onOpenProjects={() => setActiveTab('projects')} />
           </Suspense>
 
+          {/* 배운 것. 결재함 바로 아래가 맞는 자리다 — 둘 다 "사람이 알아야
+              이 시스템의 움직임을 이해할 수 있는 것" 이다. 교훈은 다음 계획을
+              바꾸므로, 보이지 않으면 그게 숨은 자율성이다. */}
+          <Suspense fallback={null}>
+            <LessonsBox open={lessonsOpen}
+                        onToggle={() => setLessonsOpen(v => !v)} />
+          </Suspense>
+
           {/* 현황판. 결재·프로젝트·태스크를 한 자로 잰다 — 셋은 생김새가
               달라도 사장님이 묻는 것은 같다: 지금 어디에 무엇이 걸려 있나. */}
           <div className="ceo-kanban">
@@ -930,9 +956,11 @@ function MainScreen() {
             ))}
             <div className="hs-status-row">
               <span className={`hs-dot ${cycleStatus !== 'stopped' ? 'amber' : 'gray'}`} />
-              <span className="hs-status-label">사이클</span>
+              <span className="hs-status-label">활동</span>
               <span className={`hs-status-badge ${cycleStatus !== 'stopped' ? 'run' : 'idle'}`}>
-                {cycleStatus === 'stopped' ? '대기' : cycleStatus === 'analyzing' ? '분석중' : cycleStatus === 'strategizing' ? '작전중' : cycleStatus === 'executing' ? '실행중' : cycleStatus}
+                {cycleStatus === 'stopped' ? '대기'
+                  : cycleStatus === 'executing' ? '진행중'
+                  : cycleStatus === 'waiting' ? '사장님 차례' : cycleStatus}
               </span>
             </div>
             <div className="hs-status-row">

@@ -28,6 +28,11 @@ WORKSPACE_ROOT = (Path(__file__).resolve().parent.parent / "workspace").resolve(
 FILE_MARK = "[파일]"
 
 import re as _re
+
+try:                     # 평평하게 부를 때 — server.py 의 `import projects`
+    import disk_guard
+except ImportError:      # 패키지로 부를 때 — `from shared_memory import projects`
+    from shared_memory import disk_guard
 _BACKTICKED = _re.compile(r"`([^`]+)`")
 _TRAILING_NOTE = _re.compile(r"\s*[（(][^)）]*[)）]\s*$")
 # ```lang 다음 줄부터 ``` 앞까지. lang 은 있어도 없어도 된다.
@@ -133,5 +138,8 @@ def write(rel: str, content: str) -> str:
     if len(data) > MAX_BYTES:
         raise ProposalError(f"파일이 너무 큽니다({len(data)} bytes, 한도 {MAX_BYTES})")
     p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(content, encoding="utf-8")
+    # 결재 승인 뒤에 불린다. 사유 없이 터지면 사장님은 "승인했는데
+    # 아무 일도 안 일어났다" 를 본다 — 가장 설명이 필요한 자리다.
+    with disk_guard.writing(p):
+        p.write_text(content, encoding="utf-8")
     return str(p.relative_to(WORKSPACE_ROOT)).replace("\\", "/")

@@ -20,6 +20,11 @@ import uuid
 from pathlib import Path
 from typing import Any
 
+try:                     # 평평하게 부를 때 — server.py 의 `import projects`
+    import disk_guard
+except ImportError:      # 패키지로 부를 때 — `from shared_memory import projects`
+    from shared_memory import disk_guard
+
 STORE_DIR = Path(__file__).resolve().parent / "store"
 STORE_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -51,9 +56,10 @@ def _save(collection: str, rows: list[dict]) -> None:
     # 같은 디렉터리에 임시 파일을 만들어 교체해야 os.replace 가 원자적이다.
     fd, tmp = tempfile.mkstemp(dir=str(STORE_DIR), suffix=".tmp")
     try:
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            json.dump(rows, f, ensure_ascii=False, indent=2)
-        os.replace(tmp, target)
+        with disk_guard.writing(target):
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                json.dump(rows, f, ensure_ascii=False, indent=2)
+            os.replace(tmp, target)
     except Exception:
         Path(tmp).unlink(missing_ok=True)
         raise

@@ -135,6 +135,15 @@ def archive(project: dict) -> list[str]:
         body = arts.get(d.get("id", ""), "")
         if not body or len(body.strip()) < 80:
             continue
+        # 위키로 가는 쪽에 방법 절이 **특히** 중요하다. 다음 프로젝트가
+        # 이걸 근거로 집어 쓰는데, "어떻게 나왔는지" 가 함께 가지 않으면
+        # 근거의 근거가 끊긴다 — 검토 3회 반려 끝에 나온 글과 한 번에
+        # 통과한 글이 위키에서 똑같아 보이게 된다.
+        try:
+            from shared_memory import provenance
+            body = provenance.attach(project, d, body)
+        except Exception as exc:  # noqa: BLE001
+            print(f"[experience] 방법 절 첨부 실패(무시): {exc}", file=sys.stderr)
         try:
             saved.append(kb.inject(
                 f"{title} — {d.get('title', '')}",

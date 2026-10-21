@@ -126,6 +126,63 @@ export interface ApprovalRow extends StoreItem {
   tier_why?: string;
   /** 3등급은 false — 일괄 승인에 넣지 않는다. 서버도 거부한다. */
   batchable?: boolean;
+  /** 누가 결정했는가 — ui | batch | cli | telegram | runner.
+   *  이것이 없어서 결재 9건이 왜 승인됐는지 사후에 밝힐 수 없었다. */
+  decided_by?: string;
+  decided_at?: number;
+}
+
+/** 막힌 프로젝트에서 건진 교훈.
+ *
+ *  완료된 프로젝트는 위키에 산출물로 쌓이고(experience), **막힌 것만** 여기
+ *  남는다. 반려 사유를 되풀이 단위로 묶어 두었다가, 같은 주제로 다시 시킬 때
+ *  계획 프롬프트에 넣는다 — 그래서 이 목록은 "다음 계획이 왜 그렇게 나왔나"
+ *  를 설명하는 입력이기도 하다. 보이지 않으면 숨은 자율성이 된다. */
+export interface LessonRow extends StoreItem {
+  project_id: string;
+  title: string;
+  idea?: string;
+  status?: string;
+  reason?: string;
+  steps: number;
+  rejections: number;
+  /** 되풀이된 지적만. 같은 말을 여러 번 적으면 프롬프트만 길어진다. */
+  recurring?: string[];
+  /** 스스로 범위를 좁히며 덜어낸 요구. */
+  dropped?: string[];
+  at?: string;
+}
+
+/** 사람이 검증할 주장 하나. 기계가 실제 논문을 찾아 둔 상태로 온다. */
+export interface VerifyClaim {
+  id: string;
+  /** 문서가 그 논문에 대해 뭐라고 적었는지 — 문맥째로. */
+  claim: string;
+  /** 근거 자료에 그 번호가 있었는지. 없으면 어디서 왔는지 물어야 한다. */
+  in_sources: boolean;
+  verdict?: string;
+  note?: string;
+  paper?: {
+    /** true 있음 · false arXiv 에 없음 · null **조회 못 함**.
+     *  셋을 섞으면 멀쩡한 논문을 "지어냈다" 고 표시하게 된다. */
+    found: boolean | null;
+    title?: string;
+    summary?: string;
+    published?: string;
+    url?: string;
+    error?: string;
+    cached?: boolean;
+  };
+}
+
+export interface VerifySummary {
+  checked: number;
+  total_cites: number;
+  counts: { ok: number; wrong: number; unsure: number };
+  by?: string;
+  at?: number;
+  wrong_ids?: string[];
+  unsure_ids?: string[];
 }
 
 /* ── 자율 프로젝트 ─────────────────────────────────────────────────────────
@@ -330,13 +387,50 @@ export const api = {
     ),
   /** 2등급까지 한 번에 승인한다. 3등급(바깥으로 나가는 것)은 ids 에 넣어도
    *  서버가 거부하고 skipped 로 돌려준다 — 화면을 믿지 않는다. */
+  /** 막힌 프로젝트에서 건진 교훈. 최신순. */
+  /** 산출물의 '방법' 절 — 어떤 모델이 무슨 설정으로, 무엇을 근거로,
+   *  몇 번 반려를 거쳐 나왔는지. RAISE 가 요구하는 공개를 화면에서도
+   *  볼 수 있어야 결재 전에 판단하실 수 있다. */
+  provenance: (pid: string, did: string) =>
+    safeJson<{ markdown: string; error?: string }>(
+      fetch(`${API_BASE}/provenance/${pid}/${did}`)
+    ),
+  /** 반복 실행 일관성 시험 — 같은 조건으로 한 번 더 쓰게 하고 견준다.
+   *  호출 하나를 쓰므로 사장님이 원할 때만 돈다. */
+  runConsistency: (pid: string, did: string) =>
+    safeJson<{ error?: string; shaky?: string[]; missed?: string[];
+               invented?: string[]; chars?: number[] }>(
+      fetch(`${API_BASE}/consistency/${pid}/${did}`, { method: 'POST' })
+    ),
+  /** 검증할 표본. arXiv 조회가 섞여 있어 처음 한 번은 느리다(결과는 캐시). */
+  verifyClaims: (pid: string, did: string) =>
+    safeJson<{ claims: VerifyClaim[]; total_cites: number; sampled: number;
+               is_sample: boolean; summary?: VerifySummary; error?: string }>(
+      fetch(`${API_BASE}/verify/${pid}/${did}`)
+    ),
+  /** 사람의 판정을 기록한다 — 누가 언제 했는지와 함께. */
+  saveVerdicts: (pid: string, did: string,
+                 verdicts: Record<string, { verdict: string; note?: string }>) =>
+    safeJson<VerifySummary & { error?: string }>(
+      fetch(`${API_BASE}/verify/${pid}/${did}`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ verdicts }),
+      })
+    ),
+  listLessons: () =>
+    safeJson<{ items: LessonRow[]; stats: { count: number; rejections: number } }>(
+      fetch(`${API_BASE}/lessons`)
+    ),
   batchApprove: (ids: string[]) =>
-    safeJson<{ ok: boolean;
+    safeJson<{ ok: boolean; error?: string;
                approved: { id: string; label: string; tier: number }[];
                skipped: { id: string; why: string; tier?: number; label?: string }[] }>(
       fetch(`${API_BASE}/approvals/batch`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ids }),
+        // confirm_count 는 사람이 건수를 직접 확인했다는 증거다. 서버가
+        // 수와 맞는지 보고 다르면 거부한다 — window.confirm 만으로는
+        // 자동화 브라우저를 막지 못했다(실제로 9건이 그렇게 넘어갔다).
+        body: JSON.stringify({ ids, confirm_count: ids.length }),
       })
     ),
   storeRemove: (collection: StoreCollection, id: string) =>

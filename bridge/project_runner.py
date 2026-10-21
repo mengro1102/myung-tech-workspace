@@ -25,6 +25,7 @@
 """
 from __future__ import annotations
 
+import hashlib  # 프롬프트 지문 — 같은 지문이면 같은 프롬프트다(RAISE 공개 요구)
 import json
 import os      # 로컬 대체 모델 이름을 환경변수로 덮어쓸 수 있게 한다
 import re
@@ -45,8 +46,22 @@ for _s in (sys.stdout, sys.stderr):
         pass
 
 import agent_dispatcher as dispatcher          # noqa: E402
-from shared_memory import (experience, lessons, notify, projects,  # noqa: E402
-                           secrets_guard, workspace_store)
+
+# 근거의 출처 종류(사람 노드 / 수집 논문 / 이전 AI 출력)를 가르는 분류기.
+# 지식베이스 모듈이 없는 환경에서도 집필 자체는 돌아야 하므로 감싼다 —
+# 없으면 예전처럼 "위키 N건" 으로 적힌다.
+try:
+    from knowledge_base import (origin_counts as kb_origin_counts,  # noqa: E402
+                                origin_label as kb_origin_label)
+except Exception:  # noqa: BLE001
+    def kb_origin_counts(paths):  # type: ignore[misc]
+        return {}
+
+    def kb_origin_label(paths):  # type: ignore[misc]
+        return ""
+from shared_memory import (archive, disk_guard, experience, lessons,  # noqa: E402
+                           notify, projects, provenance, secrets_guard,
+                           workspace_store)
 
 # 데이터 모듈의 것을 그대로 쓴다. 계획을 화면에서 고칠 수 있게 되면서
 # 서버도 같은 검증을 해야 했고, 목록이 두 벌이면 한쪽만 빠져나간다.
@@ -240,6 +255,27 @@ def _local_draft_model() -> tuple[str, str]:
     return dispatcher.choose_backend("orchestration_dept")
 
 
+# 호출 온도. 명시하지 않으면 프로바이더 기본값이 되고, 그러면 **무엇이
+# 쓰였는지 적을 수 없다** — RAISE 가 요구하는 공개와 재현성이 둘 다 막힌다.
+#
+# 초안 0.3: 같은 근거에서 같은 결론이 나오는 편이 서베이·분석에 맞다.
+# 검토 0.1: 같은 산출물에 매번 다른 점수가 나오면 점수가 의미를 잃는다.
+# 계획 0.4: 여기만 약간의 폭을 둔다 — 산출물을 쪼개는 방식은 하나가 아니다.
+TEMPERATURE = {"draft": 0.3, "review1": 0.1, "review2": 0.1,
+               "plan": 0.4, "narrow": 0.2}
+DEFAULT_TEMPERATURE = 0.3
+
+
+def _prompt_digest(system: str, user: str) -> str:
+    """프롬프트 지문. 같은 지문이면 같은 프롬프트다.
+
+    ISPOR 는 전체 프롬프트 공개를 요구하지만, 초안 프롬프트는 1만 6천 자이고
+    매 단계 저장하면 프로젝트 파일이 수 메가가 된다. 지문과 길이를 단계에
+    남기고 전문은 산출물당 한 번만 보관한다 — 재현성 주장에는 충분하다.
+    """
+    return hashlib.sha256((system + "\x00" + user).encode("utf-8")).hexdigest()[:12]
+
+
 def _ask(p: dict, dept: str, system: str, user: str,
          prefer_cloud: bool = False, max_tokens: int = 0,
          allow_local: bool = False) -> tuple[str, bool]:
@@ -261,9 +297,53 @@ def _ask(p: dict, dept: str, system: str, user: str,
     # 프로세스가 죽는 경우라 except/finally 로는 못 잡는다. 살아남는 자리는
     # 디스크뿐이고, 다음 스텝이 이 표시를 보고 뒤처리한다(_sweep_inflight).
     started = time.time()
+    phase = str(p.get("phase") or "")
+    temp = TEMPERATURE.get(phase, DEFAULT_TEMPERATURE)
+    # RAISE/ISPOR 가 요구하는 호출 조건. 다음 _log 가 단계에 옮겨 적는다.
+    p["last_call"] = {
+        "backend": backend, "model": model, "temperature": temp,
+        "max_tokens": max_tokens or 0,
+        "prompt": _prompt_digest(system, user),
+        "prompt_chars": len(system) + len(user),
+    }
     cur = projects.current(p) or {}
+
+    # ④ 근거 원문 스냅샷 + ① 전체 프롬프트 보관.
+    #
+    # 둘을 따로 만들려다 보니 하나였다 — `_sources()` 가 만든 근거 블록이
+    # user 프롬프트에 통째로 박히므로, 프롬프트를 남기면 "모델이 실제로 본
+    # 근거" 가 함께 남는다. 조회해 놓고 버린 것이 아니라 들어간 것 그대로다.
+    #
+    # 여기가 유일한 자리다. `_log` 로 미루면 system·user 는 이미 스코프
+    # 밖이고, 지문만 남아 "같은 지문이면 같은 프롬프트" 라고 말할 수는 있어도
+    # 그 프롬프트가 무엇이었는지는 끝내 알 수 없다.
+    _why = archive.record_call(p["id"], {
+        "at": started,
+        "phase": phase,
+        "dept": dept,
+        "did": cur.get("id", ""),
+        "deliverable": cur.get("title", ""),
+        "backend": backend,
+        "model": model,
+        "temperature": temp,
+        "max_tokens": max_tokens or 0,
+        "digest": _prompt_digest(system, user),
+        # 비밀값이 프롬프트에 섞여 들어갔을 경우를 대비해 한 번 거른다.
+        # 보관은 디스크에 오래 남으므로 여기가 가장 샐 만한 자리다.
+        "system": secrets_guard.mask(system),
+        "user": secrets_guard.mask(user),
+    })
+    if _why:
+        # 삼키지 않는다. 방법 절이 "그만큼은 전문이 없다" 고 적는다.
+        _fails = list(p.get("archive_fails") or [])[-19:]
+        _fails.append({"at": started, "phase": phase,
+                       "did": cur.get("id", ""), "why": _why})
+        p["archive_fails"] = _fails
+        print(f"[project] 프롬프트 보관 실패: {_why}", file=sys.stderr)
+
     projects.update(p["id"], {
         "budget": projects.spend(p),
+        **({"archive_fails": p["archive_fails"]} if _why else {}),
         "inflight": {
             "phase": p.get("phase") or "",
             "dept": dept,
@@ -277,7 +357,8 @@ def _ask(p: dict, dept: str, system: str, user: str,
             {"role": "user", "content": user}]
     try:
         try:
-            out = dispatcher.call_llm(backend, model, msgs, max_tokens=max_tokens)
+            out = dispatcher.call_llm(backend, model, msgs,
+                                      max_tokens=max_tokens, temperature=temp)
         except Exception as first:  # noqa: BLE001
             if not any(h in str(first).lower() for h in _QUOTA_HINTS):
                 raise
@@ -288,7 +369,8 @@ def _ask(p: dict, dept: str, system: str, user: str,
                 time.sleep(QUOTA_RETRY_WAIT)
                 try:
                     out = dispatcher.call_llm(backend, model, msgs,
-                                              max_tokens=max_tokens)
+                                              max_tokens=max_tokens,
+                                              temperature=temp)
                     break
                 except Exception as again:  # noqa: BLE001
                     if not any(h in str(again).lower() for h in _QUOTA_HINTS):
@@ -344,7 +426,11 @@ def _ask(p: dict, dept: str, system: str, user: str,
                           f"— {p['quota_note']}")
                     try:
                         out = dispatcher.call_llm(lb, lm, msgs,
-                                                  max_tokens=max_tokens)
+                                                  max_tokens=max_tokens,
+                                                  temperature=temp)
+                        p["last_call"] = {**p.get("last_call", {}),
+                                          "backend": lb, "model": lm,
+                                          "fallback": "router 막힘 → 로컬"}
                         projects.update(p["id"], {"inflight": None})
                         p["last_secs"] = round(time.time() - float(started), 1)
                         p["last_finish"] = getattr(dispatcher, "LAST_FINISH", "")
@@ -369,6 +455,18 @@ def _log(p: dict, phase: str, dept: str, ok: bool, note: str,
     steps = list(p.get("steps") or [])
     row = {"n": len(steps) + 1, "phase": phase, "dept": dept,
            "ok": ok, "score": score, "note": note[:400], "at": time.time()}
+
+    # 어느 산출물의 스텝인가. 없으면 **"어느 산출물이 몇 번 반려됐나" 를
+    # 물을 수 없다** — 실측으로 확인했다. 반려 68건 중 산출물 식별자가 붙은
+    # 것은 0건이었고, 그래서 "근거가 얇으면 더 지어내는가" 같은 질문을
+    # 제목 부분일치로 추측할 수밖에 없었다(그 추측은 믿을 게 못 된다).
+    #
+    # D1(병렬)·D2(스킬 합성)을 언젠가 판정하려면 이 한 칸이 있어야 한다.
+    # 기능을 하나 더 만드는 것보다 **다음 측정을 가능하게 하는 것**이 먼저다.
+    cur = projects.current(p) or {}
+    if cur.get("id"):
+        row["did"] = cur["id"]
+        row["deliverable"] = str(cur.get("title") or "")[:60]
     # 잘림은 품질 실패가 아니라 길이 실패다. 표시해 두면 안전망 계산과
     # 화면이 둘을 구분할 수 있다.
     if trunc:
@@ -386,6 +484,11 @@ def _log(p: dict, phase: str, dept: str, ok: bool, note: str,
     if secs > 0:
         row["secs"] = round(secs, 1)
         p.pop("last_secs", None)      # 다음 단계가 같은 값을 다시 쓰지 않게
+    # 호출 조건(모델·온도·프롬프트 지문). RAISE 가 요구하는 "공개" 의 알맹이다 —
+    # 이것이 없으면 산출물을 보고 "어떻게 나왔나" 를 물을 수 없다.
+    call = p.pop("last_call", None)
+    if call:
+        row["call"] = call
     steps.append(row)
     return steps
 
@@ -640,6 +743,7 @@ def _sources(p: dict, d: dict | None = None) -> str:
                 names += used
         except Exception as exc:  # noqa: BLE001
             print(f"[project] 연동 조회 실패(무시): {exc}", file=sys.stderr)
+    kb_origins: dict[str, int] = {}
     try:
         kb_block, paths = dispatcher.kb_context(idea)
         if kb_block:
@@ -648,10 +752,28 @@ def _sources(p: dict, d: dict | None = None) -> str:
             # 조회해 놓고 버리는 셈이고, "위키 5건" 이라고 적히지만 실제로
             # 모델이 본 것은 두 건이다. 화면이 거짓말을 하게 된다.
             parts.append(kb_block[:7000])
-            names.append(f"위키 {len(paths)}건")
+            # "위키 5건" 으로 뭉치면 그중 몇 건이 **이전 AI 출력**인지
+            # 알 수 없다. 조회는 raw/projects 도 함께 훑기 때문이다.
+            # 분류는 knowledge_base 가 한다(폴더 분류의 주인).
+            try:
+                names.append(kb_origin_label(paths) or f"위키 {len(paths)}건")
+            except Exception:  # noqa: BLE001
+                names.append(f"위키 {len(paths)}건")
+            # 방법 절이 종류별 건수를 그대로 쓸 수 있게 남긴다.
+            try:
+                kb_origins = kb_origin_counts(paths)
+            except Exception:  # noqa: BLE001
+                kb_origins = {}
     except Exception as exc:  # noqa: BLE001
         print(f"[project] 위키 조회 실패(무시): {exc}", file=sys.stderr)
     text = "\n\n".join(parts)
+
+    if key and kb_origins:
+        # 산출물마다 조회가 다르므로 종류별 건수도 산출물마다 다르다.
+        by_o = dict(p.get("origins_by_d") or {})
+        if by_o.get(key) != kb_origins:
+            by_o[key] = kb_origins
+            projects.update(p["id"], {"origins_by_d": by_o})
 
     if key:
         by_d = dict(p.get("sources_by_d") or {})
@@ -730,6 +852,13 @@ PLAN_SYSTEM = """당신은 명테크의 오케스트레이터입니다. 사장�
 산출물은 2~5개로 쪼개세요. **하나가 한국어 5000자 안에 완결될 수 있는 크기**여야
 합니다. 그보다 크면 글이 중간에서 끊기고, 끊긴 글은 검토를 통과하지 못합니다.
 '설계서와 코드와 운영 가이드' 처럼 성격이 다른 셋을 한 산출물에 묶지 마세요.
+
+아이디어가 깨져 있거나 뜻을 알 수 없으면 **계획을 세우지 마세요.** `title` 에
+"입력을 읽을 수 없습니다" 라고만 쓰고 `deliverables` 를 빈 배열로 두세요.
+조회된 자료로 그럴듯한 프로젝트를 만들어 내지 마세요 — 인코딩이 깨진
+아이디어에서 전혀 다른 사업 계획(「독일 BSI 자동 인증 지원 시스템」, 산출물
+4개)이 나와 사장님께 승인 요청까지 간 적이 있습니다. 근거가 된 것은 그때
+조회된 논문 한 편이었습니다.
 
 아래 JSON 만 출력하세요. 설명을 덧붙이지 마세요.
 
@@ -818,12 +947,14 @@ def _do_plan(p: dict) -> dict:
 
 
 # ── 2단계: 초안 ─────────────────────────────────────────────────────────
-def _do_draft(p: dict) -> dict:
-    pid = p["id"]
-    d = projects.current(p)
-    if d is None:
-        return _finish(p)
+def draft_prompt(p: dict, d: dict) -> tuple[str, str]:
+    """초안 한 번을 위한 (system, user) 프롬프트.
 
+    `_do_draft` 에서 떼어낸 것이다. 일관성 시험(consistency.py)이 **같은
+    프롬프트로** 다시 써 보려면 밖에서도 같은 것을 만들 수 있어야 한다.
+    복사해서 쓰면 두 벌이 되고, 둘이 어긋나는 순간 "같은 프롬프트로 다시
+    썼다" 는 전제가 깨져 시험 자체가 거짓이 된다.
+    """
     plan = p.get("plan") or {}
     prev = p.get("artifacts", {}).get(d["id"], "")
     feedback = p.get("last_feedback", "")
@@ -862,6 +993,24 @@ def _do_draft(p: dict) -> dict:
         user = user[:USER_PROMPT_CHARS] + "\n\n…(분량 상한으로 뒷부분 생략)"
     system += ("\n\n[근거 자료]에 없는 구체적 수치·색상 코드·시간·조회수·인용을 지어내지 "
                "마세요. 모르는 것은 '확인 필요' 라고 적으세요.")
+
+    # 지어내지 않는 것만으로는 모자란다. **빠진 것을 적게** 해야 한다.
+    #
+    # 근거 강제는 "없는 것을 쓰지 마라" 를 시킨다. 그런데 모델은 빈칸을
+    # 그냥 비워 두지 않고 있는 것으로 메운다 — 실제로 Federated Sketching
+    # LoRA, FORCE, AleXity 같은 이름을 지어내 열네 번 반려된 적이 있다.
+    # "없으면 없다고 적어라" 를 시키면 메울 이유가 사라진다.
+    #
+    # 자료가 없다는 사실 자체가 서베이에서는 발견이다. 그걸 적는 글이
+    # 빈칸을 메운 글보다 쓸모 있다.
+    system += ("\n\n[빠진 것 적기 — 반드시]\n"
+               "근거 자료에 그 주제의 내용이 없으면 '조회 범위에 이 주제의 "
+               "자료가 없었다' 고 한 줄 적고 넘어가세요. 비슷한 것으로 "
+               "대신하거나 그럴듯한 이름을 만들어 메우지 마세요 — 없다는 "
+               "사실 자체가 읽는 사람에게 쓸모 있는 정보입니다.\n"
+               "확인하지 못한 것, 자료가 서로 어긋나는 것도 그대로 적으세요. "
+               "매끄러운 글보다 어디까지가 확인된 것인지 분명한 글이 낫습니다.")
+
     system += ("\n\n본문을 다 쓴 뒤 **맨 끝에 두 줄**을 덧붙이세요. 본문과 분리되어 동료에게 "
                "대화로 전달되고, 산출물에는 들어가지 않습니다.\n"
                "[한마디] 검토자에게 — 무엇에 집중했고 어디를 봐 달라는지 한두 문장\n"
@@ -870,8 +1019,21 @@ def _do_draft(p: dict) -> dict:
                "본문 전체를 코드 블록으로 감싸지 마세요 — 문서는 마크다운 본문 그대로, "
                "코드는 코드 블록으로 쓰세요.")
 
+    return system, user
+
+
+def _do_draft(p: dict) -> dict:
+    pid = p["id"]
+    d = projects.current(p)
+    if d is None:
+        return _finish(p)
+
+    # 프롬프트 조립은 draft_prompt 가 한다 — 일관성 시험과 같은 함수를 쓴다.
+    system, user = draft_prompt(p, d)
+
     _emit(pid, d["dept"], f"초안 작성 — {d['title']}")
     # 초안만 로컬 대체를 허용한다(위 _ask 의 docstring 참고).
+
     out, exhausted = _ask(p, d["dept"], system, user,
                           max_tokens=DRAFT_MAX_TOKENS, allow_local=True)
     if exhausted:
@@ -1057,12 +1219,21 @@ def _finish(p: dict) -> dict:
     plan = p.get("plan") or {}
     projects.update(pid, {"status": "done", "phase": "draft", "pause_reason": ""})
 
+    # 완료 구간에서 실패한 것들. 전에는 stderr 로만 갔다 — 사장님은
+    # "완료" 와 빈 결재함을 동시에 보고 사유를 알 수 없었다.
+    finish_warnings: list[str] = []
+    queued = 0               # 결재함에 실제로 올라간 건수
+
     # 산출물을 파일 제안으로 올린다. 승인해야 디스크에 쓰인다 — 자율 실행이
     # 사람 모르게 파일을 만드는 일은 없어야 한다.
     for d in projects.deliverables(p):
         body = _unwrap(p.get("artifacts", {}).get(d["id"], ""))
         if not body:
             continue
+        # 방법 절을 붙여서 내보낸다. 파일로 저장된 산출물이 "어떻게 나왔는지"
+        # 없이 돌아다니면, 나중에 그걸 읽는 사람은 믿을지 말지를 판단할
+        # 재료가 없다 — RAISE 가 요구하는 공개가 거기서 끊긴다.
+        body = provenance.attach(projects.get(pid) or p, d, body)
         safe = re.sub(r"[^\w가-힣-]+", "_", d["title"]).strip("_")[:40] or d["id"]
         try:
             row = workspace_store.request_approval(
@@ -1073,8 +1244,14 @@ def _finish(p: dict) -> dict:
                 "file_path": f"projects/{pid}/{safe}.md",
                 "file_content": body,
             })
+            queued += 1
         except Exception as exc:  # noqa: BLE001
-            print(f"[project] 파일 제안 실패(무시): {exc}", file=sys.stderr)
+            # 디스크면 사유를 그대로 쓴다. disk_guard 가 이미 사람 말로
+            # 바꿔 둔 메시지라 다시 꾸밀 것이 없다.
+            # 결재 제안은 shared_memory/store 에 쓴다 — 그 볼륨을 묻는다.
+            why = disk_guard.explain(exc, workspace_store.STORE_DIR) or str(exc)
+            finish_warnings.append(f"결재함에 올리지 못했습니다 — {d['title']}: {why}")
+            print(f"[project] 파일 제안 실패: {exc}", file=sys.stderr)
 
     # 검토를 통과한 것만 위키에 쌓는다. 그 순간부터 다음 질문에서 근거로
     # 딸려 나온다 — 에이전트가 매번 백지에서 시작하지 않게 하는 유일한 장치다.
@@ -1082,7 +1259,18 @@ def _finish(p: dict) -> dict:
     try:
         archived = experience.archive(projects.get(pid) or p)
     except Exception as exc:  # noqa: BLE001
-        print(f"[project] 경험 축적 실패(무시): {exc}", file=sys.stderr)
+        # 이쪽은 실제로 넘어가도 되는 실패다 — 위키에 안 쌓여도 산출물은
+        # 멀쩡하다. 다만 "쌓았다" 고 말하지는 않는다.
+        # 경험 축적은 위키(knowledge_base.KB_PATH/raw/)에 쓴다. 명테크와
+        # 다른 볼륨일 수 있으므로 BASE_DIR 이 아니라 거기를 묻는다.
+        try:
+            import knowledge_base as _kb
+            _where = _kb.KB_PATH
+        except Exception:  # noqa: BLE001
+            _where = BASE_DIR
+        why = disk_guard.explain(exc, _where) or str(exc)
+        finish_warnings.append(f"위키에 쌓지 못했습니다 (산출물은 멀쩡합니다): {why}")
+        print(f"[project] 경험 축적 실패: {exc}", file=sys.stderr)
     if archived:
         _emit(pid, ORCHESTRATOR, f"위키에 축적 — {len(archived)}건")
 
@@ -1091,9 +1279,19 @@ def _finish(p: dict) -> dict:
         f"{plan.get('title', p['title'])}\n"
         f"산출물 {len(projects.deliverables(p))}개 · {len(p.get('steps') or [])}스텝\n\n"
         f"각 산출물이 부서 1차·오케스트레이터 2차 검토를 모두 통과했습니다.\n"
-        f"결재함에 파일 저장 제안으로 올려 뒀습니다."
+        + ("결재함에 파일 저장 제안으로 올려 뒀습니다."
+           if queued and not finish_warnings else
+           f"결재함에 {queued}건을 올렸습니다." if queued else
+           "결재함에는 아무것도 올리지 못했습니다.")
         + (f"\n위키에 {len(archived)}건을 쌓았습니다 — 다음 질문부터 검색됩니다."
-           if archived else ""))
+           if archived else "")
+        + (("\n\n⚠️ 다만 아래가 실패했습니다:\n"
+            + "\n".join(f"· {w}" for w in finish_warnings))
+           if finish_warnings else ""))
+    if finish_warnings:
+        projects.update(pid, {"finish_warnings": finish_warnings})
+        for w in finish_warnings:
+            _emit(pid, ORCHESTRATOR, f"⚠️ {w}")
     _emit(pid, ORCHESTRATOR, "프로젝트 완료")
     _say(pid, ORCHESTRATOR, "lead", ORCHESTRATOR, "lead", "전체 브리핑 — 프로젝트 완료",
          kind="brief",
@@ -1293,7 +1491,9 @@ def _close_approval(pid: str, status: str) -> None:
         for row in workspace_store.load("approvals"):
             if row.get("kind") == "project" and row.get("project_id") == pid \
                     and row.get("status") == "pending":
-                workspace_store.update("approvals", row["id"], {"status": status})
+                workspace_store.update("approvals", row["id"], {
+                    "status": status, "decided_by": "runner",
+                    "decided_at": time.time()})
     except Exception as exc:  # noqa: BLE001
         print(f"[project] 결재행 정리 실패(무시): {exc}", file=sys.stderr)
 
@@ -1308,8 +1508,13 @@ def approve(pid: str) -> dict | None:
          (projects.deliverables(p) or [{"dept": ORCHESTRATOR}])[0]["dept"], "maker",
          "사장님 착수 승인 — 시작합시다", kind="approve")
     _emit(pid, ORCHESTRATOR, "착수 승인 — 자율 실행 시작")
-    return projects.update(pid, {"status": "running", "phase": "draft",
-                                 "cursor": 0, "pause_reason": ""})
+    # 승인받은 계획의 지문을 박아 둔다 — 사전 등록(pre-registration)에
+    # 해당한다. 뒤에 계획이 바뀌면 방법 절이 "승인 시점과 다릅니다" 를
+    # 띄운다. 계획 수정은 착수 전에만 허용되므로, 달라졌다면 그 자체가 신호다.
+    return projects.update(pid, {
+        "status": "running", "phase": "draft", "cursor": 0, "pause_reason": "",
+        "plan_digest": provenance.plan_digest(p.get("plan") or {}),
+    })
 
 
 def resume(pid: str, steer: str = "") -> dict | None:

@@ -280,7 +280,7 @@ def _post_chat(url: str, body: dict, headers: dict, label: str) -> str:
 
 
 def call_llm(backend: str, model: str, messages: list[dict],
-             max_tokens: int = 0) -> str:
+             max_tokens: int = 0, temperature: float | None = None) -> str:
     """max_tokens 를 주지 않으면 프로바이더 기본값을 쓴다.
 
     기본값은 대개 4096 토큰이고, 한국어로는 7~8천 자쯤에서 잘린다. 실제로
@@ -288,7 +288,15 @@ def call_llm(backend: str, model: str, messages: list[dict],
     리뷰어는 "코드가 잘려 실행 불가"라고 반려했고, 다시 써도 같은 자리에서
     또 잘렸다. 모델이 못 쓰는 게 아니라 자리가 없었던 것이다.
     """
-    extra = {"max_tokens": max_tokens} if max_tokens else {}
+    extra: dict = {"max_tokens": max_tokens} if max_tokens else {}
+    # temperature 를 **명시해서** 보낸다.
+    #
+    # 전에는 아예 보내지 않아 프로바이더 기본값에 맡겼다. 그러면 같은
+    # 프롬프트로 다시 돌려도 같은 글이 나온다는 보장이 없고, 무엇이
+    # 쓰였는지 기록할 수도 없다 — RAISE 가 요구하는 "공개" 와 재현성이
+    # 둘 다 불가능해진다. 부르는 쪽이 정하고, 그 값을 단계 기록에 남긴다.
+    if temperature is not None:
+        extra["temperature"] = float(temperature)
     if backend == "router":
         return _post_chat(f"{ROUTER_BASE_URL}/chat/completions",
                           {"model": model, "messages": messages, "stream": False, **extra},

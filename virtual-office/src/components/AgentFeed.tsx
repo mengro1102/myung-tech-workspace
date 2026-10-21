@@ -139,7 +139,7 @@ export default function AgentFeed({ compact }: { compact?: boolean }) {
         <div className="af-body">
           {events.length === 0 ? (
             <div className="af-empty">
-              {live ? '대기 중 — "🚀 운영 시작"을 누르면 에이전트 상호작용이 흐릅니다.'
+              {live ? '대기 중 — 프로젝트 탭에서 일을 시키면 에이전트 대화가 여기 흐릅니다.'
                     : '백엔드(server.py) 미연결 — 포트 9000 확인'}
             </div>
           ) : events.map(ev => (

@@ -12,14 +12,36 @@ interface FeedEvent {
   payload: string; timestamp?: string;
 }
 
+interface DiskVolume {
+  mount: string;
+  used_by: string[];
+  free_gb: number | null;
+  total_gb: number | null;
+  used_gb?: number;
+  percent: number | null;
+  level: 'ok' | 'low' | 'critical' | 'unknown';
+  error?: string;
+}
+
 interface SystemStats {
   cpu_percent: number;
   mem_percent: number;
   mem_used_gb: number;
   mem_total_gb: number;
+  /** ROOT 가 사는 볼륨 하나뿐이다(= D:). 남겨 두지만 게이지는 volumes 를 쓴다. */
   disk_percent?: number;
+  /** **작업** 볼륨만, 빠듯한 쪽부터. volumes[0] 이 우리 일을 먼저 막을 볼륨. */
+  volumes?: DiskVolume[];
+  /** 윈도우가 사는 볼륨. 명테크는 여기에 쓰지 않으므로 칸이 다르다. */
+  disk_system?: DiskVolume | null;
+  disk_level?: 'ok' | 'low' | 'critical' | 'unknown';
+  disk_notes?: string[];
   error?: string;
 }
+
+const DISK_COLOR: Record<string, string> = {
+  ok: '#FB923C', low: '#FBBF24', critical: '#F87171', unknown: '#94A3B8',
+};
 
 const DEPT_META: Record<string, { icon: string; color: string; border: string; role: string; desc: string }> = {
   orchestration_dept: { icon: '🧠', color: '#8B5CF6', border: 'rgba(139,92,246,0.4)', role: 'Chief Orchestrator', desc: '전체 에이전트 워크플로우를 조정하고 태스크를 배분합니다.' },
@@ -182,6 +204,13 @@ export default function AgentManageTab({ agents, onDeploy, onDeptChat }: Props) 
 
   const agentGaugeValue = agents.length > 0 ? Math.round(activeCount / agents.length * 100) : 0;
 
+  // 서버가 빠듯한 쪽부터 정렬해 보내므로 [0] 이 가장 급한 볼륨이다.
+  // 정렬을 여기서 다시 하지 않는다 — 두 곳에서 정렬하면 한쪽만 고치고
+  // 화면과 맹비서가 다른 볼륨을 가리키게 된다.
+  const tightDisk = stats?.volumes?.[0] ?? null;
+  const sysDisk = stats?.disk_system ?? null;
+  const diskNotes = stats?.disk_notes ?? [];
+
   return (
     <div className="am-root">
       <div className="am-bg-deco" />
@@ -307,7 +336,24 @@ export default function AgentManageTab({ agents, onDeploy, onDeptChat }: Props) 
               { label: 'CPU 부하', value: stats?.cpu_percent ?? 0, color: '#8B5CF6', suffix: '%' },
               { label: '메모리', value: stats?.mem_percent ?? 0, color: '#2DD4BF',
                 sub: stats ? `${stats.mem_used_gb}GB / ${stats.mem_total_gb}GB` : '' },
-              { label: '디스크', value: stats?.disk_percent ?? 0, color: '#FB923C', suffix: '%' },
+              // 가장 빠듯한 볼륨을 그린다. 전에는 D: 만 봤고, 그래서 C: 가
+              // 92.4% 일 때 게이지는 48% 를 가리켰다 — 안심시키는 숫자였다.
+              {
+                label: tightDisk ? `디스크 ${tightDisk.mount.replace(/[\\/]+$/, '')}` : '디스크',
+                value: tightDisk?.percent ?? stats?.disk_percent ?? 0,
+                color: DISK_COLOR[tightDisk?.level ?? 'ok'] ?? '#FB923C',
+                suffix: '%',
+                sub: tightDisk?.free_gb != null ? `${tightDisk.free_gb}GB 남음` : '',
+              },
+              // 시스템 볼륨은 따로 칸을 준다. 게이지 하나에 섞으면 늘 92% 인
+              // C: 가 작업 볼륨을 가려 버린다 — 바로 그게 처음의 버그였다.
+              ...(sysDisk && sysDisk.percent != null ? [{
+                label: `시스템 ${sysDisk.mount.replace(/[\\/]+$/, '')} (명테크 미사용)`,
+                value: sysDisk.percent,
+                color: DISK_COLOR[sysDisk.level] ?? '#94A3B8',
+                suffix: '%',
+                sub: sysDisk.free_gb != null ? `${sysDisk.free_gb}GB 남음` : '',
+              }] : []),
               { label: '에이전트 가동률', value: agentGaugeValue, color: '#F87171', suffix: '%' },
             ].map(bar => (
               <div key={bar.label}>
@@ -320,6 +366,20 @@ export default function AgentManageTab({ agents, onDeploy, onDeptChat }: Props) 
                 </div>
               </div>
             ))}
+            {diskNotes.length > 0 && (
+              <div className="am-disk-warn">
+                {diskNotes.map((n, i) => (
+                  <div key={i} className="am-disk-warn-row">⚠️ {n}</div>
+                ))}
+              </div>
+            )}
+            {tightDisk && tightDisk.level === 'unknown' && (
+              <div className="am-disk-warn">
+                <div className="am-disk-warn-row">
+                  ⚠️ {tightDisk.mount} 조회 못 함 — 여유가 있다는 뜻이 아닙니다
+                </div>
+              </div>
+            )}
           </div>
           <button className="am-optimize-btn"
             onClick={() => fetch('/api/system/stats').then(r => r.json()).then(d => setStats(d)).catch(() => {})}>

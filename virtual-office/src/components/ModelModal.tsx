@@ -60,10 +60,20 @@ export default function ModelModal({ onClose, globalModel, onGlobalModelChange }
               fontSize: 10, padding: '2px 8px', borderRadius: 10,
               background: 'var(--green-dk)', border: '1px solid var(--green)',
               color: 'var(--green)'
-            }}>사용 중</span>
+            }}>오케스트만</span>
           </div>
-          <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 4 }}>
-            Ollama via Windows host · GPU 가속 (RTX 3090)
+          {/* "사용 중" 이라고만 적혀 있었다. 실측하면 이 모델이 가는 곳은
+              5개 부서 중 하나뿐이다 —
+                research/dev/content/finance → router(auto:hermes)  ← 이 값 무시
+                orchestration                → ollama(이 값)
+              "사용 중" 은 전체에 쓰인다고 믿게 만든다. 범위를 적는다. */}
+          <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 4, lineHeight: 1.6 }}>
+            Ollama via Windows host · GPU 가속 (RTX 3090)<br />
+            <span style={{ color: 'var(--amber, #FBBF24)' }}>
+              이 모델은 <b>오케스트레이션 부서에만</b> 적용됩니다.
+            </span>{' '}
+            학술연구·개발·콘텐츠·금융투자는 라우터(<code>auto:hermes</code>)가
+            무료 경로를 돌려 쓰므로 여기서 고른 값을 쓰지 않습니다.
           </div>
         </div>
 

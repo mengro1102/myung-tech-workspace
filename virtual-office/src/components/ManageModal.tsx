@@ -203,6 +203,10 @@ export default function ManageModal({ onClose, agentCount, globalModel, onOpenTe
   const [tab,         setTab]         = useState<Tab>('대시보드');
   const [toast,       setToast]       = useState('');
   const [connKeys,    setConnKeys]    = useState<Record<string, boolean>>({});
+  const [notifyState, setNotifyState] = useState<{
+    primary?: string | null;
+    discord?: { ready?: boolean }; telegram?: { ready?: boolean };
+  }>({});
   const [connHints,   setConnHints]   = useState<Record<string, string>>({});
   const [ytOauth,     setYtOauth]     = useState<{ connected: boolean; has_client: boolean } | null>(null);
   const [ytBusy,      setYtBusy]      = useState(false);
@@ -282,6 +286,7 @@ export default function ManageModal({ onClose, agentCount, globalModel, onOpenTe
   /* 저장된 키 로드 */
   useEffect(() => {
     fetch('/api/config/load').then(r => r.json()).then(d => { setConnKeys(d.keys ?? {}); setConnHints(d.hints ?? {}); }).catch(() => {});
+    fetch('/api/notify/status').then(r => r.json()).then(setNotifyState).catch(() => {});
     api.ytOauthStatus().then(d => d && setYtOauth(d));
     void refreshIntegrations();
   }, [refreshIntegrations]);
@@ -475,15 +480,17 @@ export default function ManageModal({ onClose, agentCount, globalModel, onOpenTe
     showToast('✅ 서비스 등록됨 — 에이전트가 이제 이 서비스를 압니다');
   };
 
-  /* 승인 큐 — 아직 에이전트가 결재를 올리는 경로가 없다. 이 버튼은 큐가
-   * 어떻게 보이는지 확인하는 용도다(이름 그대로 '테스트'). */
-  const addSampleApproval = () => {
-    approvalStore.add({
-      label: `[샘플] 광고 집행 ₩250,000 결제 승인 요청 — ${new Date().toLocaleTimeString('ko-KR')}`,
-      status: 'pending',
-      department: '',
-    });
-  };
+  /* "큰 결제 테스트" 버튼이 여기 있었다 — 가짜 ₩250,000 결제 건을 진짜
+   * 결재함에 넣는 버튼이다(2026-10-21 제거).
+   *
+   * 위에 있던 주석은 "아직 에이전트가 결재를 올리는 경로가 없다" 였고
+   * 9월엔 맞았다. 지금은 project_runner._finish() 가 파일 저장 제안을
+   * 올리고 실제로 대기 건이 있다. 게다가 이 버튼은 kind 를 주지 않아
+   * 가짜 건이 **1등급(내부·일괄승인 가능)** 으로 떨어졌다 — 결제처럼
+   * 보이는 항목이 가장 낮은 등급에 앉는 셈이었다.
+   *
+   * 결재함을 시험하려면 테스트_시나리오.md 의 B-4 를 쓰면 된다. 실제
+   * 결재 건으로 등급 묶음·일괄승인 건수 확인까지 같은 것을 본다. */
 
   /* 태스크 추가 */
   const addTask = async () => {
@@ -584,8 +591,16 @@ export default function ManageModal({ onClose, agentCount, globalModel, onOpenTe
                 { icon: '🧠', label: connKeys.GITHUB_TOKEN ? '연결됨' : '미연결', sub: '지식 노트' },
                 { icon: '📦', label: String(services.length), sub: '등록 서비스' },
                 { icon: '💳', label: connKeys.PAYPAL_CLIENT_ID ? '연결됨' : '미연결', sub: 'PayPal' },
-                { icon: '📱', label: connKeys.TELEGRAM_BOT_TOKEN ? '연결됨' : '미연결', sub: '텔레그램' },
-                { icon: '💻', label: globalModel, sub: '모델' },
+                // 주 알림 채널은 디스코드다(notify.primary = discord). 전에는
+                // 텔레그램만 보여 줘서 화면이 틀린 채널을 보고하고 있었다.
+                // 키 유무로 추정하지 않는다 — 디스코드 토큰은 명테크가 아니라
+                // hermes 의 .env 에 살아서 connKeys 에 아예 없다. notify 가
+                // 실제 준비 상태와 주 채널을 안다.
+                { icon: '💬', label: notifyState.discord?.ready ? (notifyState.primary === 'discord' ? '주 채널' : '보조') : '미연결', sub: '디스코드' },
+                { icon: '📱', label: notifyState.telegram?.ready ? (notifyState.primary === 'telegram' ? '주 채널' : '보조') : '미연결', sub: '텔레그램' },
+                // global_model 은 5개 부서 중 오케스트레이션 하나에만 간다.
+                // 나머지 넷은 라우터(auto:hermes)라 이 값을 무시한다.
+                { icon: '💻', label: globalModel, sub: '모델 (오케스트만)' },
               ].map((tile, i) => (
                 <div key={i} style={{
                   background: 'var(--bg3)', border: '1px solid var(--border)',
@@ -656,11 +671,9 @@ export default function ManageModal({ onClose, agentCount, globalModel, onOpenTe
             <div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
                 <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)' }}>✅ 승인 큐 — 에이전트가 중요한 일 전에 결재 요청</span>
-                <button style={{
-                  marginLeft: 'auto', padding: '4px 12px',
-                  background: 'transparent', border: '1px solid var(--border)',
-                  borderRadius: 6, color: 'var(--muted)', fontSize: 11, cursor: 'pointer',
-                }} onClick={addSampleApproval}>큰 결제 테스트</button>
+                <span style={{
+                  marginLeft: 'auto', fontSize: 11, color: 'var(--muted)',
+                }}>등급·일괄승인은 CEO 룸 결재함에서</span>
               </div>
               {approvals.length === 0 ? (
                 <div className="mem-beta-note" style={{ margin: 0 }}>

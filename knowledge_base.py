@@ -73,8 +73,90 @@ NODE_DIRS = ("concepts", "entities", "comparisons")
 # **검색에는 함께 넣는다** — 넣지 않으면 쌓아도 아무도 못 읽는다.
 EXPERIENCE_DIRS = ("raw/projects",)
 
+# 크론이 매일 모으는 논문·문헌(collect_references.py · scholar_alerts.py).
+#
+# 여기 빠져 있었다. 뺀 사유는 코드 어디에도 없고, 바로 위 EXPERIENCE_DIRS
+# 주석이 쓴 원칙이 그대로 적용된다 — "검색에는 함께 넣는다. 넣지 않으면
+# 쌓아도 아무도 못 읽는다." glossary 는 지금 0건이지만 같은 성격이라 함께 둔다.
+#
+# **효과 범위를 실측했다. 처음 생각보다 좁다.**
+#
+# 넣기 전 `search("PPO", limit=30)` 이 30건 전부 concepts 를 돌려주길래
+# "논문 89건은 어휘 검색에서 0건" 이라고 단정했다. 틀렸다 — 두 가지가
+# 섞여 있었다:
+#
+#   1. `search()` 는 SEARCH_DIRS 를 **순서대로** 훑다가 limit 을 채우면 즉시
+#      반환한다. concepts 가 먼저라 작은 limit 에서는 그것만 나온다.
+#      limit=200 으로 올리면 references 21건이 나온다. 이건 별개의 결함이고
+#      아래 `search` 주석에 적어 뒀다.
+#   2. 근거 조회(`retrieve`)는 SEARCH_DIRS 가 아니라 `load_graph()` 에서
+#      후보를 뽑고, **그 그래프에는 references 89건이 이미 들어 있었다.**
+#      그래서 이 변경 전후로 retrieve 결과가 **전혀 바뀌지 않았다**
+#      (질의 5개 실측, 출처 구성 동일).
+#
+# 즉 "AI 출력은 좌석을 받고 논문은 못 받는다" 는 내 진단은 **틀렸다.**
+# 이 변경이 실제로 고치는 것은 `search()`·`list_nodes()` 의 도달 범위
+# 하나다 — 그 전에는 어떤 limit 으로도 references 에 닿을 수 없었다
+# (`search("Schulman")` 이 지금은 references 8건을 돌려준다).
+REFERENCE_DIRS = ("references", "glossary")
+
 # 검색·검색씨앗이 훑는 범위.
-SEARCH_DIRS = NODE_DIRS + EXPERIENCE_DIRS
+SEARCH_DIRS = NODE_DIRS + REFERENCE_DIRS + EXPERIENCE_DIRS
+
+# 근거 자료의 '출처 종류'. 방법 절이 "위키 5건" 이라고만 적으면 그 5건 중
+# 무엇이 사람이 쓴 것이고 무엇이 **이전 AI 출력**인지 알 수 없다. 실측하면
+# 섞여 있다 — "강화학습 정책 최적화 PPO" 질의에서 6건 중 2건이
+# raw/projects 였다.
+#
+# 분류를 여기 두는 이유: 폴더 분류의 주인이 이 파일이다. 쓰는 쪽에 두면
+# 폴더가 늘었을 때 두 곳을 고쳐야 하고, 한 곳만 고치면 조용히 어긋난다.
+ORIGIN_KO = {
+    "node": "사람이 정리한 노드",
+    "reference": "수집한 논문·문헌",
+    "experience": "이전 프로젝트 산출물(AI 출력)",
+    "injected": "직접 넣은 자료",
+    "unknown": "분류 불명",
+}
+
+
+def origin_of(path: str) -> str:
+    """경로 하나의 출처 종류. `concepts/ppo.md` · `raw/projects/x.md` 형식."""
+    p = (path or "").replace("\\", "/").lstrip("./")
+    if p.startswith("raw/projects/"):
+        return "experience"
+    if p.startswith("raw/"):
+        return "injected"
+    head = p.split("/", 1)[0]
+    if head in NODE_DIRS:
+        return "node"
+    if head in ("references", "glossary"):
+        return "reference"
+    return "unknown"
+
+
+def origin_counts(paths: list[str]) -> dict[str, int]:
+    """출처 종류별 건수. 0 인 종류는 넣지 않는다 — 안 쓰인 종류를
+    "0건" 으로 적으면 읽는 사람이 세어야 할 것이 늘기만 한다."""
+    out: dict[str, int] = {}
+    for p in paths or []:
+        k = origin_of(p)
+        out[k] = out.get(k, 0) + 1
+    return out
+
+
+def origin_label(paths: list[str]) -> str:
+    """사람이 읽을 한 줄. 예: "위키 6건 (노드 3 · 논문 1 · 이전 산출물 2)".
+
+    `experience` 가 섞였는지가 핵심이라 그 이름만은 줄이지 않는다.
+    """
+    c = origin_counts(paths)
+    if not c:
+        return ""
+    short = {"node": "노드", "reference": "논문", "experience": "이전 산출물",
+             "injected": "직접 넣음", "unknown": "분류 불명"}
+    order = ["node", "reference", "injected", "experience", "unknown"]
+    parts = [f"{short[k]} {c[k]}" for k in order if c.get(k)]
+    return f"위키 {sum(c.values())}건 ({' · '.join(parts)})"
 GRAPH_PATH = KB_PATH / "graph" / "graph.json"
 SCHEMA_PATH = KB_PATH / "SCHEMA.md"
 INDEX_PATH = KB_PATH / "index.md"
@@ -124,6 +206,17 @@ def search(pattern: str, *, limit: int = 50) -> list[tuple[str, str]]:
     """노드 본문 단순 텍스트 검색. (relpath, 매칭 라인) 튜플 목록 반환.
 
     어휘 기반 1차 검색(시맨틱/벡터 검색은 향후 확장 항목 — 리뷰 리포트 P3 참조).
+
+    **알려진 결함 — limit 이 폴더 순서를 편든다.** 아래 루프는 SEARCH_DIRS 를
+    순서대로 훑다가 limit 을 채우면 그 자리에서 반환한다. concepts 가 먼저라
+    `search("PPO", limit=30)` 은 30건 전부 concepts 를 돌려준다. limit=200
+    에서야 references 21건이 보인다. 즉 **기본 limit 으로는 뒤쪽 폴더가
+    사실상 보이지 않는다.**
+
+    고치려면 폴더별로 고르게 걷거나(라운드로빈) 전부 모은 뒤 자르면 되는데,
+    후자는 limit 이 막으려던 비용을 되살린다. 근거 조회(`retrieve`)는 이
+    함수가 아니라 `load_graph()` 로 후보를 뽑으므로 **근거의 구성에는 영향이
+    없다** — 실측으로 확인했다. 그래서 급하지 않다고 보고 남겨 둔다.
     """
     _require()
     needle = pattern.lower()

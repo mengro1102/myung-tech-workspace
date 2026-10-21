@@ -2325,6 +2325,68 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
   transition: width 0.6s ease;
   box-shadow: 0 0 6px currentColor;
 }
+/* 디스크 경고. 평소에는 렌더되지 않는다 — 늘 떠 있으면 읽지 않게 되고,
+   그러면 정작 빠듯해진 날에도 안 읽는다. 기존 게이지 색(--warn 계열)과
+   맞추되 배경을 깔아 게이지 묶음과 구분한다. */
+/* 지식 네트워크 — 조회 방식. 숫자만 보여 주면 그 숫자가 검색에
+   어떻게 쓰이는지 알 수 없다. 특히 '이전 AI 출력이 섞인다' 는 사실은
+   경고 색으로 세운다. */
+.mem-retrieval {
+  margin: 0 20px 12px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--bg2);
+  border: 1px solid var(--border);
+}
+.mem-retrieval-title {
+  font-size: 10px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin-bottom: 6px;
+}
+.mem-retrieval-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.mem-retrieval-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+  color: var(--text);
+}
+.mem-retrieval-row b { font-variant-numeric: tabular-nums; }
+.mem-ret-warn { color: #FBBF24; }
+.mem-retrieval-note {
+  margin-top: 8px;
+  font-size: 10px;
+  line-height: 1.6;
+  color: var(--muted);
+  word-break: keep-all;
+}
+.mem-retrieval-note code {
+  font-size: 10px;
+  padding: 1px 4px;
+  border-radius: 4px;
+  background: var(--bg3);
+}
+.am-disk-warn {
+  margin-top: 10px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: rgba(248, 113, 113, 0.10);
+  border: 1px solid rgba(248, 113, 113, 0.28);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.am-disk-warn-row {
+  font-size: 11px;
+  line-height: 1.5;
+  color: #FCA5A5;
+  word-break: keep-all;
+}
 .am-optimize-btn {
   padding: 10px;
   border-radius: 10px;
@@ -4514,4 +4576,170 @@ button.pj-deliv-item[aria-expanded="true"] { background: var(--glass-hi); border
   flex: none; padding: 1px 6px; border-radius: 5px; font-size: 10.5px;
   background: var(--glass-bg); border: 1px solid var(--border); color: var(--muted);
   font-variant-numeric: tabular-nums;
+}
+
+/* ── 배운 것 (교훈) ──────────────────────────────────────────────────────
+   `lessons.py` 가 조용히 쌓고 있었는데 볼 수 있는 화면이 없었다.
+
+   두 가지로 나빴다. 하나는 "이 시스템이 배우고 있다" 를 확인할 길이 없다는
+   것 — 작동하는지 알 수 없는 기능은 믿을 근거가 없다. 다른 하나는 교훈이
+   **다음 계획을 바꾼다**는 것이다. 계획이 왜 그렇게 나왔는지 설명하는 입력이
+   화면에 없으면 그게 숨은 자율성이다.
+
+   결재함과 같은 모양으로 둔다 — 둘 다 "사람이 알아야 움직임을 이해할 수
+   있는 것" 이라 같은 자리에 같은 꼴로 있는 편이 읽힌다. */
+.ceo-lessons { display: flex; flex-direction: column; gap: 9px; padding: 0 16px 14px; }
+
+.ceo-lesson-why {
+  margin: 0; padding: 8px 11px; border-radius: 8px;
+  font-size: 11px; line-height: 1.6; color: var(--muted);
+  background: var(--bg3); border: 1px dashed var(--border);
+}
+
+.ceo-lesson-list { display: flex; flex-direction: column; gap: 8px; }
+.ceo-lesson-card {
+  padding: 10px 12px; border-radius: 10px;
+  background: var(--bg3); border: 1px solid var(--border);
+  border-left: 3px solid #a78bfa;     /* 결재(분홍·빨강)와 구분되는 색 */
+}
+.ceo-lesson-head {
+  display: flex; align-items: center; gap: 8px; width: 100%;
+  background: none; border: 0; padding: 0; cursor: pointer; text-align: left;
+  color: inherit; font: inherit;
+}
+.ceo-lesson-title { flex: 1; min-width: 0; font-size: 12.5px; font-weight: 600; }
+.ceo-lesson-meta {
+  flex: none; font-size: 10.5px; color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.ceo-lesson-chev { flex: none; font-size: 10px; color: var(--muted); }
+
+/* 되풀이된 지적. 접힌 상태에서도 첫 줄은 보인다 — 무엇 때문에 막혔는지가
+   이 카드의 요점이라, 숨기면 카드가 비어 보인다. */
+.ceo-lesson-item {
+  margin: 7px 0 0; font-size: 11.5px; line-height: 1.6;
+  color: var(--text); word-break: break-word;
+}
+.ceo-lesson-dropped {
+  margin-top: 9px; padding: 8px 10px; border-radius: 7px;
+  font-size: 11px; line-height: 1.6;
+  background: rgba(248, 113, 113, .08); border: 1px solid rgba(248, 113, 113, .25);
+}
+.ceo-lesson-dropped b { display: block; margin-bottom: 4px; color: #fca5a5; }
+.ceo-lesson-dropped p { margin: 3px 0 0; }
+.ceo-lesson-reason, .ceo-lesson-idea {
+  margin: 8px 0 0; font-size: 10.5px; line-height: 1.6; color: var(--muted);
+}
+
+/* ── 산출물의 '방법' 절 ──────────────────────────────────────────────────
+   결재(파일 저장)를 누르기 전에 "이게 어떻게 나왔나" 를 보는 자리다.
+   감독할 사람에게 판단 재료가 없으면 감독은 형식이 된다 — RAISE 1(공개)과
+   2(사람의 감독)가 만나는 지점. */
+.pj-methods {
+  margin: 8px 0 0; padding: 12px 14px; border-radius: 10px;
+  background: var(--bg3); border: 1px solid var(--border);
+  border-left: 3px solid #60a5fa;
+  font-size: 12px; line-height: 1.7;
+  max-height: 460px; overflow: auto;
+}
+.pj-methods h2 { font-size: 13.5px; margin: 0 0 8px; }
+.pj-methods h3 { font-size: 12.5px; margin: 14px 0 6px; color: #93c5fd; }
+.pj-methods table { font-size: 11px; }
+.pj-methods blockquote {
+  margin: 8px 0; padding: 7px 10px; border-radius: 7px;
+  background: var(--glass-bg); border-left: 2px solid var(--border);
+  color: var(--muted);
+}
+.pj-methods-wait { margin: 0; font-size: 11.5px; color: var(--muted); }
+
+/* ── 최근 처리 내역 (승인 주체) ──────────────────────────────────────────
+   결재 9건이 승인 주체 기록 없이 승인된 일이 있었다. 추적했으나 밝히지
+   못했다 — 기록이 없었기 때문이다.
+
+   이제 남기고, 남긴 것을 **보여 준다.** 기록만 하고 화면에 없으면 사후에
+   누가 들여다볼 일이 생기지 않는다. RAISE 3(최종 책임은 사람)은 "누가
+   결정했는지 말할 수 있을 때" 만 성립한다. */
+.ceo-appr-audit {
+  margin-top: 10px; padding: 9px 12px; border-radius: 9px;
+  background: var(--bg3); border: 1px dashed var(--border);
+  font-size: 11px; line-height: 1.7;
+}
+.ceo-appr-audit b { display: block; margin-bottom: 5px; font-size: 11.5px; color: var(--muted); }
+.ceo-appr-audit p { margin: 3px 0 0; display: flex; align-items: baseline; gap: 7px; flex-wrap: wrap; }
+.ceo-appr-audit .ok { flex: none; color: #6ee7b7; font-weight: 700; }
+.ceo-appr-audit .no { flex: none; color: #fca5a5; font-weight: 700; }
+.ceo-appr-audit .who {
+  margin-left: auto; flex: none; color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── 표본 검증 ───────────────────────────────────────────────────────────
+   명테크의 검토는 모델끼리 한다. 사람의 눈은 승인 두 지점에만 있었고,
+   ISPOR 의 8개 축 중 "인간 기준" 이 비어 있었다(평가 30건 중 23건이 이걸
+   뒀는데 우리는 0이었다).
+
+   기계가 실제 논문을 찾아 두고, 사람은 "그 논문이 정말 그 말을 하는가" 만
+   판정한다 — 모델에게 물으면 맞다고 하므로 그건 사람만 할 수 있다. */
+.pj-verify {
+  margin: 8px 0 0; padding: 12px 14px; border-radius: 10px;
+  background: var(--bg3); border: 1px solid var(--border);
+  border-left: 3px solid #34d399;
+  display: flex; flex-direction: column; gap: 10px;
+}
+.pj-verify-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; }
+.pj-verify-head b { font-size: 12.5px; color: #6ee7b7; }
+.pj-verify-note { flex: 1 1 100%; font-size: 11px; line-height: 1.6; color: var(--muted); }
+.pj-verify-sample {
+  flex: 1 1 100%; padding: 6px 9px; border-radius: 7px; font-size: 10.5px;
+  background: var(--glass-bg); border: 1px dashed var(--border); color: var(--muted);
+}
+
+.pj-verify-card {
+  padding: 10px 12px; border-radius: 9px;
+  background: var(--bg); border: 1px solid var(--border);
+  display: flex; flex-direction: column; gap: 6px;
+}
+.pj-verify-top { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; }
+.pj-verify-top a { font-size: 11.5px; font-weight: 700; font-family: 'JetBrains Mono', monospace; }
+.pj-verify-top .tag {
+  flex: none; padding: 2px 8px; border-radius: 99px; font-size: 10.5px; font-weight: 600;
+}
+/* 세 상태를 색으로도 가른다 — 조회 실패를 '없음' 과 같은 색으로 두면
+   사장님이 멀쩡한 논문을 "지어냈다" 고 표시하게 된다. */
+.pj-verify-top .tag.ok   { background: rgba(52,211,153,.14); border: 1px solid rgba(52,211,153,.45); color: #6ee7b7; }
+.pj-verify-top .tag.no   { background: rgba(248,113,113,.14); border: 1px solid rgba(248,113,113,.5); color: #fca5a5; }
+.pj-verify-top .tag.hold { background: var(--glass-bg); border: 1px dashed var(--border); color: var(--muted); cursor: help; }
+.pj-verify-top .tag.warn { background: rgba(251,191,36,.12); border: 1px solid rgba(251,191,36,.45); color: #fcd34d; }
+
+.pj-verify-claim, .pj-verify-real {
+  margin: 0; font-size: 11.5px; line-height: 1.65; word-break: break-word;
+}
+.pj-verify-claim b, .pj-verify-real b {
+  display: inline-block; min-width: 62px; margin-right: 6px;
+  font-size: 10.5px; color: var(--muted);
+}
+.pj-verify-real { color: #93c5fd; }
+.pj-verify-abs {
+  margin: 0; padding: 7px 9px; border-radius: 7px;
+  font-size: 10.5px; line-height: 1.6; color: var(--muted);
+  background: var(--glass-bg); border: 1px solid var(--border);
+  max-height: 110px; overflow: auto;
+}
+
+.pj-verify-pick { display: flex; gap: 6px; margin-top: 2px; }
+.pj-verify-pick .pj-btn { padding: 5px 14px; font-size: 11.5px; }
+.pj-verify-pick .pj-btn.on.ok   { background: rgba(52,211,153,.2); border-color: rgba(52,211,153,.6); color: #6ee7b7; }
+.pj-verify-pick .pj-btn.on.no   { background: rgba(248,113,113,.2); border-color: rgba(248,113,113,.6); color: #fca5a5; }
+.pj-verify-pick .pj-btn.on.hold { background: var(--glass-hi); border-color: var(--border); color: var(--text); }
+
+.pj-verify-msg, .pj-verify-sum {
+  margin: 0; font-size: 11px; line-height: 1.6; color: var(--muted);
+}
+.pj-verify-sum { font-variant-numeric: tabular-nums; }
+.pj-verify-actions { display: flex; justify-content: flex-end; gap: 7px; }
+
+@media (max-width: 640px) {
+  .pj-verify-pick { flex-wrap: wrap; }
+  .pj-verify-pick .pj-btn { flex: 1; }
+  .pj-verify-claim b, .pj-verify-real b { display: block; min-width: 0; }
 }

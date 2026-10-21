@@ -45,6 +45,11 @@ from datetime import date
 from pathlib import Path
 from typing import Any
 
+try:                     # 평평하게 부를 때 — server.py 의 `import projects`
+    import disk_guard
+except ImportError:      # 패키지로 부를 때 — `from shared_memory import projects`
+    from shared_memory import disk_guard
+
 STORE_DIR = Path(__file__).resolve().parent / "store"
 STORE_DIR.mkdir(parents=True, exist_ok=True)
 FILE = STORE_DIR / "projects.json"
@@ -160,11 +165,15 @@ def load() -> list[dict]:
 
 
 def _save(rows: list[dict]) -> None:
+    # 이 시스템에서 가장 큰 쓰기다(실측 668 KB). 원자적 교체라 교체 직전에는
+    # 같은 내용이 두 벌 있다 — 디스크가 빠듯하면 여기가 먼저 터진다.
+    # disk_guard.writing 을 지나가면 메시지가 "디스크가 꽉 찼습니다" 가 된다.
     fd, tmp = tempfile.mkstemp(dir=str(STORE_DIR), suffix=".tmp")
     try:
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            json.dump(rows, f, ensure_ascii=False, indent=2)
-        os.replace(tmp, FILE)
+        with disk_guard.writing(FILE):
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                json.dump(rows, f, ensure_ascii=False, indent=2)
+            os.replace(tmp, FILE)
     except Exception:
         Path(tmp).unlink(missing_ok=True)
         raise
@@ -186,6 +195,61 @@ def update(pid: str, patch: dict) -> dict | None:
             _save(rows)
             return p
     return None
+
+
+# 인코딩이 깨진 입력(모지바케)을 가려내는 선. 실측으로 정했다:
+#
+#   실제 위키 문서 197건 중 최대   0.0109  (mlp-vs-transformer.md)
+#   셸이 망가뜨린 아이디어          0.27
+#
+# 25배 차이라 0.08 이면 양쪽에서 넉넉하다. 한글 비율을 쓰지 않는 이유는
+# **영어로만 쓴 멀쩡한 아이디어**도 0 이기 때문이다.
+MOJIBAKE_MAX = 0.08
+MOJIBAKE_MIN_LEN = 20          # 짧은 글은 비율이 요동쳐 판정하지 않는다
+
+
+# 이 구역에 있지만 멀쩡한 글에 쓰이는 것들. 세지 않는다.
+#
+#   ·  가운데점 — "PPO·GRPO·DPO" 처럼 한국어에서 흔하다. 이것 때문에
+#      짧은 아이디어가 0.043 까지 올라가 기준 0.08 과 여백이 1.6배밖에
+#      안 됐다. 빼야 한다.
+#   나머지는 단위·통화·인용부호. 깨진 바이트가 이것들만 모아 나올 일은 없다.
+_OK_SYMBOLS = set("·×÷°±©®§¶€£¥¢«»¬" + "\u00ad\u00a0")
+
+
+def mojibake_ratio(text: str) -> float:
+    """깨짐 지표 — latin-1 보충 구역의 **기호** 비율.
+
+    **악센트 문자는 세지 않는다.** `Müller`·`façade`·`Zürich` 는 멀쩡한
+    글이고, 실제로 악센트 섞인 영어가 0.051 까지 나왔다. 반면 cp949 를
+    latin-1 으로 잘못 읽으면 `¡ ¹ ¿ ¤ ¸ ¼ ½ º` 같은 **기호**가 무더기로
+    쏟아진다 — 실측 표본에서 19자 중 17자가 기호였다.
+    """
+    if not text:
+        return 0.0
+    n = sum(1 for c in text
+            if "\u00a0" <= c <= "\u00ff"
+            and not c.isalpha()
+            and c not in _OK_SYMBOLS)
+    return n / len(text)
+def unreadable(text: str) -> str:
+    """읽을 수 없는 입력이면 사유를, 아니면 빈 문자열.
+
+    왜 막는가. 계획 수립기는 의미 없는 바이트를 받고도 "못 읽겠다" 고 하지
+    않았다 — 조회된 논문을 붙잡고 전혀 다른 프로젝트를 지어냈다(「독일 BSI
+    자동 인증 지원 시스템」, 산출물 4개). 그리고 승인 요청을 보냈다.
+    사장님이 시키지 않은 사업 계획을 승인할 뻔한 것이다.
+    """
+    t = (text or "").strip()
+    if len(t) < MOJIBAKE_MIN_LEN:
+        return ""
+    r = mojibake_ratio(t)
+    if r > MOJIBAKE_MAX:
+        return (f"입력의 글자가 깨져 있습니다 (깨짐 지표 {r:.0%}, 기준 "
+                f"{MOJIBAKE_MAX:.0%}). 인코딩이 틀어진 것으로 보입니다 — "
+                f"이대로 계획을 세우면 엉뚱한 프로젝트를 지어냅니다. "
+                f"UTF-8 로 다시 보내 주십시오.")
+    return ""
 
 
 def create(idea: str, title: str = "") -> dict:

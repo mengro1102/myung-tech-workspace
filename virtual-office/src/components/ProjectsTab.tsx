@@ -13,6 +13,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, deptLabels, type ApprovalRow, type DialogueEntry, type ProjectRow,
          type ProjectStatus } from '../api';
 import ConfidenceBox from './ConfidenceBox';
+import VerifyBox from './VerifyBox';
 import PlanEditor from './PlanEditor';
 import ReviewHistory from './ReviewHistory';
 import { Markdown } from './GuideModal';
@@ -331,6 +332,39 @@ function Detail({ p, onRefresh }: { p: ProjectRow; onRefresh: () => void }) {
   /* 산출물을 여기서 바로 읽는다. 예전에는 목록에 제목만 있고 본문을 볼 곳이
      없었다 — 결재함의 '내용 보기' 로 돌아가거나 파일을 찾아 열어야 했다. */
   const [openD,  setOpenD]  = useState<string | null>(null);
+  // 방법 절은 산출물마다 따로 받아 둔다. 한 번 받으면 다시 받지 않는다 —
+  // 같은 산출물의 방법은 바뀌지 않는다(단계 기록이 확정된 뒤이므로).
+  const [methodsFor, setMethodsFor] = useState<string | null>(null);
+  // 검증 화면을 연 산출물. 한 번에 하나만 — arXiv 조회가 섞여 있어
+  // 여럿을 동시에 열면 요청이 몰린다.
+  const [verifyFor, setVerifyFor] = useState<string | null>(null);
+  const [methods, setMethods] = useState<Record<string, string>>({});
+
+  // 일관성 시험. 호출 하나를 쓰므로 한 번 묻는다 — 누르는 순간 예산이 준다.
+  const [consBusy, setConsBusy] = useState('');
+  async function runCons(did: string) {
+    if (!window.confirm(
+      '같은 조건으로 한 번 더 써서 두 글을 견줍니다.\n'
+      + '모델 호출 하나를 쓰고 1~2분 걸립니다.\n\n진행할까요?')) return;
+    setConsBusy(did);
+    await api.runConsistency(p.id, did);
+    setConsBusy('');
+    // 방법 절을 다시 받아 결과가 반영되게 한다.
+    setMethods(m => { const n = { ...m }; delete n[did]; return n; });
+    if (methodsFor === did) {
+      const r = await api.provenance(p.id, did);
+      setMethods(m => ({ ...m, [did]: r?.markdown || '' }));
+    }
+    onRefresh();
+  }
+
+  async function showMethods(did: string) {
+    if (methodsFor === did) { setMethodsFor(null); return; }
+    setMethodsFor(did);
+    if (methods[did]) return;
+    const r = await api.provenance(p.id, did);
+    setMethods(m => ({ ...m, [did]: r?.markdown || '방법 기록을 받지 못했습니다.' }));
+  }
   const [copied, setCopied] = useState('');
   const [saving, setSaving] = useState('');
   const [props,  setProps]  = useState<ApprovalRow[]>([]);
@@ -403,11 +437,44 @@ function Detail({ p, onRefresh }: { p: ProjectRow; onRefresh: () => void }) {
                         ) : (
                           <div className={`pj-deliv-item ${state}`}>{head}</div>
                         )}
+                        {open && body && verifyFor === d.id && (
+                          <VerifyBox pid={p.id} did={d.id}
+                            onSaved={() => {
+                              // 방법 절에 결과가 실리므로 다시 받게 한다.
+                              setMethods(m => { const n = { ...m }; delete n[d.id]; return n; });
+                            }} />
+                        )}
+                        {open && body && methodsFor === d.id && (
+                          <div className="pj-methods">
+                            {methods[d.id]
+                              ? <Markdown src={methods[d.id]} />
+                              : <p className="pj-methods-wait">방법 기록을 불러오는 중…</p>}
+                          </div>
+                        )}
                         {open && body && (
                           <div className="pj-artifact">
                             <div className="pj-art-bar">
                               <button className="pj-btn" onClick={() => void copy(d.id, body)}>
                                 {copied === d.id ? '✓ 복사됨' : '📋 복사'}
+                              </button>
+                              {/* 결재를 누르기 전에 "이게 어떻게 나왔나" 를 보는
+                                  자리다. 감독할 사람에게 판단 재료가 없으면
+                                  감독은 형식이 된다. */}
+                              <button className="pj-btn" onClick={() => void showMethods(d.id)}>
+                                {methodsFor === d.id ? '🔎 방법 닫기' : '🔎 방법 보기'}
+                              </button>
+                              {/* RAISE/ISPOR 가 요구하는 반복 실행 일관성.
+                                  안 하면 방법 절이 "확인하지 않았습니다" 로 남는다. */}
+                              <button className="pj-btn" disabled={consBusy === d.id}
+                                      onClick={() => void runCons(d.id)}>
+                                {consBusy === d.id ? '시험 중…' : '🔁 일관성 시험'}
+                              </button>
+                              {/* 검토가 모델끼리라는 것이 이 시스템의 가장 큰
+                                  빈칸이다. 사람이 표본을 보는 자리. */}
+                              <button className="pj-btn"
+                                      onClick={() => setVerifyFor(
+                                        verifyFor === d.id ? null : d.id)}>
+                                {verifyFor === d.id ? '✋ 검증 닫기' : '✋ 표본 검증'}
                               </button>
                               {prop?.status === 'approved' ? (
                                 <span className="pj-art-file ok">💾 저장됨 · workspace/{prop.file_path}</span>
