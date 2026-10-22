@@ -11,7 +11,7 @@
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, deptLabels, type ApprovalRow, type DialogueEntry, type ProjectRow,
-         type ProjectStatus } from '../api';
+         type ProjectStatus, type ArchivedCall } from '../api';
 import ConfidenceBox from './ConfidenceBox';
 import VerifyBox from './VerifyBox';
 import PlanEditor from './PlanEditor';
@@ -358,6 +358,25 @@ function Detail({ p, onRefresh }: { p: ProjectRow; onRefresh: () => void }) {
     onRefresh();
   }
 
+  // 보관된 프롬프트 전문. 지문은 **대조용 값**이지 사람이 읽을 참조가
+  // 아니다 — 실제 글을 열어 볼 자리를 만든다.
+  const [promptsFor, setPromptsFor] = useState<string | null>(null);
+  const [prompts, setPrompts] = useState<ArchivedCall[]>([]);
+  const [promptsBusy, setPromptsBusy] = useState(false);
+  const [promptsErr, setPromptsErr] = useState('');
+  const [openCall, setOpenCall] = useState<number | null>(null);
+
+  async function showPrompts(did: string) {
+    if (promptsFor === did) { setPromptsFor(null); return; }
+    setPromptsFor(did); setPrompts([]); setPromptsErr(''); setOpenCall(null);
+    setPromptsBusy(true);
+    // full=true 로 받는다. 목록만 받으면 또 "길이만 알고 내용은 모르는" 상태다.
+    const r = await api.archivedPrompts(p.id, did, true);
+    setPromptsBusy(false);
+    if (!r || r.error) { setPromptsErr(r?.error || '불러오지 못했습니다'); return; }
+    setPrompts(r.calls || []);
+  }
+
   async function showMethods(did: string) {
     if (methodsFor === did) { setMethodsFor(null); return; }
     setMethodsFor(did);
@@ -463,6 +482,11 @@ function Detail({ p, onRefresh }: { p: ProjectRow; onRefresh: () => void }) {
                               <button className="pj-btn" onClick={() => void showMethods(d.id)}>
                                 {methodsFor === d.id ? '🔎 방법 닫기' : '🔎 방법 보기'}
                               </button>
+                              {/* 지문만 보여 주던 것을 고친 자리. 보관해 두고
+                                  열 길이 없으면 ①(전체 프롬프트 공개)은 절반이다. */}
+                              <button className="pj-btn" onClick={() => void showPrompts(d.id)}>
+                                {promptsFor === d.id ? '📄 프롬프트 닫기' : '📄 프롬프트'}
+                              </button>
                               {/* RAISE/ISPOR 가 요구하는 반복 실행 일관성.
                                   안 하면 방법 절이 "확인하지 않았습니다" 로 남는다. */}
                               <button className="pj-btn" disabled={consBusy === d.id}
@@ -494,6 +518,46 @@ function Detail({ p, onRefresh }: { p: ProjectRow; onRefresh: () => void }) {
                                 </span>
                               )}
                             </div>
+                            {promptsFor === d.id && (
+                              <div className="pj-prompts">
+                                {promptsBusy && <div className="pj-prompt-note">불러오는 중…</div>}
+                                {promptsErr && <div className="pj-prompt-note">⚠️ {promptsErr}</div>}
+                                {!promptsBusy && !promptsErr && prompts.length === 0 && (
+                                  <div className="pj-prompt-note">
+                                    보관된 프롬프트가 없습니다. 2026-10-22 이전에 만든
+                                    산출물은 지문과 길이만 남아 있어 되살릴 수 없습니다.
+                                  </div>
+                                )}
+                                {prompts.map((c, i) => (
+                                  <div key={i} className="pj-prompt-item">
+                                    <button className="pj-prompt-head"
+                                            onClick={() => setOpenCall(openCall === i ? null : i)}>
+                                      <span className="pj-prompt-phase">
+                                        {c.phase === 'draft' ? '초안'
+                                          : c.phase === 'review1' ? '1차 검토'
+                                          : c.phase === 'review2' ? '2차 검토'
+                                          : c.phase === 'plan' ? '계획' : c.phase}
+                                      </span>
+                                      <span className="pj-prompt-meta">
+                                        {c.model} · temp {c.temperature} ·{' '}
+                                        {((c.system?.length ?? 0) + (c.user?.length ?? 0)).toLocaleString()}자
+                                      </span>
+                                      <span className="pj-prompt-caret">{openCall === i ? '▲' : '▼'}</span>
+                                    </button>
+                                    {openCall === i && (
+                                      <div className="pj-prompt-body">
+                                        <div className="pj-prompt-label">지시 (system)</div>
+                                        <pre className="pj-prompt-pre">{c.system || '(없음)'}</pre>
+                                        <div className="pj-prompt-label">
+                                          입력 (user) — 조회된 근거가 이 안에 들어 있습니다
+                                        </div>
+                                        <pre className="pj-prompt-pre">{c.user || '(없음)'}</pre>
+                                      </div>
+                                    )}
+                                  </div>
+                                ))}
+                              </div>
+                            )}
                             <div className="pj-art-body"><Markdown src={body} /></div>
                           </div>
                         )}

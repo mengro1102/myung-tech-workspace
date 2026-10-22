@@ -138,6 +138,47 @@ export interface ApprovalRow extends StoreItem {
  *  남는다. 반려 사유를 되풀이 단위로 묶어 두었다가, 같은 주제로 다시 시킬 때
  *  계획 프롬프트에 넣는다 — 그래서 이 목록은 "다음 계획이 왜 그렇게 나왔나"
  *  를 설명하는 입력이기도 하다. 보이지 않으면 숨은 자율성이 된다. */
+/** 보관된 호출 하나. `full=1` 일 때만 system/user 가 실린다. */
+export interface ArchivedCall {
+  at?: number;
+  phase?: string;
+  dept?: string;
+  did?: string;
+  deliverable?: string;
+  backend?: string;
+  model?: string;
+  temperature?: number;
+  max_tokens?: number;
+  digest?: string;
+  system?: string;
+  user?: string;
+  system_chars?: number;
+  user_chars?: number;
+}
+
+export interface ArchiveResult {
+  calls: ArchivedCall[];
+  stats: { calls: number; broken: number; bytes: number; chars: number; path: string };
+  full: boolean;
+}
+
+/** 맹비서 세션 하나. 디스코드·텔레그램·대시보드가 같은 목록을 본다. */
+export interface AssistantSession {
+  id: string;
+  source?: string;          // discord · telegram · api_server
+  title?: string | null;
+  model?: string;
+  started_at?: number;
+  ended_at?: number | null;
+  message_count?: number;
+}
+
+export interface AssistantMessage {
+  role?: string;
+  content?: string;
+  created_at?: number;
+}
+
 export interface LessonRow extends StoreItem {
   project_id: string;
   title: string;
@@ -415,6 +456,51 @@ export const api = {
       fetch(`${API_BASE}/verify/${pid}/${did}`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ verdicts }),
+      })
+    ),
+  /** 보관된 프롬프트 전문. 지문은 대조용 값일 뿐이라 **실제 글**이 필요하다.
+   *  full 없이 부르면 목록만(길이·모델·단계) 오고, true 면 본문까지 온다 —
+   *  호출 하나가 1만 자를 넘어 기본값에서는 뺐다. */
+  archivedPrompts: (pid: string, did?: string, full = false) =>
+    safeJson<ArchiveResult & { error?: string }>(
+      fetch(`${API_BASE}/archive/${pid}${did ? `/${did}` : ''}${full ? '?full=1' : ''}`)
+    ),
+  /** 맹비서가 살아 있나. 게이트웨이가 꺼져 있으면 여기서 먼저 드러난다. */
+  assistantHealth: () =>
+    safeJson<{ ok: boolean; status?: string; error?: string; hint?: string }>(
+      fetch(`${API_BASE}/assistant/health`)
+    ),
+  /** 세션 목록 — 디스코드에서 한 대화도 여기 보인다. */
+  assistantSessions: () =>
+    safeJson<{ data?: AssistantSession[]; error?: string }>(
+      fetch(`${API_BASE}/assistant/sessions`)
+    ),
+  /** 새 세션. 제목을 주면 목록에서 알아보기 쉽다.
+   *
+   *  **제목은 유일해야 한다.** 맹비서가 중복을 400 으로 거절한다
+   *  (`Title '...' is already in use by session ...`). 그래서 부르는
+   *  쪽이 시각을 붙인다 — 고정 문자열을 주면 두 번째부터 실패한다. */
+  assistantNewSession: (title?: string) =>
+    safeJson<{ session?: AssistantSession; error?: string }>(
+      fetch(`${API_BASE}/assistant/sessions`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(title ? { title } : {}),
+      })
+    ),
+  /** 그 세션의 대화 히스토리. '이어가기' 의 알맹이다. */
+  assistantMessages: (sid: string) =>
+    safeJson<{ data?: AssistantMessage[]; messages?: AssistantMessage[]; error?: string }>(
+      fetch(`${API_BASE}/assistant/sessions/${encodeURIComponent(sid)}/messages`)
+    ),
+  /** 이어서 대화. 길다 — 디스코드 실측 27초, 서버 타임아웃 180초. */
+  assistantChat: (sid: string, message: string) =>
+    // message 는 **객체**다 — {role, content}. 문자열로 적어 뒀다가
+    // React 가 "Objects are not valid as a React child" 로 죽었다.
+    safeJson<{ message?: AssistantMessage | string; session_id?: string;
+               error?: string; hint?: string }>(
+      fetch(`${API_BASE}/assistant/sessions/${encodeURIComponent(sid)}/chat`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message }),
       })
     ),
   listLessons: () =>

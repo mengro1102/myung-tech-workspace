@@ -4,7 +4,6 @@ import OpsMap         from './components/OpsMap';
 // 2D 사무실은 Phaser(minify 후 1.5MB)를 끌고 온다. 정적으로 물리면 메인 탭만
 // 볼 사람도 전부 내려받는다. 탭을 열 때만 가져오도록 지연 로드한다.
 const OfficeView   = lazy(() => import('./components/OfficeView'));
-import AgentFeed       from './components/AgentFeed';
 import AgentTeamModal  from './components/AgentTeamModal';
 import MemoryModal     from './components/MemoryModal';
 import ModelModal      from './components/ModelModal';
@@ -19,7 +18,8 @@ const ProjectsTab = lazy(() => import('./components/ProjectsTab'));
 const NotesTab = lazy(() => import('./components/NotesTab'));
 const ApprovalBox = lazy(() => import('./components/ApprovalBox'));
 const LessonsBox = lazy(() => import('./components/LessonsBox'));
-import { api, AgentSummary, deptLabels, type ApprovalRow, type ProjectRow } from './api';
+import { api, AgentSummary, deptLabels, type ApprovalRow, type AssistantSession,
+         type ProjectRow } from './api';
 import './styles/hermes.css';
 
 /* ── types ── */
@@ -53,7 +53,16 @@ const CHAT_HISTORY_KEY = 'myungtech_chat_history_v2';
 function loadChatHistory(): ChatMsg[] {
   try {
     const raw = localStorage.getItem(CHAT_HISTORY_KEY);
-    if (raw) return JSON.parse(raw) as ChatMsg[];
+    if (raw) {
+      const rows = JSON.parse(raw) as ChatMsg[];
+      // 저장된 기록의 id 를 다시 매긴다.
+      //
+      // 예전 id 는 `Date.now()` 라 같은 밀리초의 두 줄이 겹쳐 있다. 그대로
+      // 복원하면 새로고침할 때마다 "Encountered two children with the same
+      // key" 가 난다 — 실제로 `1792646077002` 가 계속 찍혔다. 코드를 고쳐도
+      // **이미 저장된 기록**은 그대로이므로 불러오는 자리에서 손봐야 한다.
+      return rows.map((m, i) => ({ ...m, id: `h-${i}` }));
+    }
   } catch { /* ignore */ }
   return [];
 }
@@ -107,7 +116,15 @@ function MainScreen() {
     }];
   });
   const [input,       setInput]       = useState('');
-  const [dept,        setDept]        = useState('orchestration_dept');
+  // 맹비서 세션. 메인 채팅이 여기로 간다 — 전에는 /api/workflow/run 으로
+  // 부서 태스크를 큐에 넣었고, 그 경로는 근거·검토·방법 절을 우회했다.
+  const [assistantSid, setAssistantSid] = useState<string>('');
+  const [sessions, setSessions] = useState<AssistantSession[]>([]);
+  const [sessionsOpen, setSessionsOpen] = useState(false);
+  const [sessionsBusy, setSessionsBusy] = useState(false);
+  const [assistantUp, setAssistantUp] = useState<boolean | null>(null);
+  // 기본 대화 상대는 맹비서다. 부서는 "일을 시키는" 쪽이라 성격이 다르다.
+  const [dept,        setDept]        = useState('assistant');
   const [running,     setRunning]     = useState(false);
   // 이름은 cycleStatus 그대로다 — 사무실·OpsMap·PixelOffice 등 여섯 곳이
   // 이 문자열을 받아 '살아 있나' 를 판정한다. 뜻만 바뀌었다: 사장님이
@@ -118,7 +135,6 @@ function MainScreen() {
     tasks_busy?: number; approvals_pending?: number;
   }>({});
   const [showSidebar, setShowSidebar] = useState(true);
-  const [liveOpen,    setLiveOpen]    = useState(true);
   const [taskSummary, setTaskSummary] = useState({ pending: 0, in_progress: 0, done: 0, failed: 0 });
   /* 태스크는 목록 하나만 받아 와서 화면 두 곳이 같은 답을 하게 한다.
    * 예전에는 사이드바가 /tasks/summary(전체), CEO 룸이 /tasks/list(상위 20건)
@@ -234,6 +250,13 @@ function MainScreen() {
   const [isMobile,    setIsMobile]    = useState(() => window.innerWidth < 768);
   const navigate = useNavigate();
   const chatEndRef = useRef<HTMLDivElement>(null);
+  // 스크롤 컨테이너. 끝 표시(높이 0)의 위치에 기대지 않고 직접 내린다 —
+  // scrollIntoView({block:'nearest'}) 는 "이미 가깝다" 고 보고 긴 답에서
+  // 안 움직였다.
+  const chatBoxRef = useRef<HTMLDivElement>(null);
+  // 사장님이 위로 올려 읽는 중이면 끌어내리지 않는다. 긴 답을 읽는 도중에
+  // 화면이 튀면 그게 더 나쁘다.
+  const chatAtBottom = useRef(true);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const sidebarResizeRef = useRef<{ dragging: boolean; startX: number; startW: number }>({ dragging: false, startX: 0, startW: 220 });
 
@@ -384,8 +407,16 @@ function MainScreen() {
   }, [showNotifications]);
 
   useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-  }, [messages]);
+    const box = chatBoxRef.current;
+    if (!box) return;
+    if (!chatAtBottom.current) return;      // 올려 읽는 중이면 그대로 둔다
+    // 레이아웃이 끝난 뒤에 내려야 한다 — 같은 틱에 하면 방금 들어온 긴
+    // 메시지의 높이가 아직 반영되지 않아 중간에서 멈춘다.
+    const id = requestAnimationFrame(() => {
+      box.scrollTo({ top: box.scrollHeight, behavior: 'smooth' });
+    });
+    return () => cancelAnimationFrame(id);
+  }, [messages, running]);
 
   // 트레이 메뉴 명령 처리 (Phase 6 — 데스크톱 셸)
   /* 현황판에 올릴 카드. 프로젝트·결재·태스크를 한 자로 잰다.
@@ -475,7 +506,7 @@ function MainScreen() {
     ea.onMenuCommand((_e: any, cmd: string) => {
       if (cmd === 'new-chat' || cmd === 'briefing') {
         void fetchBriefing().then(text => setMessages(prev => {
-          const briefing = { id: Date.now().toString(), role: 'assistant' as const,
+          const briefing = { id: uid('b'), role: 'assistant' as const,
                              sender: '명테크 AI', text, ts: nowStr() };
           return cmd === 'new-chat' ? [briefing] : [...prev, briefing];
         }));
@@ -483,20 +514,88 @@ function MainScreen() {
     });
   }, []);
 
+  // id 가 `Date.now()` 였다. 같은 밀리초에 두 줄이 들어가면 겹친다 —
+  // 실제로 "Encountered two children with the same key" 가 났다. 사용자 줄과
+  // 대기 줄("⏳ 생각하는 중…")을 연달아 넣으므로 흔하게 난다.
+  //
+  // React 는 key 가 겹치면 엉뚱한 줄을 재사용하거나 빠뜨린다. "보냈는데
+  // 안 보인다" 가 거기서 나온다. 시각 뒤에 증가하는 번호를 붙인다.
+  const msgSeq = useRef(0);
+  /** 목록 key 용 유일 id. 토스트·알림·브리핑도 같은 충돌을 겪으므로 함께 쓴다. */
+  const uid = useCallback((p = 'x') => `${p}-${Date.now()}-${msgSeq.current++}`, []);
   const pushMsg = useCallback((msg: Omit<ChatMsg, 'id' | 'ts'>) => {
-    setMessages(prev => [...prev, { ...msg, id: Date.now().toString(), ts: nowStr() }]);
+    const id = uid('m');
+    setMessages(prev => [...prev, { ...msg, id, ts: nowStr() }]);
   }, []);
 
   const pushToast = useCallback((type: ToastItem['type'], message: string) => {
-    setToasts(prev => [...prev.slice(-4), { id: Date.now().toString(), type, message }]);
+    setToasts(prev => [...prev.slice(-4), { id: uid('t'), type, message }]);
   }, []);
 
   const pushNotif = useCallback((type: Notification['type'], message: string, link?: () => void) => {
-    const n: Notification = { id: Date.now().toString(), type, message, time: new Date(), read: false, link };
+    const n: Notification = { id: uid('n'), type, message, time: new Date(), read: false, link };
     setNotifications(prev => [n, ...prev].slice(0, 50));
     setRecentNotif(n);
     if (recentNotifTimerRef.current) clearTimeout(recentNotifTimerRef.current);
     recentNotifTimerRef.current = setTimeout(() => setRecentNotif(null), 5000);
+  }, []);
+
+  // 맹비서가 살아 있나. 꺼져 있으면 채팅이 왜 안 되는지 화면에서 바로
+  // 보여야 한다 — 말없이 실패하면 사장님은 네트워크를 의심하게 된다.
+  useEffect(() => {
+    let alive = true;
+    void api.assistantHealth().then(r => { if (alive) setAssistantUp(!!r?.ok); });
+    return () => { alive = false; };
+  }, []);
+
+  const loadSessions = useCallback(async () => {
+    setSessionsBusy(true);
+    const r = await api.assistantSessions();
+    setSessionsBusy(false);
+    setSessions(r?.data ?? []);
+  }, []);
+
+  /** 세션 하나를 화면으로 불러온다. 이것이 '이어가기' 의 알맹이다. */
+  const openSession = useCallback(async (sid: string) => {
+    setAssistantSid(sid);
+    setSessionsOpen(false);
+    const r = await api.assistantMessages(sid);
+    const rows = r?.data ?? r?.messages ?? [];
+    if (!rows.length) {
+      setMessages([{ id: 'empty', role: 'assistant', sender: '맹비서',
+                     text: '이 대화에는 아직 기록이 없습니다.', ts: nowStr() }]);
+      return;
+    }
+
+    // 도구 호출과 그 결과도 메시지로 쌓인다(스키마에 tool_calls·tool_name·
+    // tool_call_id 가 있다). 그대로 그렸더니 이런 것이 맹비서의 말인 양 떴다:
+    //
+    //   {"total_count": 0, "error": "Search failed: rg: regex parse error..."}
+    //
+    // 사람이 읽을 대화만 남긴다. content 가 빈 턴(도구만 부른 턴)도 뺀다 —
+    // 빈 말풍선이 남는다.
+    const talk = rows.filter(m =>
+      (m.role === 'user' || m.role === 'assistant')
+      && String(m.content ?? '').trim().length > 0);
+    const hidden = rows.length - talk.length;
+
+    const shown: ChatMsg[] = talk.map((m, i) => ({
+      id: `s-${sid}-${i}`,
+      role: (m.role === 'user' ? 'user' : 'assistant') as ChatMsg['role'],
+      sender: m.role === 'user' ? '사장님' : '맹비서',
+      text: String(m.content ?? ''),
+      ts: nowStr(),
+    }));
+
+    // 숨긴 건수를 적는다. 조용히 빼면 "대화가 중간에 비었다" 로 보인다.
+    if (hidden > 0) {
+      shown.unshift({
+        id: `s-${sid}-note`, role: 'assistant', sender: '맹비서',
+        text: `(도구 호출·결과 ${hidden}건은 접었습니다 — 대화만 보여 드립니다)`,
+        ts: nowStr(),
+      });
+    }
+    setMessages(shown);
   }, []);
 
   const send = async (text: string, targetDept: string) => {
@@ -504,6 +603,52 @@ function MainScreen() {
     setInput('');
     pushMsg({ role: 'user', sender: '사장님', text });
     setRunning(true);
+
+    // 맹비서와 대화 — 기본 경로.
+    //
+    // 부서를 고르면 예전처럼 태스크를 넣는다. 둘은 다른 행위다 — "맹비서에게
+    // 묻는 것" 과 "학술연구부에 일을 시키는 것" 을 한쪽으로 합치면 다른
+    // 쪽이 할 수 있던 일이 사라진다.
+    if (targetDept === 'assistant') {
+      pushMsg({ role: 'assistant', sender: '맹비서', text: '⏳ 생각하는 중…' });
+      try {
+        let sid = assistantSid;
+        if (!sid) {
+          const made = await api.assistantNewSession(`대시보드 · ${nowStr()}`);
+          sid = made?.session?.id ?? '';
+          if (sid) setAssistantSid(sid);
+        }
+        if (!sid) throw new Error('세션을 만들지 못했습니다');
+        const r = await api.assistantChat(sid, text);
+        // 맹비서는 message 를 {role, content} 객체로 준다. 그대로
+        // 넣으면 React 가 죽는다(겪었다) — content 를 꺼낸다.
+        const raw = r?.message;
+        const said = typeof raw === 'string' ? raw : (raw?.content ?? '');
+        const reply = said
+          ?? (r?.error ? `⚠️ ${r.error}${r.hint ? `\n\n${r.hint}` : ''}` : '');
+        setMessages(prev => {
+          const copy = [...prev];
+          copy[copy.length - 1] = {
+            ...copy[copy.length - 1],
+            text: reply || '⚠️ 빈 응답이 왔습니다 — 게이트웨이 로그를 확인하십시오.',
+          };
+          return copy;
+        });
+      } catch (e) {
+        setMessages(prev => {
+          const copy = [...prev];
+          copy[copy.length - 1] = {
+            ...copy[copy.length - 1],
+            text: `⚠️ 맹비서에 닿지 못했습니다: ${e instanceof Error ? e.message : String(e)}`
+                  + '\n\n게이트웨이가 꺼져 있을 수 있습니다 — `1. 전체 시작.bat`',
+          };
+          return copy;
+        });
+      } finally {
+        setRunning(false);
+      }
+      return;
+    }
 
     const deptName = deptLabels[targetDept] ?? targetDept;
     pushMsg({ role: 'assistant', sender: deptName, text: `⏳ ${deptName}에 지시를 전달하는 중...` });
@@ -523,7 +668,7 @@ function MainScreen() {
           copy[copy.length - 1] = { ...last, text: resultText };
           return copy;
         });
-        setToasts(prev => [...prev.slice(-4), { id: Date.now().toString(), type: 'success' as const, message: `✅ ${deptLabels[targetDept] ?? targetDept} 태스크 완료` }]);
+        setToasts(prev => [...prev.slice(-4), { id: uid('t'), type: 'success' as const, message: `✅ ${deptLabels[targetDept] ?? targetDept} 태스크 완료` }]);
         pushNotif('success', `✅ ${deptLabels[targetDept] ?? targetDept} 응답 완료`, () => setActiveTab('main'));
         // 태스크 목록 새로고침
         refreshTasks();
@@ -712,15 +857,32 @@ function MainScreen() {
                   {
                     icon: '✨', label: '새 대화', active: false,
                     bg: 'rgba(167,243,208,0.15)', color: '#6EE7B7',
+                    // 전에는 localStorage 한 칸을 비울 뿐이라 '새 대화' 가 무엇인지
+                    // 모호했다 — 이어갈 것도, 돌아갈 것도 없었다. 이제 맹비서 세션을
+                    // 실제로 만든다. 그 세션은 디스코드·텔레그램 대화와 같은 목록에 선다.
                     action: () => {
-                      const fresh: ChatMsg[] = [{ id: 'init', role: 'assistant', sender: '명테크 AI', text: '■ 브리핑\n\n지금 상태를 읽고 있습니다…', ts: nowStr() }];
-                      void fetchBriefing().then(text => setMessages(p2 =>
-                        p2.length === 1 && p2[0].id === 'init'
-                          ? [{ ...p2[0], text, ts: nowStr() }] : p2));
-                      setMessages(fresh);
-                      saveChatHistory(fresh);
-                      pushNotif('info', '새 대화를 시작했습니다');
+                      void (async () => {
+                        const r = await api.assistantNewSession(`대시보드 · ${nowStr()}`);
+                        const sid = r?.session?.id ?? '';
+                        if (!sid) {
+                          pushNotif('warning',
+                            `새 대화를 만들지 못했습니다 — ${r?.error ?? '맹비서 응답 없음'}`);
+                          return;
+                        }
+                        setAssistantSid(sid);
+                        setMessages([{ id: 'init', role: 'assistant', sender: '맹비서',
+                                       text: '새 대화를 시작했습니다. 무엇을 도와드릴까요?',
+                                       ts: nowStr() }]);
+                        pushNotif('info', '새 대화를 시작했습니다');
+                      })();
                     },
+                  },
+                  {
+                    // 디스코드·텔레그램에서 한 대화도 같은 목록에 선다.
+                    // 그게 "맹비서와 명테크를 직접 연결" 의 실체다.
+                    icon: '🗂', label: '대화 기록', active: sessionsOpen,
+                    bg: 'rgba(96,165,250,0.15)', color: '#60A5FA',
+                    action: () => { setSessionsOpen(true); void loadSessions(); },
                   },
                   {
                     icon: '⚙️', label: '관리 탭', active: false,
@@ -1074,35 +1236,47 @@ function MainScreen() {
 
         {/* ── Center ── */}
         <main className="hs-center">
-          {/* 실시간 활동 — 중앙 상단이 비어 있던 자리.
-              부서 이벤트가 흐르므로 시스템이 살아 있는지 첫 화면에서 보인다. */}
-          <section className={`hs-live ${liveOpen ? '' : 'collapsed'}`}>
-            <div className="hs-live-head">
-              <span className={`hs-live-pulse ${activeAgents > 0 || running ? '' : 'idle'}`} />
-              <b>실시간 활동</b>
-              <span>부서 간 상호작용 · 지식베이스 조회</span>
-              <button
-                className="hs-live-toggle"
-                onClick={() => setLiveOpen(v => !v)}
-                aria-expanded={liveOpen}
-              >
-                {liveOpen ? '접기' : '펼치기'}
-              </button>
-            </div>
-            {liveOpen && (
-              <div className="hs-live-body">
-                <AgentFeed compact />
-              </div>
-            )}
-          </section>
+          {/* '실시간 활동' 을 여기서 들어냈다 (2026-10-22).
+              에이전트 활동이 세 군데에 있었다 — 메인(여기)·사무실(에이전트
+              대화)·에이전트(실시간 연산 로그). 같은 것을 세 번 보여 주면
+              어느 것도 제대로 안 보게 된다. 메인의 일은 **대화**지 감시가
+              아니므로 여기를 뺐다.
+              확인한 것: 사무실(OfficeView)과 에이전트(AgentManageTab)는
+              각자 `/api/events` 를 폴링한다 — AgentFeed 를 쓰지 않는다.
+              그래서 여기를 빼도 기능이 사라지지 않고, AgentFeed 는 고아가
+              되어 함께 지웠다(git 에 남아 있다). SSE 엔드포인트
+              `/api/events/stream` 은 pages/VirtualOffice.tsx 가 쓰므로 둔다. */}
 
           {/* Chat section */}
           <div className="hs-chat-section">
-            <div className="hs-chat-area">
+            <div className="hs-chat-area" ref={chatBoxRef}
+                 onScroll={e => {
+                   const el = e.currentTarget;
+                   // 바닥에서 80px 안쪽이면 "따라가도 되는 상태" 로 본다.
+                   // 0 으로 잡으면 부드러운 스크롤 도중에 어긋나 꺼진다.
+                   chatAtBottom.current =
+                     el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+                 }}>
               {messages.map(m => (
                 <div key={m.id} className={`hs-msg ${m.role}`}>
                   <div className="hs-msg-avatar">
-                    {m.role === 'assistant' ? '🤖' : '👤'}
+                    {/* 맹비서는 디스코드 봇의 실제 아바타를 쓴다 — 같은 인격이
+                        창마다 다른 얼굴로 보이면 안 된다. 출처와 갱신 방법은
+                        public/assets/assistant/SOURCE.md.
+                        onError 로 이모지로 되돌린다 — 파일이 없을 때 깨진
+                        이미지 아이콘이 남는 것보다 낫다. */}
+                    {m.role === 'assistant' ? (
+                      m.sender === '맹비서' ? (
+                        <img className="hs-msg-face"
+                             src="/assets/assistant/mengbiseo.png"
+                             alt="맹비서"
+                             onError={e => {
+                               const el = e.currentTarget;
+                               el.style.display = 'none';
+                               el.parentElement?.insertAdjacentText('beforeend', '🤖');
+                             }} />
+                      ) : '🤖'
+                    ) : '👤'}
                   </div>
                   <div className="hs-msg-body">
                     <div className="hs-msg-sender">{m.sender} · {m.ts}</div>
@@ -1140,6 +1314,9 @@ function MainScreen() {
               value={dept}
               onChange={e => setDept(e.target.value)}
             >
+              {/* 맹비서가 기본 대화 상대. 부서는 아래에 남긴다 — 한쪽을
+                  지우면 다른 쪽이 할 수 있던 일이 사라진다. */}
+              <option value="assistant">🤖 맹비서</option>
               <option value="orchestration_dept">🧠 오케스트레이션</option>
               <option value="research_dept">🔬 학술연구</option>
               <option value="finance_dept">📈 금융투자</option>
@@ -1199,6 +1376,46 @@ function MainScreen() {
           onGlobalModelChange={setGlobalModel}
         />
       )}
+      {/* 대화 기록 — 세션함. 전에는 '새 대화' 가 localStorage 를 비울 뿐이라
+          돌아갈 곳이 없었다. 이제 맹비서 세션을 열고 이어간다. */}
+      {sessionsOpen && (
+        <div className="hm-backdrop" onClick={() => setSessionsOpen(false)}>
+          <div className="hm-panel" style={{ maxWidth: 560 }} onClick={e => e.stopPropagation()}>
+            <div className="hm-header">
+              <span className="hm-title">🗂 대화 기록</span>
+              <span className="hm-subtitle">{sessions.length}건</span>
+              <button className="hm-close" onClick={() => setSessionsOpen(false)}>✕</button>
+            </div>
+            <div className="sess-note">
+              디스코드·텔레그램에서 하신 대화도 여기 있습니다. 누르면 그 자리에서
+              이어집니다.
+            </div>
+            <div className="sess-list">
+              {sessionsBusy && <div className="sess-empty">불러오는 중…</div>}
+              {!sessionsBusy && sessions.length === 0 && (
+                <div className="sess-empty">
+                  대화가 없습니다. 맹비서가 꺼져 있으면 목록도 비어 보입니다 —
+                  없다는 뜻이 아닙니다.
+                </div>
+              )}
+              {sessions.map(sv => (
+                <button key={sv.id}
+                        className={`sess-item ${assistantSid === sv.id ? 'active' : ''}`}
+                        onClick={() => void openSession(sv.id)}>
+                  <span className="sess-src">
+                    {sv.source === 'discord' ? '💬 디스코드'
+                      : sv.source === 'telegram' ? '📱 텔레그램'
+                      : sv.source === 'api_server' ? '🖥 대시보드' : (sv.source ?? '?')}
+                  </span>
+                  <span className="sess-title">{sv.title || '(제목 없음)'}</span>
+                  <span className="sess-meta">{sv.message_count ?? 0}개</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
       {showManage && (
         <ManageModal
           onClose={() => setShowManage(false)}

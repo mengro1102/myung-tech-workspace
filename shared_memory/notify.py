@@ -98,6 +98,65 @@ def discord_credentials() -> tuple[str, str]:
     return tok, ch
 
 
+# DM 채널 id 는 한 번 열면 바뀌지 않는다. 알림마다 다시 열면 호출 낭비이고
+# 디스코드가 그 호출도 레이트리밋한다.
+_DM_CACHE = MYUNG_TECH / "shared_memory" / "store" / "discord_dm.json"
+
+
+def dm_recipient() -> str:
+    """DM 을 받을 사용자 id. 여러 명이면 첫 번째(사장님)."""
+    raw_ids = _cred("DISCORD_DM_USER",
+                    (MYUNG_TECH / ".env", "DISCORD_DM_USER"),
+                    (HERMES / ".env", "DISCORD_ALLOWED_USERS"))
+    for part in str(raw_ids).replace(";", ",").split(","):
+        p = part.strip()
+        if p.isdigit():
+            return p
+    return ""
+
+
+def _dm_channel(tok: str) -> tuple[str, str]:
+    """(DM 채널 id, 실패 사유). 캐시 → 없으면 디스코드에 연다.
+
+    실패해도 예외를 올리지 않는다 — 알림이 안 갔다고 프로젝트가 죽으면 안
+    된다. 대신 사유를 돌려주어 호출하는 쪽이 서버 채널로 내려가게 한다.
+    """
+    uid = dm_recipient()
+    if not uid:
+        return "", "DM 받을 사용자 id 가 없습니다 (DISCORD_ALLOWED_USERS)"
+
+    try:
+        if _DM_CACHE.exists():
+            cached = json.loads(_DM_CACHE.read_text(encoding="utf-8"))
+            if cached.get("user") == uid and cached.get("channel"):
+                return str(cached["channel"]), ""
+    except Exception:  # noqa: BLE001
+        pass                      # 캐시가 깨졌으면 다시 연다
+
+    try:
+        req = urllib.request.Request(
+            "https://discord.com/api/v10/users/@me/channels",
+            data=json.dumps({"recipient_id": uid}).encode("utf-8"),
+            headers={"Content-Type": "application/json",
+                     "User-Agent": USER_AGENT,
+                     "Authorization": f"Bot {tok}"},
+            method="POST")
+        with urllib.request.urlopen(req, timeout=15) as r:
+            ch = str((json.loads(r.read().decode("utf-8")) or {}).get("id") or "")
+    except Exception as e:  # noqa: BLE001
+        return "", f"DM 채널을 열지 못했습니다: {e}"
+    if not ch:
+        return "", "DM 채널 id 를 받지 못했습니다"
+
+    try:
+        _DM_CACHE.parent.mkdir(parents=True, exist_ok=True)
+        _DM_CACHE.write_text(json.dumps({"user": uid, "channel": ch},
+                                        ensure_ascii=False), encoding="utf-8")
+    except OSError:
+        pass                      # 캐시를 못 써도 이번 발송은 된다
+    return ch, ""
+
+
 def credentials() -> tuple[str, str]:
     """(텔레그램 토큰, 채널). 이제는 예비 경로다."""
     tok = _cred("TELEGRAM_BOT_TOKEN",
@@ -131,14 +190,43 @@ def _post(url: str, payload: dict, headers: dict) -> tuple[bool, str]:
 
 
 def _send_discord(text: str) -> tuple[bool, str]:
+    """DM 으로 보낸다. 안 되면 서버 채널로.
+
+    사장님이 정리하신 용도 경계:
+
+      DM        — 명테크의 전체적인 인터랙션(착수 승인·완료·정지)
+      서버 채널 — 맹비서에게 질의하고 **스레드로** 답을 받는 자리
+
+    전에는 DISCORD_HOME_CHANNEL(서버 채널)로만 보냈다. 그래서 결재 알림이
+    맹비서 질의 스레드들 사이에 섞여 쌓였다 — 알림은 조치가 필요하고 질의
+    스레드는 주제별로 모여 있어야 하니, 성격이 다른 둘을 한 자리에 두면
+    양쪽 다 쓰기 나빠진다.
+
+    서버 채널을 **버리지는 않는다.** DM 이 막혀 있으면(봇과 DM 차단, 공통
+    서버 없음) 알림이 통째로 사라진다. 내려갈 때는 폴백임을 밝힌다.
+    """
     tok, ch = discord_credentials()
-    if not (tok and ch):
-        return False, "디스코드 토큰 또는 채널이 없습니다"
+    if not tok:
+        return False, "디스코드 토큰이 없습니다"
     body = text if len(text) <= DISCORD_LIMIT else (
         text[:DISCORD_LIMIT] + "\n\n…(길어서 잘림 — 대시보드에서 전체를 보세요)")
-    return _post(DISCORD_API.format(ch), {"content": body},
-                 {"Authorization": f"Bot {tok}"})
 
+    dm, why = _dm_channel(tok)
+    if dm:
+        ok, err = _post(DISCORD_API.format(dm), {"content": body},
+                        {"Authorization": f"Bot {tok}"})
+        if ok:
+            return True, ""
+        why = f"DM 발송 실패({err})"
+
+    if not ch:
+        return False, f"{why}; 서버 채널도 없습니다"
+    ok, err = _post(
+        DISCORD_API.format(ch),
+        {"content": f"⚠️ DM 으로 보내지 못해 이 채널로 보냅니다 — {why}\n"
+                    f"(이 채널은 맹비서 질의용입니다)\n\n{body}"[:DISCORD_LIMIT]},
+        {"Authorization": f"Bot {tok}"})
+    return ok, "" if ok else f"{why}; 서버 채널도 실패({err})"
 
 def _send_telegram(text: str) -> tuple[bool, str]:
     tok, chat = credentials()
@@ -171,7 +259,17 @@ def send(text: str, quiet: bool = False) -> bool:
     if ok:
         return True
 
-    tg_ok, tg_why = _send_telegram(text)
+    # 폴백 메시지는 **자기가 폴백임을 밝힌다.**
+    #
+    # 전에는 그냥 같은 내용을 텔레그램으로 보냈다. 그래서 디스코드가
+    # HTTP 403(Cloudflare, User-Agent 누락)으로 막혀 있던 동안 사장님은
+    # 평범한 명테크 알림을 텔레그램에서 받았고, **"디스코드로 설정했는데 왜
+    # 텔레그램으로 오나" 로 두 번 물으셨다.** 설정 문제처럼 보인 것이다.
+    #
+    # 한 줄만 붙이면 그 질문이 사라진다 — 어디가 막혔는지가 메시지에 있다.
+    tg_ok, tg_why = _send_telegram(
+        f"⚠️ 디스코드로 보내지 못해 여기로 보냅니다 — {why}\n"
+        f"(디스코드가 정상이면 이 알림은 디스코드로만 갑니다)\n\n" + text)
     if not quiet:
         # 실패를 삼키지 않는다. 알림이 안 가는 것을 모르는 상태가 가장 나쁘다.
         where = "텔레그램으로 대신 보냈습니다" if tg_ok else f"텔레그램도 실패({tg_why})"
@@ -183,10 +281,29 @@ def status() -> dict:
     """어디로 나가는지. 진단과 설정 화면이 쓴다 — 토큰 값은 숨긴다."""
     dtok, dch = discord_credentials()
     ttok, tchat = credentials()
+
+    # 캐시된 DM 채널만 본다 — status() 는 진단용이라 디스코드에 호출을 날리지
+    # 않는다. 한 번도 안 열었으면 "channel" 로 보이고, 첫 발송 때 열린다.
+    _dm = ""
+    try:
+        if _DM_CACHE.exists():
+            _c = json.loads(_DM_CACHE.read_text(encoding="utf-8"))
+            if _c.get("user") == dm_recipient():
+                _dm = str(_c.get("channel") or "")
+    except Exception:  # noqa: BLE001
+        pass
+
     return {
-        "primary": ("discord" if (dtok and dch)
+        "primary": ("discord" if (dtok and (dch or _dm))
                     else ("telegram" if (ttok and tchat) else "없음")),
-        "discord": {"ready": bool(dtok and dch), "channel": dch or ""},
+        # **어디로** 가는지가 요점이다. 전에는 서버 채널만 적어서, 화면이
+        # "준비됨" 이라고 해도 DM 인지 채널인지 알 수 없었다.
+        "discord": {
+            "ready": bool(dtok and (dch or _dm)),
+            "target": "dm" if _dm else ("channel" if dch else None),
+            "dm": bool(_dm),
+            "channel": dch or "",          # DM 이 막혔을 때 내려갈 자리
+        },
         "telegram": {"ready": bool(ttok and tchat), "chat": tchat or ""},
     }
 

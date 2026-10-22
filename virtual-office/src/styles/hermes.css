@@ -561,11 +561,14 @@ body {
 .hs-chat-area {
   flex: 1;
   overflow-y: auto;
-  padding: 16px 40px 8px;
+  /* 실시간 활동을 들어내 세로가 비었다. 위아래 여백을 늘려 대화가 그
+     자리를 쓰게 한다. 좌우는 좁은 화면에서 숨막히지 않게 줄인다. */
+  padding: 24px 32px 12px;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 16px;
   min-height: 0;
+  scroll-behavior: smooth;
 }
 .hs-chat-area::-webkit-scrollbar { width: 4px; }
 .hs-chat-area::-webkit-scrollbar-thumb { background: var(--muted2); border-radius: 2px; }
@@ -575,11 +578,22 @@ body {
 }
 
 .hs-msg {
-  max-width: 780px;
+  /* 780px 에 묶여 있어서 넓은 화면에서 가운데만 쓰고 양옆이 비었다.
+     긴 글(서베이 요약 같은 것)은 읽는 줄이 짧을수록 눈이 더 많이 돌아간다. */
+  max-width: min(1040px, 100%);
   align-self: flex-start;
   display: flex;
-  gap: 10px;
+  gap: 12px;
 }
+/* 사장님 말풍선은 오른쪽에 붙인다 — 누가 한 말인지 모양으로 먼저 보인다. */
+.hs-msg.user { align-self: flex-end; flex-direction: row-reverse; }
+.hs-msg.user .hs-msg-body {
+  border-top-left-radius: 16px;
+  border-top-right-radius: 4px;
+  background: var(--primary-dim);
+  border-color: rgba(139, 92, 246, 0.28);
+}
+.hs-msg.user .hs-msg-sender { text-align: right; }
 .hs-msg-avatar {
   width: 32px; height: 32px;
   border-radius: 10px;
@@ -2331,6 +2345,143 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 /* 지식 네트워크 — 조회 방식. 숫자만 보여 주면 그 숫자가 검색에
    어떻게 쓰이는지 알 수 없다. 특히 '이전 AI 출력이 섞인다' 는 사실은
    경고 색으로 세운다. */
+/* 프롬프트 전문. 지문 대신 실제 글을 읽는 자리 — 긴 글이라 단계별로
+   접어 두고, 펼치면 원문 그대로 보여 준다(줄바꿈·들여쓰기 보존). */
+.pj-prompts {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 14px 0;
+}
+.pj-prompt-note {
+  font-size: 11px;
+  color: var(--muted);
+  line-height: 1.6;
+  word-break: keep-all;
+}
+.pj-prompt-item {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--bg2);
+}
+.pj-prompt-head {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 10px;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  text-align: left;
+  color: var(--text);
+}
+.pj-prompt-head:hover { background: var(--bg3); }
+.pj-prompt-phase {
+  font-size: 11px;
+  font-weight: 700;
+  padding: 1px 7px;
+  border-radius: 10px;
+  background: var(--primary-dim);
+  color: var(--primary);
+  white-space: nowrap;
+}
+.pj-prompt-meta {
+  font-size: 10px;
+  color: var(--muted);
+  font-family: 'JetBrains Mono', monospace;
+}
+.pj-prompt-caret { margin-left: auto; font-size: 10px; color: var(--muted); }
+.pj-prompt-body { padding: 0 10px 10px; }
+.pj-prompt-label {
+  font-size: 10px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin: 8px 0 4px;
+}
+.pj-prompt-pre {
+  margin: 0;
+  padding: 8px 10px;
+  max-height: 320px;
+  overflow: auto;
+  border-radius: 6px;
+  background: var(--bg3);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10.5px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--text);
+}
+/* 대화 기록(세션함). 출처를 먼저 보여 준다 — 디스코드에서 한 대화인지
+   대시보드에서 한 것인지가 "어디까지 말했더라" 를 떠올리는 단서다. */
+/* 맹비서 얼굴. 이모지 자리에 그대로 들어가도록 아바타 칸을 꽉 채운다. */
+.hs-msg-face {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: 50%;
+  display: block;
+}
+.sess-note {
+  margin: 0 20px 10px;
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--muted);
+  word-break: keep-all;
+}
+.sess-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 0 20px 20px;
+  max-height: 60vh;
+  overflow-y: auto;
+}
+.sess-empty {
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--muted);
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--bg2);
+  word-break: keep-all;
+}
+.sess-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg2);
+  color: var(--text);
+  cursor: pointer;
+  text-align: left;
+}
+.sess-item:hover { background: var(--bg3); }
+.sess-item.active { border-color: var(--primary); background: var(--primary-dim); }
+.sess-src {
+  font-size: 10px;
+  white-space: nowrap;
+  color: var(--muted);
+  min-width: 74px;
+}
+.sess-title {
+  flex: 1;
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sess-meta {
+  font-size: 10px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
 .mem-retrieval {
   margin: 0 20px 12px;
   padding: 10px 12px;

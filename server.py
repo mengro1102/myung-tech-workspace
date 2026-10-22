@@ -25,6 +25,10 @@ import subprocess
 import threading
 import uuid
 import socketserver
+import io              # 맹비서 .env 에서 키를 읽는다
+import urllib.error    # 중계 중 HTTPError 를 가려내려면 필요하다
+import urllib.parse    # 세션 id 를 경로에 넣을 때 따옴표 처리
+import urllib.request
 try:
     import psutil as _psutil
     HAS_PSUTIL = True
@@ -85,6 +89,78 @@ def _activity() -> dict:
         # 활동을 모르는 것과 활동이 없는 것은 다르다. 섞지 않는다.
         return {"status": "stopped", "running": False, "error": f"조회 실패: {e}",
                 "cycle_count": 0, "last_cycle": None, "logs": []}
+
+
+# ── 맹비서(hermes) API 중계 ──────────────────────────────────────────
+#
+# 키는 맹비서 .env 에만 있다. 브라우저에 내려보내지 않는다 — 내려보내면
+# 화면을 여는 누구나 에이전트를 실행할 수 있다.
+# 이 블록은 `from pathlib import Path` 보다 앞에 있다. 문자열로 둔다 —
+# 여기서 Path 를 쓰면 임포트 순서에 묶여 서버가 아예 안 뜬다(겪었다).
+HERMES_DIR = r"D:\AI_Workspace\hermes"
+ASSISTANT_BASE = "http://127.0.0.1:8642"
+
+# 대화는 길다(디스코드 실측 27초). 목록·히스토리는 짧다. 같은 값을 쓰면
+# 한쪽이 반드시 틀린다 — 짧으면 멀쩡한 답을 끊고, 길면 죽은 게이트웨이를
+# 하염없이 기다린다.
+ASSISTANT_TIMEOUT_READ = 20
+ASSISTANT_TIMEOUT_CHAT = 180
+
+
+def _assistant_key() -> str:
+    """맹비서 API 키. 환경변수 먼저, 없으면 hermes/.env."""
+    v = os.environ.get("API_SERVER_KEY", "").strip()
+    if v:
+        return v
+    try:
+        for ln in io.open(os.path.join(HERMES_DIR, ".env"),
+                          encoding="utf-8", errors="replace"):
+            t = ln.strip()
+            if t.startswith("API_SERVER_KEY=") and not t.startswith("#"):
+                return t.split("=", 1)[1].strip().strip('"').strip("'")
+    except OSError:
+        pass
+    return ""
+
+
+def _assistant_call(method: str, path: str, payload: dict | None = None,
+                    timeout: int = ASSISTANT_TIMEOUT_READ) -> tuple[int, dict]:
+    """(HTTP 상태, 본문). 예외를 올리지 않는다 — 화면이 사유를 받아야 한다."""
+    key = _assistant_key()
+    if not key:
+        return 503, {"error": "맹비서 API 키가 없습니다 — hermes/.env 의 "
+                              "API_SERVER_KEY 를 확인하십시오."}
+    data = json.dumps(payload).encode("utf-8") if payload is not None else None
+    req = urllib.request.Request(
+        ASSISTANT_BASE + path, data=data, method=method,
+        headers={"Content-Type": "application/json",
+                 "Authorization": f"Bearer {key}"})
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            body = r.read().decode("utf-8", "replace")
+            try:
+                return r.status, json.loads(body) if body else {}
+            except json.JSONDecodeError:
+                return r.status, {"raw": body[:2000]}
+    except urllib.error.HTTPError as e:
+        detail = e.read().decode("utf-8", "replace")[:500]
+        # 맹비서가 보낸 **진짜 사유**를 꺼내 준다. 전에는 "거절했습니다(400)"
+        # 만 올려서, 화면이 "세션을 만들지 못했습니다" 라고만 말했다 —
+        # 실제 사유는 "제목이 이미 쓰이고 있다" 였고 그걸 알 길이 없었다.
+        why = ""
+        try:
+            inner = json.loads(detail)
+            why = (((inner or {}).get("error") or {}).get("message")
+                   or (inner or {}).get("message") or "")
+        except Exception:  # noqa: BLE001
+            pass
+        return e.code, {"error": why or f"맹비서가 거절했습니다 ({e.code})",
+                        "detail": detail}
+    except Exception as e:  # noqa: BLE001
+        # 게이트웨이가 내려가 있는 경우가 대부분이다. 추측하지 말고 그대로.
+        return 503, {"error": f"맹비서에 닿지 못했습니다: {e}",
+                     "hint": "게이트웨이가 꺼져 있을 수 있습니다 — "
+                             "1. 전체 시작.bat"}
 
 
 def _disk_block() -> dict:
@@ -225,8 +301,10 @@ def _yt_catch_code(timeout: int = 180) -> None:
 
 def _yt_exchange(code: str, client_id: str, client_secret: str) -> dict:
     """인가 코드를 refresh_token 으로 바꾼다."""
-    import urllib.parse
-    import urllib.request
+    # urllib 은 최상위에서 임포트한다. 여기 지역 임포트를 두면 `urllib` 이
+    # 함수 전체의 지역 이름이 되어, 그 앞에서 쓰는 곳이 UnboundLocalError 로 죽는다(겪었다).
+    # urllib 은 최상위에서 임포트한다. 여기 지역 임포트를 두면 `urllib` 이
+    # 함수 전체의 지역 이름이 되어, 그 앞에서 쓰는 곳이 UnboundLocalError 로 죽는다(겪었다).
     data = urllib.parse.urlencode({
         "code": code, "client_id": client_id, "client_secret": client_secret,
         "redirect_uri": YT_REDIRECT_URI, "grant_type": "authorization_code",
@@ -334,7 +412,8 @@ def _approval_followup(row: dict) -> dict:
 def _ollama_models() -> list[dict]:
     """Ollama 에 실제로 설치된 모델 목록. 실패하면 빈 목록."""
     try:
-        import urllib.request
+        # urllib 은 최상위에서 임포트한다. 여기 지역 임포트를 두면 `urllib` 이
+        # 함수 전체의 지역 이름이 되어, 그 앞에서 쓰는 곳이 UnboundLocalError 로 죽는다(겪었다).
         with urllib.request.urlopen(f"{OLLAMA_HOST}/api/tags", timeout=5) as r:
             return json.loads(r.read().decode()).get("models", [])
     except Exception:
@@ -460,7 +539,7 @@ def _detect_ollama_host() -> str:
                     break
     except OSError:
         pass
-    import urllib.request as _ur2
+    import urllib.request as _ur2   # 별칭이라 urllib 을 가리지 않는다
     for host in candidates:
         try:
             _ur2.urlopen(f"{host}/api/tags", timeout=2).close()
@@ -502,7 +581,7 @@ _ollama_cache_lock = threading.Lock()
 
 def _probe_ollama_cached() -> tuple[bool, str]:
     """(ok, error) 반환. TTL 안이면 캐시된 값을 즉시 반환."""
-    import urllib.request as _ur
+    import urllib.request as _ur   # 별칭이라 urllib 을 가리지 않는다
 
     now = time.time()
     with _ollama_cache_lock:
@@ -1249,6 +1328,23 @@ class Handler(BaseHTTPRequestHandler):
             except Exception as e:  # noqa: BLE001
                 _json_resp(self, 500, {"error": f"보관 조회 실패: {e}"})
 
+        # ── GET /api/assistant/*  (맹비서 중계 — 읽기)
+        elif path == "/api/assistant/health":
+            st, body = _assistant_call("GET", "/health")
+            _json_resp(self, 200 if st == 200 else st,
+                       {"ok": st == 200, **body})
+
+        elif path == "/api/assistant/sessions":
+            st, body = _assistant_call("GET", "/api/sessions")
+            _json_resp(self, st, body)
+
+        elif (path.startswith("/api/assistant/sessions/")
+              and path.endswith("/messages")):
+            sid = path[len("/api/assistant/sessions/"):-len("/messages")]
+            st, body = _assistant_call(
+                "GET", f"/api/sessions/{urllib.parse.quote(sid)}/messages")
+            _json_resp(self, st, body)
+
         # ── GET /api/notify/status  (어느 채널이 주인가)
         #
         # 관리 탭이 전에는 /api/config/load 의 키 목록으로 채널을 판단했다.
@@ -1740,6 +1836,28 @@ class Handler(BaseHTTPRequestHandler):
         # RAISE_COMPLIANCE.md 의 "운영 사이클을 들어낸 이유" 절.
         # 아래가 POST 사슬의 첫 분기다. elif 로 두면 영원히 안 걸린다.
 
+        # ── POST /api/assistant/*  (맹비서 중계 — 쓰기)
+        #
+        # 메인 채팅이 여기로 온다. 전에는 /api/workflow/run 으로 부서 태스크를
+        # 큐에 넣었는데, 그 경로는 근거 조회·검토·방법 절을 전부 우회했다.
+        # 맹비서는 자기 세션·히스토리·도구를 갖고 있으므로 대화는 그쪽이 맞다.
+        if path == "/api/assistant/sessions":
+            body = self._read_body()
+            st, out = _assistant_call("POST", "/api/sessions", body or {})
+            _json_resp(self, st, out)
+            return
+
+        if (path.startswith("/api/assistant/sessions/")
+                and path.endswith("/chat")):
+            sid = path[len("/api/assistant/sessions/"):-len("/chat")]
+            body = self._read_body()
+            # 대화는 길다 — 디스코드 실측 27초. 짧게 주면 멀쩡한 답을 끊는다.
+            st, out = _assistant_call(
+                "POST", f"/api/sessions/{urllib.parse.quote(sid)}/chat",
+                body or {}, timeout=ASSISTANT_TIMEOUT_CHAT)
+            _json_resp(self, st, out)
+            return
+
         # ── POST /api/business/ideas  (AI 비즈니스 아이디어 생성)
         if path == "/api/business/ideas":
             body = self._read_body()
@@ -1953,7 +2071,8 @@ class Handler(BaseHTTPRequestHandler):
                     "error": "Client ID/Secret 을 먼저 저장하세요.",
                 })
                 return
-            import urllib.parse
+            # urllib 은 최상위에서 임포트한다. 여기 지역 임포트를 두면 `urllib` 이
+            # 함수 전체의 지역 이름이 되어, 그 앞에서 쓰는 곳이 UnboundLocalError 로 죽는다(겪었다).
             _yt_oauth.update({"state": uuid.uuid4().hex, "code": "", "error": "",
                               "started_at": time.time()})
             threading.Thread(target=_yt_catch_code, daemon=True).start()

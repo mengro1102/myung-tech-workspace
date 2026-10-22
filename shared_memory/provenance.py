@@ -183,10 +183,29 @@ def methods_section(p: dict, d: dict) -> str:
     A("")
     A(_arch)
     A("")
-    A(f"프롬프트 지문: "
-      + (", ".join(f"`{(s.get('call') or {}).get('prompt', '?')}`"
-                   f"({(s.get('call') or {}).get('prompt_chars', 0):,}자)"
-                   for s in drafts[-3:]) or "기록 없음"))
+    # 지문은 **대조용 값**이지 사람이 읽을 참조가 아니다.
+    #
+    # 전에는 `프롬프트 지문: adbd9bf37677(10,436자)` 라고만 적었다. 읽는
+    # 사람에게 이 줄은 아무것도 말해 주지 않는다 — 추적할 길도 없었다.
+    # 전문을 archive.py 에 보관해 두고도 화면에서 열 길이 없었으니,
+    # ①(전체 프롬프트 공개)이 절반만 된 상태였다.
+    #
+    # 그래서 (가) 지문이 무엇인지 밝히고 (나) 실제 글로 가는 길을 적는다.
+    _digests = [((s.get("call") or {}).get("prompt"),
+                 (s.get("call") or {}).get("prompt_chars", 0))
+                for s in drafts[-3:]]
+    _digests = [(d, n) for d, n in _digests if d]
+    if _digests:
+        A("프롬프트 지문 — **같은 지문이면 같은 프롬프트**라는 대조용 값입니다. "
+          "이 값만으로는 내용을 알 수 없습니다:")
+        A("")
+        for d, n in _digests:
+            A(f"- `{d}` · {n:,}자")
+        A("")
+        A("**실제로 들어간 글**은 산출물의 「📄 프롬프트」 버튼에서 보십시오 "
+          "(또는 위 보관 위치).")
+    else:
+        A("프롬프트 지문: 기록 없음")
     A("")
 
     # ── 2. 무엇을 근거로 했나 (ISPOR ④)

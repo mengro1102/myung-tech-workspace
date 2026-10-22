@@ -205,7 +205,8 @@ export default function ManageModal({ onClose, agentCount, globalModel, onOpenTe
   const [connKeys,    setConnKeys]    = useState<Record<string, boolean>>({});
   const [notifyState, setNotifyState] = useState<{
     primary?: string | null;
-    discord?: { ready?: boolean }; telegram?: { ready?: boolean };
+    discord?: { ready?: boolean; target?: string | null; dm?: boolean };
+    telegram?: { ready?: boolean };
   }>({});
   const [connHints,   setConnHints]   = useState<Record<string, string>>({});
   const [ytOauth,     setYtOauth]     = useState<{ connected: boolean; has_client: boolean } | null>(null);
@@ -596,7 +597,12 @@ export default function ManageModal({ onClose, agentCount, globalModel, onOpenTe
                 // 키 유무로 추정하지 않는다 — 디스코드 토큰은 명테크가 아니라
                 // hermes 의 .env 에 살아서 connKeys 에 아예 없다. notify 가
                 // 실제 준비 상태와 주 채널을 안다.
-                { icon: '💬', label: notifyState.discord?.ready ? (notifyState.primary === 'discord' ? '주 채널' : '보조') : '미연결', sub: '디스코드' },
+                // DM 인지 서버 채널인지가 요점이다. 용도를 갈랐다 —
+                // DM 은 명테크 알림(착수·완료·정지), 서버 채널은 맹비서 질의 스레드.
+                { icon: '💬',
+                  label: !notifyState.discord?.ready ? '미연결'
+                    : notifyState.discord?.target === 'dm' ? 'DM' : '서버 채널',
+                  sub: '디스코드 알림' },
                 { icon: '📱', label: notifyState.telegram?.ready ? (notifyState.primary === 'telegram' ? '주 채널' : '보조') : '미연결', sub: '텔레그램' },
                 // global_model 은 5개 부서 중 오케스트레이션 하나에만 간다.
                 // 나머지 넷은 라우터(auto:hermes)라 이 값을 무시한다.

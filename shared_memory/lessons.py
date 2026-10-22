@@ -40,6 +40,24 @@ COLL = "lessons"
 KEEP = 60               # 교훈이 무한히 쌓이면 주입 후보 고르기가 느려진다
 MAX_INJECT = 3          # 계획 프롬프트에 넣을 최대 건수
 
+# 그중 성공 사례에 내줄 최대 자리. 나머지는 막힌 기록 몫이다.
+#
+# 성공이 세 자리를 다 차지하면 14회 반려를 한 번에 풀었던 그 경고가
+# 프롬프트에서 사라진다. 막힌 기록이 더 비싸게 산 정보다.
+MAX_SUCCESS_INJECT = 1
+
+# 뜻으로 찾을 때의 경계선. 실측(질의 9개 · 교훈 3건 · 6/6 정답):
+#
+#   맞아야 할 것 최저   0.492   "모방학습·행동복제 관련 문헌을 정리"
+#   무관한 것 최고      0.366   "회계 장부 마감 절차 문서화"
+#
+# 간격 +0.126, 겹침 없음. 중간인 0.43 을 쓴다 — 양쪽 0.06 여백.
+#
+# kb_embed.MIN_SIM 주석에는 "임계값으로 관련성을 가를 수 없다" 고 적어
+# 뒀는데 모순이 아니다. **비교 대상이 다르다** — 위키 노드는 짧은 조각이라
+# 주제가 섞이지만, 교훈은 제목·아이디어·의도를 합친 긴 덩어리라 또렷하다.
+EMBED_MIN = 0.43
+
 # 텍스트 정규화는 projects 에서 가져온다 — 직접 만들지 않는다.
 #
 # 처음엔 여기에 토큰화와 불용어 목록을 따로 뒀다. 그랬더니 같은 지적 셋이
@@ -144,6 +162,56 @@ def record(project: dict, reason: str = "") -> dict | None:
         return None
 
 
+def record_success(project: dict) -> dict | None:
+    """반려 0회로 끝난 프로젝트의 **모양**을 남긴다.
+
+    아무 성공이나 남기지 않는다 — 반려가 한 번이라도 있었으면 평범한
+    완료고, 배울 것은 "무엇이 달라서 한 번도 안 막혔나" 뿐이다.
+
+    산출물 '내용' 은 넣지 않는다. 넣으면 다음 계획이 지난 프로젝트를
+    베낀다. 건수·반려 수·시간 같은 **모양**만 남긴다.
+    """
+    try:
+        pid = project.get("id") or ""
+        plan = project.get("plan") or {}
+        rejects = _rejections(project)
+        if rejects:
+            return None                     # 평범한 완료 — 배울 것이 없다
+        ds = plan.get("deliverables") or []
+        if not ds:
+            return None
+        steps = project.get("steps") or []
+        mins = round(sum(float(s.get("secs") or 0) for s in steps) / 60, 1)
+
+        row = {
+            "kind": "success",
+            "project_id": pid,
+            "title": plan.get("title") or project.get("title") or "",
+            "idea": str(project.get("idea") or "")[:400],
+            "intent": str(project.get("intent") or "")[:300],
+            "status": "done",
+            "deliverables": len(ds),
+            "steps": len(steps),
+            "rejections": 0,
+            "minutes": mins,
+            "recurring": [],
+            "dropped": [],
+            "topic": _fingerprint(
+                f"{plan.get('title', '')} {project.get('idea', '')} "
+                f"{project.get('intent', '')}"),
+            "at": datetime.now().isoformat(timespec="seconds"),
+        }
+        for old in workspace_store.load(COLL):
+            if old.get("project_id") == pid:
+                return workspace_store.update(COLL, old["id"], row)
+        new = workspace_store.add(COLL, row)
+        _prune()
+        return new
+    except Exception as exc:  # noqa: BLE001
+        print(f"[lessons] 성공 교훈 저장 실패(무시): {exc}", file=sys.stderr)
+        return None
+
+
 def _prune() -> None:
     rows = workspace_store.load(COLL)
     if len(rows) <= KEEP:
@@ -151,6 +219,41 @@ def _prune() -> None:
     rows.sort(key=lambda r: r.get("at") or "")
     for r in rows[:len(rows) - KEEP]:
         workspace_store.remove(COLL, r["id"])
+
+
+def _lesson_text(row: dict) -> str:
+    """임베딩에 넣을 교훈 본문. 지문이 아니라 원문을 쓴다 — 지문은 토큰만
+    추려 둔 것이라 뜻이 깎여 있다."""
+    return (f"{row.get('title', '')} {row.get('idea', '')} "
+            f"{row.get('intent', '')}")[:1200]
+
+
+def _by_meaning(idea: str, rows: list[dict], limit: int) -> list[dict] | None:
+    """뜻으로 고른다(bge-m3, 다국어). 쓸 수 없으면 None.
+
+    None 과 빈 목록을 가르는 것이 중요하다 — 호출하는 쪽이 "관련 교훈 없음"
+    과 "뜻으로 못 찾음" 을 구분해야 어휘 비교로 내려갈 수 있다. 섞으면
+    Ollama 가 내려간 날 교훈이 통째로 사라지고 아무도 모른다.
+    """
+    if not idea or not rows:
+        return None
+    try:
+        import kb_embed
+        vecs = kb_embed.embed([idea] + [_lesson_text(r) for r in rows])
+        if not vecs or len(vecs) != len(rows) + 1:
+            return None
+        q = kb_embed._norm(vecs[0])                       # noqa: SLF001
+        scored = []
+        for r, v in zip(rows, vecs[1:]):
+            sim = kb_embed._cos(q, kb_embed._norm(v))     # noqa: SLF001
+            if sim >= EMBED_MIN:
+                scored.append((sim, r))
+        scored.sort(key=lambda x: -x[0])
+        return [r for _, r in scored[:limit]]
+    except Exception as exc:  # noqa: BLE001
+        print(f"[lessons] 뜻으로 찾기 실패 — 어휘 비교로 내려갑니다: {exc}",
+              file=sys.stderr)
+        return None
 
 
 def relevant(idea: str, limit: int = MAX_INJECT) -> list[dict]:
@@ -161,6 +264,16 @@ def relevant(idea: str, limit: int = MAX_INJECT) -> list[dict]:
     제목·의도를 합친 것을 견준다. 자카드는 한쪽이 길면 값이 낮게 나오므로
     같은 문턱을 쓰면 같은 주제도 안 걸린다.
     """
+    rows_all = workspace_store.load(COLL)
+
+    # 뜻으로 먼저 찾는다. 한국어가 기본이므로 영어 제목·전문용어로 저장된
+    # 교훈도 걸려야 한다 — 어휘 비교로는 "강화학습" ↔ "RL Survey" 가
+    # 0.000 이었다. bge-m3 는 다국어라 표 없이 이어 준다.
+    by_meaning = _by_meaning(idea, rows_all, limit)
+    if by_meaning is not None:
+        return by_meaning
+
+    # 여기부터는 내리막길 — 임베딩을 못 쓸 때만 온다.
     want = _fingerprint(idea)
     if not want:
         return []
@@ -169,6 +282,15 @@ def relevant(idea: str, limit: int = MAX_INJECT) -> list[dict]:
         topic = r.get("topic") or ""
         sim = _similarity(want, topic)
         hit = len(set(want.split()) & set(topic.split()))
+        # 이 길의 한계를 적어 둔다 — **영어 제목·intent 가 지문을 채우면
+        # 한국어 재진술로 못 찾는다.** 실측: "RL Survey: Policy, Imitation,
+        # World Model, Robot" 교훈의 지문은 `action advantage arxiv behavior
+        # clon critic diffusion dreamer ...` 라서 "강화학습 서베이를 다시
+        # 쓴다…" 와 유사도 **0.000** 이다.
+        #
+        # 그래서 위에서 임베딩을 먼저 쓴다. 여기는 임베딩이 죽었을 때의
+        # 예비 경로이고, 그때는 이 한계를 안고 간다 — 교훈이 아예 안 걸리는
+        # 것보다는 낫다.
         if sim >= 0.22 or hit >= 3:
             scored.append((sim, hit, r))
     scored.sort(key=lambda x: (-x[0], -x[1], x[2].get("at") or ""))
@@ -182,10 +304,32 @@ def brief(idea: str, limit: int = MAX_INJECT) -> str:
     통째로 피한다. 실제로 필요한 것은 **같은 함정을 피하되 일은 하는 것**이라
         "이번에는 ~로 바꿔 잡으세요" 까지 적어 준다.
     """
-    rows = relevant(idea, limit)
-    if not rows:
+    # 막힌 기록을 먼저 채우고, 남은 자리에만 성공 사례를 넣는다.
+    # 순서를 바꾸면 더 비싸게 산 정보가 밀려난다.
+    picked = relevant(idea, limit)
+    stalls = [r for r in picked if r.get("kind") != "success"]
+    wins = [r for r in picked if r.get("kind") == "success"][:MAX_SUCCESS_INJECT]
+    room = max(0, limit - len(stalls))
+    wins = wins[:room]
+    if not stalls and not wins:
         return ""
-    out = ["[지난번에 막힌 기록 — 같은 함정을 반복하지 마세요]", ""]
+
+    out: list[str] = []
+    if wins:
+        out += ["[깨끗하게 끝난 모양 — 참고만 하세요, 베끼지 마세요]", ""]
+        for w in wins:
+            out.append(f"· \"{w.get('title', '')}\" — 산출물 "
+                       f"{w.get('deliverables', 0)}개 · 검토 반려 0회 · "
+                       f"{w.get('minutes', 0)}분")
+        out += ["",
+                "산출물을 적게 잡고 완료 조건을 자료만으로 채울 수 있게 "
+                "두면 이렇게 끝납니다. 주제가 다르면 모양도 달라야 하니 "
+                "건수를 그대로 따라 하지는 마세요.", ""]
+
+    rows = stalls
+    if not rows:
+        return "\n".join(out)
+    out += ["[지난번에 막힌 기록 — 같은 함정을 반복하지 마세요]", ""]
     for r in rows:
         head = f"· \"{r.get('title', '')}\" — {r.get('steps', 0)}단계 진행 후 중단"
         if r.get("rejections"):

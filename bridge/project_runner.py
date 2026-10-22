@@ -853,6 +853,23 @@ PLAN_SYSTEM = """당신은 명테크의 오케스트레이터입니다. 사장�
 합니다. 그보다 크면 글이 중간에서 끊기고, 끊긴 글은 검토를 통과하지 못합니다.
 '설계서와 코드와 운영 가이드' 처럼 성격이 다른 셋을 한 산출물에 묶지 마세요.
 
+**제목과 산출물 이름은 한국어로 쓰세요.** 이 시스템의 기본 언어가 한국어입니다.
+
+다만 **고유명사·약어는 원래 표기를 그대로 두세요** — `PPO`, `GRPO`, `DPO`,
+`RLHF`, `Transformer` 처럼 그게 그 기술의 이름인 것들입니다. 억지로 "근접
+정책 최적화" 로 풀어 쓰면 아무도 그렇게 부르지 않아 오히려 못 알아봅니다.
+
+바꿔야 하는 것은 **그 주위를 감싸는 말**입니다:
+
+    나쁨:  "RL Survey: Policy, Imitation, World Model, Robot"
+           "Part 1: Policy Optimization & RLHF"
+    좋음:  "강화학습 서베이 — 정책 최적화·모방학습·월드 모델·로봇 제어"
+           "1부: 정책 최적화와 RLHF"
+
+영어 제목으로 두면 나중에 한국어로 물었을 때 이 프로젝트의 기록을 찾지
+못합니다 — 실제로 "RL Survey…" 로 지은 프로젝트의 교훈이 "강화학습
+서베이…" 질의에 어휘 유사도 0.000 으로 안 걸린 적이 있습니다.
+
 아이디어가 깨져 있거나 뜻을 알 수 없으면 **계획을 세우지 마세요.** `title` 에
 "입력을 읽을 수 없습니다" 라고만 쓰고 `deliverables` 를 빈 배열로 두세요.
 조회된 자료로 그럴듯한 프로젝트를 만들어 내지 마세요 — 인코딩이 깨진
@@ -1255,6 +1272,14 @@ def _finish(p: dict) -> dict:
 
     # 검토를 통과한 것만 위키에 쌓는다. 그 순간부터 다음 질문에서 근거로
     # 딸려 나온다 — 에이전트가 매번 백지에서 시작하지 않게 하는 유일한 장치다.
+    # 반려 0회로 끝났으면 그 '모양' 을 남긴다. 평범한 완료는 남기지 않는다
+    # (lessons.record_success 가 거른다) — 배울 것은 "무엇이 달라서 한 번도
+    # 안 막혔나" 뿐이다.
+    try:
+        lessons.record_success(projects.get(pid) or p)
+    except Exception as exc:  # noqa: BLE001
+        print(f"[project] 성공 교훈 저장 실패(무시): {exc}", file=sys.stderr)
+
     archived: list[str] = []
     try:
         archived = experience.archive(projects.get(pid) or p)
