@@ -1,4 +1,21 @@
 import { useRef, useEffect } from 'react';
+import { deptLabels } from '../api';
+
+/** 알림 문구에 섞여 오는 부서 id 를 한글 이름으로 바꾼다.
+ *
+ *  알림만 `finance_dept 보고` · `research_dept 보고` 처럼 **내부 이름**을
+ *  그대로 보여 주고 있었다(실측). 화면의 다른 곳은 전부 한글이다
+ *  — 금융투자부·학술연구부. 알림이 유일하게 속을 드러내는 자리였다.
+ *
+ *  문구를 다시 만들지 않고 치환만 한다. 알림은 서버·에이전트·화면 여러
+ *  곳에서 만들어져서, 모양을 하나로 맞추려면 그 전부를 건드려야 한다. */
+function humanize(text: string): string {
+  let out = text;
+  for (const [id, label] of Object.entries(deptLabels)) {
+    out = out.split(id).join(label);
+  }
+  return out;
+}
 
 export interface Notification {
   id: string;
@@ -84,7 +101,7 @@ export default function NotificationBell({
                     {meta.icon}
                   </div>
                   <div className="nb-item-body">
-                    <div className="nb-item-msg">{n.message}</div>
+                    <div className="nb-item-msg">{humanize(n.message)}</div>
                     <div className="nb-item-time">{fmtTime(n.time)}</div>
                   </div>
                   <button className="nb-item-dismiss" onClick={e => { e.stopPropagation(); onRemove(n.id); }}>

@@ -284,9 +284,26 @@ export default function AgentManageTab({ agents, onDeploy, onDeptChat }: Props) 
                         onClick={async e => {
                           e.stopPropagation();
                           if (!confirm(`"${a.character_name}" 에이전트를 제거하시겠습니까?`)) return;
-                          await fetch(`/api/agents/${a.agent_id}`, { method: 'DELETE' });
-                          // 상위에서 agents 목록을 갱신할 수 없으므로 로컬에서 임시 hide
-                          (e.currentTarget.closest('.am-team-member-wrap') as HTMLElement)?.style.setProperty('display', 'none');
+                          // **응답을 본다.** 전에는 결과를 버리고 무조건 행을
+                          // 숨겼다 — 500 이 와도 지워진 것처럼 보였다. 실패를
+                          // 성공처럼 보이게 하는 것이 제일 나쁘다.
+                          const row = e.currentTarget.closest('.am-team-member-wrap') as HTMLElement | null;
+                          let ok = false;
+                          try {
+                            const r = await fetch(`/api/agents/${a.agent_id}`, { method: 'DELETE' });
+                            ok = r.ok;
+                            if (!ok) {
+                              const d = await r.json().catch(() => null);
+                              alert(`제거하지 못했습니다 (${r.status})`
+                                    + (d?.error ? ` — ${d.error}` : ''));
+                            }
+                          } catch {
+                            alert('제거하지 못했습니다 — 서버에 닿지 못했습니다');
+                          }
+                          if (!ok) return;
+                          // 성공했을 때만 숨긴다. 머릿수 배지는 상위가 들고
+                          // 있어 여기서 못 고치므로 새로고침해야 맞는다.
+                          row?.style.setProperty('display', 'none');
                         }}>✕</button>
                     </div>
                   ))

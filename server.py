@@ -205,7 +205,7 @@ def _disk_health() -> dict:
 class ThreadingHTTPServer(socketserver.ThreadingMixIn, HTTPServer):
     daemon_threads = True
 from pathlib import Path
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from urllib.parse import urlparse, parse_qs
 
 ROOT = Path(__file__).resolve().parent
@@ -243,6 +243,24 @@ YT_SCOPE = " ".join([
 ])
 _yt_oauth: dict = {"state": "", "code": "", "error": "", "started_at": 0.0}
 
+# ── 구글 캘린더 ──────────────────────────────────────────────────
+#
+# **같은 OAuth 클라이언트와 같은 리다이렉트를 쓴다.** 유튜브 연결이 이미
+# 돼 있다는 것은 구글 콘솔에 클라이언트가 있고 리다이렉트 URI 가 등록돼
+# 있다는 뜻이다. 캘린더용을 새로 만들면 사장님이 콘솔에서 클라이언트를
+# 하나 더 만들고 URI 를 또 등록해야 한다. 두 흐름이 동시에 돌 일은 없으니
+# 포트를 나눌 이유도 없다.
+#
+# 다만 **유튜브 동의에 범위를 얹지는 않는다.** 범위를 더하면 기존 동의가
+# 무효가 되어 되던 유튜브 연결이 끊긴다. 동의와 refresh_token 을 따로
+# 받아 따로 저장한다.
+#
+# 읽기만 받는다. 카드에 적힌 일(일정을 읽어 마감일과 맞추기)에 쓰기는
+# 필요 없고, 지금 필요 없는 권한을 받아 두면 나중에 버그 하나가 사장님
+# 달력을 고칠 수 있게 된다.
+CAL_SCOPE = "https://www.googleapis.com/auth/calendar.readonly"
+_cal_oauth: dict = {"state": "", "code": "", "error": "", "started_at": 0.0}
+
 
 def _env_get(key: str) -> str:
     if not ENV_FILE.exists():
@@ -262,24 +280,30 @@ def _env_set(key: str, value: str) -> None:
     ENV_FILE.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
-def _yt_catch_code(timeout: int = 180) -> None:
+def _yt_catch_code(timeout: int = 180, box: dict | None = None) -> None:
     """리다이렉트를 한 번만 받고 닫는 아주 작은 서버.
 
     구글이 브라우저를 이 주소로 되돌려 보낼 때 쿼리에 code 가 실려 온다.
     사람이 로그인하는 동안만 살아 있으면 되므로 스레드 하나로 충분하다.
+
+    `box` 로 **어느 흐름의 상태에 쓸지**를 받는다(기본은 유튜브). 캘린더가
+    같은 포트·같은 리다이렉트를 쓰기 때문에 필요하다 — 구글 콘솔에 URI 를
+    또 등록하지 않으려고 그렇게 했다. 둘이 동시에 돌 일은 없다.
     """
     import http.server
+
+    state = _yt_oauth if box is None else box
 
     class _Once(http.server.BaseHTTPRequestHandler):
         def do_GET(self):  # noqa: N802
             q = parse_qs(urlparse(self.path).query)
-            _yt_oauth["code"] = (q.get("code") or [""])[0]
-            _yt_oauth["error"] = (q.get("error") or [""])[0]
-            ok = bool(_yt_oauth["code"]) and (q.get("state") or [""])[0] == _yt_oauth["state"]
-            if not ok and not _yt_oauth["error"]:
-                _yt_oauth["error"] = "state 불일치 — 다시 시도하세요"
+            state["code"] = (q.get("code") or [""])[0]
+            state["error"] = (q.get("error") or [""])[0]
+            ok = bool(state["code"]) and (q.get("state") or [""])[0] == state["state"]
+            if not ok and not state["error"]:
+                state["error"] = "state 불일치 — 다시 시도하세요"
             msg = ("연결되었습니다. 이 창을 닫고 명테크로 돌아가세요."
-                   if ok else f"실패: {_yt_oauth['error'] or '알 수 없는 오류'}")
+                   if ok else f"실패: {state['error'] or '알 수 없는 오류'}")
             body = f"<meta charset='utf-8'><body style='font-family:sans-serif'>{msg}</body>"
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
@@ -292,7 +316,7 @@ def _yt_catch_code(timeout: int = 180) -> None:
     try:
         srv = http.server.HTTPServer(("127.0.0.1", YT_OAUTH_PORT), _Once)
     except OSError as e:  # 포트가 이미 물려 있다
-        _yt_oauth["error"] = f"포트 {YT_OAUTH_PORT} 를 열 수 없습니다: {e}"
+        state["error"] = f"포트 {YT_OAUTH_PORT} 를 열 수 없습니다: {e}"
         return
     srv.timeout = timeout
     srv.handle_request()      # 딱 한 번
@@ -313,6 +337,89 @@ def _yt_exchange(code: str, client_id: str, client_secret: str) -> dict:
                                  method="POST")
     with urllib.request.urlopen(req, timeout=30) as r:
         return json.loads(r.read().decode("utf-8"))
+
+
+def _google_access_token(refresh: str) -> str:
+    """refresh_token → access_token. 한 시간짜리라 저장하지 않고 그때그때 받는다."""
+    data = urllib.parse.urlencode({
+        "client_id": _env_get("YOUTUBE_OAUTH_CLIENT_ID"),
+        "client_secret": _env_get("YOUTUBE_OAUTH_CLIENT_SECRET"),
+        "refresh_token": refresh,
+        "grant_type": "refresh_token",
+    }).encode()
+    req = urllib.request.Request("https://oauth2.googleapis.com/token",
+                                 data=data, method="POST")
+    with urllib.request.urlopen(req, timeout=20) as r:
+        return (json.loads(r.read().decode("utf-8")) or {}).get("access_token", "")
+
+
+def _calendar_events(days: int = 14, limit: int = 20) -> dict:
+    """다가오는 일정. 연결돼 있지 않으면 **왜** 안 되는지 적어 돌려준다.
+
+    빈 목록을 돌려주면 화면이 "일정 없음" 이라고 말한다 — 연결이 끊긴
+    것과 일정이 없는 것은 완전히 다른 상태인데, 둘을 같게 보이게 된다.
+    """
+    refresh = _env_get("GOOGLE_CALENDAR_REFRESH_TOKEN")
+    if not refresh:
+        return {"ok": False, "connected": False, "events": [],
+                "error": "구글 캘린더가 아직 연결되지 않았습니다"}
+    try:
+        token = _google_access_token(refresh)
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "connected": True, "events": [],
+                "error": f"토큰 갱신 실패: {e}"}
+    if not token:
+        return {"ok": False, "connected": True, "events": [],
+                "error": "access_token 을 받지 못했습니다 — 다시 연결해 주세요"}
+
+    now = datetime.now(timezone.utc)
+    q = urllib.parse.urlencode({
+        "timeMin": now.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "timeMax": (now + timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "singleEvents": "true",          # 반복 일정을 날짜별로 펼친다
+        "orderBy": "startTime",          # singleEvents 없이는 쓸 수 없는 옵션이다
+        "maxResults": str(limit),
+    })
+    req = urllib.request.Request(
+        "https://www.googleapis.com/calendar/v3/calendars/primary/events?" + q,
+        headers={"Authorization": f"Bearer {token}"})
+    try:
+        with urllib.request.urlopen(req, timeout=20) as r:
+            data = json.loads(r.read().decode("utf-8")) or {}
+    except urllib.error.HTTPError as e:
+        detail = ""
+        try:
+            detail = (json.loads(e.read().decode("utf-8")) or {}) \
+                .get("error", {}).get("message", "")
+        except Exception:                 # noqa: BLE001
+            pass
+        # 403 은 대개 "이 프로젝트에서 Calendar API 가 꺼져 있다" 다.
+        # 그냥 403 이라고만 하면 어디를 손봐야 하는지 알 수 없다.
+        hint = (" — 구글 클라우드 콘솔에서 Google Calendar API 를 켜야 합니다"
+                if e.code == 403 else "")
+        return {"ok": False, "connected": True, "events": [],
+                "error": f"캘린더 조회 실패 ({e.code}) {detail}{hint}".strip()}
+    except Exception as e:                # noqa: BLE001
+        return {"ok": False, "connected": True, "events": [],
+                "error": f"캘린더 조회 실패: {e}"}
+
+    out = []
+    for it in data.get("items") or []:
+        start = it.get("start") or {}
+        end = it.get("end") or {}
+        out.append({
+            "id": it.get("id", ""),
+            "title": it.get("summary") or "(제목 없음)",
+            # dateTime 은 시각이 있는 일정, date 는 종일 일정이다. 둘을
+            # 구분해서 넘긴다 — 화면이 "오전 10:00" 과 "종일" 을 다르게 쓴다.
+            "start": start.get("dateTime") or start.get("date") or "",
+            "end": end.get("dateTime") or end.get("date") or "",
+            "all_day": not start.get("dateTime"),
+            "where": it.get("location") or "",
+            "link": it.get("htmlLink") or "",
+        })
+    return {"ok": True, "connected": True, "events": out,
+            "calendar": data.get("summary") or "기본 캘린더"}
 
 
 def _approval_followup(row: dict) -> dict:
@@ -450,6 +557,7 @@ ALLOWED_ENV_KEYS = {
     "GITHUB_TOKEN", "HUGGINGFACE_TOKEN",
     # OAuth 왕복으로 받은 refresh_token. 서버가 직접 쓴다.
     "YOUTUBE_OAUTH_REFRESH_TOKEN",
+    "GOOGLE_CALENDAR_REFRESH_TOKEN",
 }
 
 def _check_credential(key: str, value: str) -> str:
@@ -837,7 +945,7 @@ def _briefing() -> str:
             kinds[k] = kinds.get(k, 0) + 1
         detail = ", ".join(f"{k} {v}건" for k, v in kinds.items())
         blocked.append(f"결재 {len(appr)}건이 승인을 기다립니다 ({detail}). "
-                       "CEO 룸 결재함에서 처리하실 수 있습니다.")
+                       "프로젝트 탭 결재함에서 처리하실 수 있습니다.")
 
     paused, running, done_today = [], [], 0
     try:
@@ -903,7 +1011,7 @@ def _briefing() -> str:
 
     # ── 다음 한 걸음. 상황에 따라 다르게 권한다.
     if appr:
-        nxt = "CEO 룸에서 결재부터 처리하시면 막힌 일이 풀립니다."
+        nxt = "프로젝트 탭에서 결재부터 처리하시면 막힌 일이 풀립니다."
     elif paused:
         nxt = "멈춘 프로젝트의 심사 이력을 보시면 왜 막혔는지 나옵니다."
     elif running:
@@ -960,6 +1068,389 @@ def _dept_activity() -> dict[str, dict]:
         pass
 
     return out
+
+
+# ── 지식베이스 탐색 (지식베이스 탭) ─────────────────────────────
+#
+# 지금까지 화면이 위키를 보는 창구는 셋이었다: 카테고리별 slug 목록
+# (/api/knowledge/nodes), 본문 한 건(/api/knowledge/read), 텍스트 검색
+# (/api/knowledge/search). 목록은 slug 뿐이라 **제목도 날짜도 없었다** —
+# `references/2coool-2nd-workshop-on-the-challenge-of-out-of-label-haz…`
+# 같은 줄 227개를 보여 주는 것이 전부였다. 그걸로는 탐구가 안 된다.
+#
+# 아래 셋이 모자란 부분을 메운다:
+#
+#   _kb_tree   폴더 → 파일. 제목·로컬 수정시각·크기·출처를 함께 준다.
+#   _kb_doc    본문 + 프런트매터 + 이웃 노드. 뷰어 한 화면 분량.
+#   _kb_file   그림·PDF. md 안의 `![](../assets/…)` 가 실제로 보이려면
+#              바이트를 내줄 곳이 필요하다(216건이 그렇게 걸려 있다).
+#
+# ## 수정시각은 로컬 것을 준다
+#
+# "깃허브 동기화 시점이 아닌 **로컬** 업데이트 시점" 을 봐야 한다.
+# 그래서 git log 가 아니라 `st_mtime` 을 쓴다. 둘은 실제로 다르다 —
+# 깃에 올리지 않은 수집분이 references 227건 중 다수다.
+
+
+# 트리에 올리는 폴더. 순서가 화면 순서다 — 사람이 정리한 것이 먼저,
+# 기계가 모은 것이 나중. (경로, 화면 이름, 한 줄 설명).
+KB_TREE_DIRS = [
+    ("concepts",     "개념",        "사람이 정리한 개념 노드"),
+    ("entities",     "인물·조직",   "사람·회사·모델 노드"),
+    ("comparisons",  "비교",        "둘 이상을 견주어 정리한 노드"),
+    ("raw/projects", "부서 산출물", "에이전트가 만들어 결재를 통과한 것"),
+    ("references",   "논문",        "arXiv 에서 모은 참조"),
+    ("raw/papers",   "논문 전문",   "PDF 에서 뽑은 본문과 그림"),
+    ("raw/articles", "읽을 거리",   "밖에서 주입한 글"),
+    ("raw",          "기타 메모",   "분류 전 메모"),
+    ("glossary",     "용어",        "용어 정리"),
+]
+
+# 내줄 확장자. 화이트리스트인 이유: KB_PATH 아래에는 md·그림 말고도
+# scripts/*.py 와 graph.json·임베딩이 있다. 경로 이탈만 막고 전부 내주면
+# 수집 스크립트와 그래프 전체가 브라우저로 흘러 나간다.
+KB_FILE_TYPES = {
+    ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+    ".gif": "image/gif", ".webp": "image/webp", ".svg": "image/svg+xml",
+    ".pdf": "application/pdf",
+}
+
+# 프런트매터에서 꺼내 쓰는 열쇠. 전부 파싱하지 않는다 — references 의
+# `sources.authors` 는 저자 10여 명이 중첩 리스트로 들어와 있어서,
+# 300건 넘는 트리를 돌릴 때 그걸 다 담으면 응답이 수 MB 가 된다.
+_KB_FRONT_KEYS = ("title", "description", "type", "created", "updated", "slug")
+
+
+def _kb_front(path, *, head_bytes: int = 4096) -> dict:
+    """프런트매터에서 스칼라 몇 개만 꺼낸다.
+
+    YAML 파서를 쓰지 않는다. 트리 한 번에 300건 넘게 돌아야 하는데
+    (references 227 + concepts 55 + …) 거기서 PyYAML 을 300번 부르면
+    눈에 보이게 느려지고, `yaml` 이 없는 환경에서도 트리는 떠야 한다.
+
+    `head_bytes` 만 읽는다. 프런트매터는 파일 맨 앞에 있고 논문 본문은
+    수십 KB 라 전부 읽을 이유가 없다.
+    """
+    out: dict = {}
+    try:
+        with open(path, "r", encoding="utf-8", errors="replace") as fh:
+            if fh.readline().strip() != "---":
+                return out
+            head = fh.read(head_bytes)
+    except OSError:
+        return out
+    for line in head.split("\n"):
+        if line.strip() == "---":
+            break
+        # 들여쓰기·리스트 항목은 중첩 값이다. 스칼라만 본다.
+        if not line or line[0] in (" ", "\t", "-"):
+            continue
+        key, sep, val = line.partition(":")
+        if not sep or key.strip() not in _KB_FRONT_KEYS:
+            continue
+        val = val.strip()
+        if len(val) >= 2 and val[0] == val[-1] and val[0] in ("'", '"'):
+            val = val[1:-1]
+        if val:
+            out[key.strip()] = val
+    return out
+
+
+def _kb_title(path, rel: str) -> str:
+    """화면에 걸 이름. 프런트매터 title → 첫 `# 제목` → 파일명 순."""
+    front = _kb_front(path, head_bytes=2048)
+    if front.get("title"):
+        return front["title"]
+    try:
+        with open(path, "r", encoding="utf-8", errors="replace") as fh:
+            for _ in range(40):                    # 앞머리만 본다
+                line = fh.readline()
+                if not line:
+                    break
+                if line.startswith("# "):
+                    return line[2:].strip()
+    except OSError:
+        pass
+    return rel.rsplit("/", 1)[-1][:-3] if rel.endswith(".md") else rel
+
+
+def _kb_tree() -> dict:
+    """폴더 → 파일 목록. 제목·로컬 수정시각·크기·출처를 함께 준다."""
+    if knowledge_base is None or not knowledge_base.available():
+        return {"available": False, "folders": [], "total": 0, "mtime": 0,
+                "error": "지식베이스 경로를 찾지 못했습니다"}
+
+    root = knowledge_base.KB_PATH
+    folders: list[dict] = []
+    seen: set[str] = set()          # 'raw' 가 하위 폴더 파일을 또 세지 않도록
+
+    for rel, label, hint in KB_TREE_DIRS:
+        d = root / rel
+        if not d.is_dir():
+            continue
+        files = []
+        # 재귀하지 않는다 — 폴더 하나가 화면의 한 묶음이다.
+        for p in sorted(d.glob("*.md")):
+            r = rel + "/" + p.name
+            if r in seen:
+                continue
+            seen.add(r)
+            try:
+                st = p.stat()
+            except OSError:
+                continue
+            files.append({
+                "path": r, "name": p.name, "title": _kb_title(p, r),
+                "size": st.st_size, "mtime": int(st.st_mtime),
+                "origin": knowledge_base.origin_of(r),
+            })
+        if not files:
+            continue
+        folders.append({
+            "path": rel, "label": label, "hint": hint, "count": len(files),
+            # 폴더의 시각 = 가장 최근 파일. "이 묶음이 언제 자랐나" 가 궁금한 것이다.
+            "mtime": max(f["mtime"] for f in files),
+            "files": files,
+        })
+
+    # PDF 는 md 가 아니라 따로 묶는다. 뷰어는 브라우저 내장 PDF 뷰어로 넘긴다.
+    pdf_dir = root / "raw/pdfs"
+    if pdf_dir.is_dir():
+        pdfs = []
+        for p in sorted(pdf_dir.glob("*.pdf")):
+            try:
+                st = p.stat()
+            except OSError:
+                continue
+            pdfs.append({"path": "raw/pdfs/" + p.name, "name": p.name,
+                         "title": p.stem, "size": st.st_size,
+                         "mtime": int(st.st_mtime), "origin": "reference",
+                         "kind": "pdf"})
+        if pdfs:
+            folders.append({"path": "raw/pdfs", "label": "원문 PDF",
+                            "hint": "내려받은 논문 원본", "count": len(pdfs),
+                            "mtime": max(f["mtime"] for f in pdfs),
+                            "files": pdfs})
+
+    return {
+        "available": True,
+        "root": str(root),
+        "folders": folders,
+        "total": sum(f["count"] for f in folders),
+        # 위키 전체의 **로컬** 최신 변경. 깃 동기화 시각과 다르다.
+        "mtime": max((f["mtime"] for f in folders), default=0),
+        "now": int(time.time()),
+    }
+
+
+def _kb_doc(rel: str) -> dict:
+    """본문 + 프런트매터 + 이웃. 뷰어 한 화면에 필요한 것을 한 번에 준다."""
+    if knowledge_base is None or not knowledge_base.available():
+        return {"error": "지식베이스 경로를 찾지 못했습니다"}
+
+    root = knowledge_base.KB_PATH.resolve()
+    f = (knowledge_base.KB_PATH / rel).resolve()
+    # 경로 이탈 방지. `?path=../../.env` 가 그대로 들어온다고 보고 짠다.
+    if not f.is_relative_to(root) or not f.is_file():
+        return {"error": "문서를 찾지 못했습니다: " + rel}
+    if f.suffix.lower() != ".md":
+        return {"error": "md 파일만 읽습니다: " + rel}
+    try:
+        text = f.read_text(encoding="utf-8", errors="replace")
+        st = f.stat()
+    except OSError as e:
+        return {"error": "읽기 실패: " + str(e)}
+
+    # graph.json 의 키는 **맨 이름**이다 — `concepts/actor-critic` 이 아니라
+    # `actor-critic`. 경로째로 넘기면 이웃이 늘 0개로 나온다(실제로 그랬다).
+    node_id = rel.rsplit("/", 1)[-1]
+    if node_id.endswith(".md"):
+        node_id = node_id[:-3]
+
+    neighbors: list[dict] = []
+    try:
+        # 그래프에 있는 노드면 이웃을 붙인다. references 처럼 그래프에 없는
+        # 것도 많으므로 실패를 오류로 올리지 않는다 — 본문은 보여야 한다.
+        gnodes = (knowledge_base.load_graph() or {}).get("nodes") or {}
+        if not isinstance(gnodes, dict):
+            gnodes = dict(gnodes)
+        for sl, (hops, why) in (knowledge_base.neighbors(node_id, hops=1) or {}).items():
+            meta = gnodes.get(sl) or {}
+            neighbors.append({
+                "slug": sl,
+                "title": meta.get("title") or sl,
+                # 뷰어가 눌러서 이동하려면 경로가 필요하다. 그래프에 없는
+                # 이웃(dangling 위키링크)은 path 가 빈 값이고, 화면은 그걸
+                # 눌리지 않는 회색 꼬리표로 보여 준다.
+                "path": meta.get("path") or "",
+                "hops": hops, "why": why,
+            })
+        neighbors.sort(key=lambda n: (not n["path"], n["title"]))
+        neighbors = neighbors[:24]
+    except Exception:                              # noqa: BLE001
+        neighbors = []
+
+    return {
+        "path": rel, "title": _kb_title(f, rel),
+        "front": _kb_front(f, head_bytes=8192),
+        "text": text, "size": st.st_size, "mtime": int(st.st_mtime),
+        "origin": knowledge_base.origin_of(rel),
+        "neighbors": neighbors,
+    }
+
+
+def _kb_file(handler, rel: str) -> None:
+    """그림·PDF 바이트를 내준다.
+
+    md 안의 그림은 `![](../assets/papers/bert-pre-training/p003_fig001.jpeg)`
+    처럼 **상대 경로**로 걸려 있다(216건). 뷰어가 문서 폴더 기준으로 풀어서
+    이 엔드포인트로 부른다.
+
+    확장자 화이트리스트를 거친다 — KB_FILE_TYPES 주석에 이유를 적었다.
+    """
+    if knowledge_base is None or not knowledge_base.available():
+        _json_resp(handler, 404, {"error": "지식베이스 경로를 찾지 못했습니다"})
+        return
+    root = knowledge_base.KB_PATH.resolve()
+    f = (knowledge_base.KB_PATH / rel).resolve()
+    if not f.is_relative_to(root) or not f.is_file():
+        _json_resp(handler, 404, {"error": "파일이 없습니다: " + rel})
+        return
+    ctype = KB_FILE_TYPES.get(f.suffix.lower())
+    if not ctype:
+        _json_resp(handler, 403, {"error": "내줄 수 없는 형식입니다: " + f.suffix})
+        return
+    try:
+        body = f.read_bytes()
+    except OSError as e:
+        _json_resp(handler, 500, {"error": "읽기 실패: " + str(e)})
+        return
+    handler.send_response(200)
+    handler.send_header("Content-Type", ctype)
+    handler.send_header("Content-Length", str(len(body)))
+    # 수집물은 덮어쓰지 않으므로 내용이 바뀌면 경로도 사실상 바뀐다. 그림
+    # 수백 장을 문서를 옮길 때마다 다시 받지 않도록 짧게 캐시한다.
+    handler.send_header("Cache-Control", "public, max-age=3600")
+    handler.end_headers()
+    handler.wfile.write(body)
+
+
+# ── FreeLLMAPI 라우터 현황 ──────────────────────────────────────
+#
+# 화면의 "AI 모델" 점은 Ollama 를 본다. 그런데 **실제로 답을 만드는 것은
+# 대부분 라우터**다(freellmapi, 포트 3001). 무료 한도를 나눠 쓰는 구조라
+# 어느 공급자가 죽었는지·오늘 얼마나 썼는지가 바로 병목이 되는데, 그게
+# 화면 어디에도 없었다.
+#
+# 재료는 맹비서 쪽 `stack_status.py` 가 전부 갖고 있다. 새로 세지 않고
+# 그걸 부른다 — 같은 숫자를 두 군데서 세면 어긋나고, 어긋나면 둘 다 못
+# 믿게 된다.
+
+_ROUTER_CACHE: dict = {"at": 0.0, "data": None}
+_ROUTER_TTL = 20.0          # 화면이 10초마다 불러도 라우터는 20초에 한 번만
+
+
+def _stack_status():
+    """맹비서의 stack_status 모듈. 없으면 None.
+
+    **실패해도 서버는 떠야 한다.** 맹비서가 꺼져 있거나 경로가 바뀌었다고
+    명테크가 같이 죽으면 안 된다.
+    """
+    try:
+        if HERMES_DIR not in sys.path:
+            sys.path.append(HERMES_DIR)
+        import stack_status                      # noqa: PLC0415
+        return stack_status
+    except Exception:                            # noqa: BLE001
+        return None
+
+
+def _router_status() -> dict:
+    now = time.time()
+    if _ROUTER_CACHE["data"] is not None and now - _ROUTER_CACHE["at"] < _ROUTER_TTL:
+        return _ROUTER_CACHE["data"]
+
+    ss = _stack_status()
+    if ss is None:
+        out = {"ok": False, "reason": "맹비서의 stack_status 를 불러오지 못했습니다",
+               "providers": [], "recent": [], "today": []}
+        _ROUTER_CACHE.update(at=now, data=out)
+        return out
+
+    up = False
+    try:
+        up = bool(ss.port_open(ss.ROUTER_PORT))
+    except Exception:                            # noqa: BLE001
+        pass
+
+    avail, total = -1, -1
+    try:
+        avail, total = ss.router_models()
+    except Exception:                            # noqa: BLE001
+        pass
+
+    providers = []
+    try:
+        for plat, status, enabled in ss.key_health():
+            providers.append({"name": plat, "status": status, "enabled": bool(enabled)})
+    except Exception:                            # noqa: BLE001
+        pass
+
+    today = []
+    try:
+        for plat, n, tin, tout in ss.usage_today():
+            today.append({"name": plat, "calls": n,
+                          "in": int(tin or 0), "out": int(tout or 0)})
+    except Exception:                            # noqa: BLE001
+        pass
+
+    recent = []
+    try:
+        for ts, plat, status in ss.recent_upstreams(10):
+            recent.append({"at": ts, "name": plat, "status": status})
+    except Exception:                            # noqa: BLE001
+        pass
+
+    out = {
+        # 포트가 열렸고 모델 목록을 받았을 때만 ok. 포트만 보고 ok 라 하면
+        # 키가 만료돼 401 이 나는 상태를 "정상" 이라고 말하게 된다.
+        "ok": up and avail >= 0,
+        "up": up,
+        "available": avail, "total": total,
+        "providers": providers,
+        "healthy": sum(1 for p in providers if p["status"] == "healthy" and p["enabled"]),
+        "today": today,
+        "calls_today": sum(t["calls"] for t in today),
+        "recent": recent,
+        "port": getattr(ss, "ROUTER_PORT", 3001),
+    }
+    if not up:
+        out["reason"] = f"라우터가 포트 {out['port']} 에서 응답하지 않습니다"
+    elif avail < 0:
+        out["reason"] = "라우터는 떠 있는데 모델 목록을 못 받았습니다 (키 확인)"
+    _ROUTER_CACHE.update(at=now, data=out)
+    return out
+
+
+def _qs_int(qs: dict, key: str, default: int, *,
+            lo: int = 0, hi: int = 10_000) -> int:
+    """쿼리 파라미터를 정수로. 못 읽으면 기본값, 범위 밖이면 범위 안으로.
+
+    전에는 `int((qs.get("limit") or ["20"])[0])` 였다. `?limit=abc` 가
+    ValueError 를 던지고, do_GET 에 최상위 예외 처리가 없어서 **연결이
+    그대로 끊겼다** — 브라우저에는 `TypeError: Failed to fetch`, curl 에는
+    HTTP 000 으로 나왔다. 화면은 빈 칸이 되고 이유는 어디에도 안 남는다.
+
+    거절하지 않고 상식적인 값으로 받는다. `limit=abc` 는 공격이라기보다
+    오타이고, 그때 400 을 돌려주는 것보다 기본값으로 20건을 주는 편이
+    쓰는 사람에게 낫다.
+    """
+    v = (qs.get(key) or [""])[0]
+    try:
+        n = int(str(v).strip())
+    except (TypeError, ValueError):
+        return default
+    return max(lo, min(n, hi))
 
 
 def _json_resp(handler, status: int, data: dict | list):
@@ -1148,7 +1639,49 @@ class Handler(BaseHTTPRequestHandler):
         except json.JSONDecodeError:
             return {}
 
-    def do_GET(self):
+    # ── 예외 가드 ────────────────────────────────────────────────
+    #
+    # 전에는 do_GET 등에 최상위 예외 처리가 없었다. 어떤 예외든 핸들러를
+    # 빠져나가면 응답을 쓰지 않은 채 연결이 닫혀서, 쓰는 쪽에는
+    # `TypeError: Failed to fetch`(브라우저) · HTTP 000(curl) 으로 나타나고
+    # 화면은 그냥 빈 칸이 된다. 서버가 꺼진 건지, 데이터가 없는 건지,
+    # 주소가 틀린 건지 구분할 수가 없다. 로그에도 안 남았다.
+    #
+    # `?limit=abc` 하나로 재현했지만 그건 눈에 띈 사례일 뿐이다 — 앞으로
+    # 어느 경로에서 무슨 예외가 나도 똑같이 조용히 사라진다.
+    #
+    # 그래서 라우팅 본체를 `_route_*` 로 두고 여기서 감싼다. 라우팅 코드는
+    # 한 줄도 바꾸지 않는다.
+
+    def _guard(self, verb: str) -> None:
+        try:
+            getattr(self, f"_route_{verb}")()
+        except (BrokenPipeError, ConnectionResetError):
+            # 브라우저가 먼저 끊었다. 우리 잘못이 아니고 쓸 곳도 없다.
+            pass
+        except Exception:                           # noqa: BLE001
+            import traceback
+            tb = traceback.format_exc()
+            print(f"[server] {verb} {self.path} 처리 중 예외:\n{tb}",
+                  file=sys.stderr, flush=True)
+            try:
+                # 헤더를 이미 보냈으면 또 쓸 수 없다. 그때는 로그만 남는다 —
+                # 그래도 **왜 끊겼는지**는 알 수 있다.
+                _json_resp(self, 500, {
+                    "error": "서버에서 처리하지 못했습니다",
+                    "detail": tb.strip().splitlines()[-1][:300],
+                    "path": self.path[:200],
+                })
+            except Exception:                       # noqa: BLE001
+                pass
+
+    def do_GET(self):     self._guard("GET")        # noqa: N802,E704
+    def do_PUT(self):     self._guard("PUT")        # noqa: N802,E704
+    def do_DELETE(self):  self._guard("DELETE")     # noqa: N802,E704
+    def do_PATCH(self):   self._guard("PATCH")      # noqa: N802,E704
+    def do_POST(self):    self._guard("POST")       # noqa: N802,E704
+
+    def _route_GET(self):
         parsed = urlparse(self.path)
         path = parsed.path.rstrip("/")
         if self._blocked(path):
@@ -1406,8 +1939,8 @@ class Handler(BaseHTTPRequestHandler):
         elif path == "/api/tasks/list":
             qs = parse_qs(parsed.query)
             status_filter = (qs.get("status") or [None])[0]
-            limit  = int((qs.get("limit")  or ["20"])[0])
-            offset = int((qs.get("offset") or ["0"])[0])
+            limit  = _qs_int(qs, "limit", 20, lo=1, hi=1000)
+            offset = _qs_int(qs, "offset", 0, lo=0, hi=100_000)
             all_t  = task_queue.list_tasks(status_filter)
             all_t.sort(key=lambda t: t.get("updated_at", ""), reverse=True)
             total  = len(all_t)
@@ -1591,6 +2124,24 @@ class Handler(BaseHTTPRequestHandler):
                 items = [approval_tiers.annotate(r) for r in items]
             _json_resp(self, 200, {"items": items})
 
+        # ── GET /api/calendar/status
+        elif path == "/api/calendar/status":
+            _json_resp(self, 200, {
+                "connected": bool(_env_get("GOOGLE_CALENDAR_REFRESH_TOKEN")),
+                # 유튜브와 **같은 클라이언트**를 쓴다. 따로 만들지 않는 이유는
+                # CAL_SCOPE 위의 주석에.
+                "has_client": bool(_env_get("YOUTUBE_OAUTH_CLIENT_ID")
+                                   and _env_get("YOUTUBE_OAUTH_CLIENT_SECRET")),
+                "pending": bool(_cal_oauth["state"]) and not _cal_oauth["code"],
+                "error": _cal_oauth["error"],
+                "scope": CAL_SCOPE,
+            })
+
+        # ── GET /api/calendar/events?days=14
+        elif path == "/api/calendar/events":
+            days = _qs_int(parse_qs(parsed.query), "days", 14, lo=1, hi=90)
+            _json_resp(self, 200, _calendar_events(days=days))
+
         # ── GET /api/youtube/oauth/status
         elif path == "/api/youtube/oauth/status":
             _json_resp(self, 200, {
@@ -1665,6 +2216,28 @@ class Handler(BaseHTTPRequestHandler):
             except Exception as e:
                 _json_resp(self, 404, {"error": str(e)})
 
+        # ── GET /api/router/status  (FreeLLMAPI 라우터)
+        elif path == "/api/router/status":
+            _json_resp(self, 200, _router_status())
+
+        # ── GET /api/knowledge/tree  (지식베이스 탭 사이드바)
+        elif path == "/api/knowledge/tree":
+            _json_resp(self, 200, _kb_tree())
+
+        # ── GET /api/knowledge/doc?path=concepts/transformer.md  (뷰어)
+        elif path == "/api/knowledge/doc":
+            rel = (parse_qs(parsed.query).get("path") or [""])[0]
+            d = _kb_doc(rel) if rel else {"error": "path 가 없습니다"}
+            _json_resp(self, 404 if d.get("error") else 200, d)
+
+        # ── GET /api/knowledge/file?path=raw/assets/…  (그림·PDF)
+        elif path == "/api/knowledge/file":
+            rel = (parse_qs(parsed.query).get("path") or [""])[0]
+            if rel:
+                _kb_file(self, rel)
+            else:
+                _json_resp(self, 400, {"error": "path 가 없습니다"})
+
 
 
         elif not path.startswith("/api"):
@@ -1719,7 +2292,7 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def do_PUT(self):
+    def _route_PUT(self):
         """PATCH 대신 PUT 을 쓴다 — do_PATCH 는 이미 에이전트 수정에 쓰고 있다."""
         parsed = urlparse(self.path)
         path = parsed.path.rstrip("/")
@@ -1752,7 +2325,7 @@ class Handler(BaseHTTPRequestHandler):
         else:
             _json_resp(self, 404, {"error": "Not found"})
 
-    def do_DELETE(self):
+    def _route_DELETE(self):
         # do_DELETE 가 클래스 안에 두 번 정의돼 있었다. 파이썬은 뒤엣것으로
         # 덮어쓰므로 에이전트 삭제만 살아 있고 태스크 삭제는 죽어 있었다 —
         # UI 의 태스크 삭제 버튼이 조용히 아무 일도 하지 않은 이유다. 합친다.
@@ -1796,7 +2369,7 @@ class Handler(BaseHTTPRequestHandler):
         else:
             _json_resp(self, 404, {"error": "Not found"})
 
-    def do_PATCH(self):
+    def _route_PATCH(self):
         parsed = urlparse(self.path)
         path = parsed.path.rstrip("/")
         if self._blocked(path):
@@ -1820,7 +2393,7 @@ class Handler(BaseHTTPRequestHandler):
         else:
             _json_resp(self, 404, {"error": "Not found"})
 
-    def do_POST(self):
+    def _route_POST(self):
         parsed = urlparse(self.path)
         path = parsed.path.rstrip("/")
         if self._blocked(path):
@@ -2061,6 +2634,61 @@ class Handler(BaseHTTPRequestHandler):
                 _json_resp(self, 200, {"ok": True, "item": workspace_store.add(collection, body)})
             except Exception as e:  # noqa: BLE001
                 _json_resp(self, 400, {"ok": False, "error": str(e)})
+
+        # ── POST /api/calendar/oauth/start  → 구글 로그인 주소
+        elif path == "/api/calendar/oauth/start":
+            client_id = _env_get("YOUTUBE_OAUTH_CLIENT_ID")
+            if not client_id or not _env_get("YOUTUBE_OAUTH_CLIENT_SECRET"):
+                _json_resp(self, 400, {
+                    "ok": False,
+                    "error": "구글 OAuth Client ID/Secret 을 먼저 저장하세요 "
+                             "(유튜브 칸에 넣은 것과 같은 것을 씁니다).",
+                })
+                return
+            _cal_oauth.update({"state": uuid.uuid4().hex, "code": "", "error": "",
+                               "started_at": time.time()})
+            # 같은 포트·같은 리다이렉트. 수신기에 캘린더 상태함을 넘긴다.
+            threading.Thread(target=_yt_catch_code,
+                             kwargs={"box": _cal_oauth}, daemon=True).start()
+            auth_url = "https://accounts.google.com/o/oauth2/v2/auth?" + urllib.parse.urlencode({
+                "client_id": client_id,
+                "redirect_uri": YT_REDIRECT_URI,
+                "response_type": "code",
+                "scope": CAL_SCOPE,
+                "access_type": "offline",
+                "prompt": "consent",          # refresh_token 을 확실히 받으려면 필요
+                "state": _cal_oauth["state"],
+            })
+            _json_resp(self, 200, {"ok": True, "auth_url": auth_url,
+                                   "redirect_uri": YT_REDIRECT_URI})
+
+        # ── POST /api/calendar/oauth/finish
+        elif path == "/api/calendar/oauth/finish":
+            if _cal_oauth["error"]:
+                _json_resp(self, 400, {"ok": False, "error": _cal_oauth["error"]})
+                return
+            if not _cal_oauth["code"]:
+                _json_resp(self, 202, {"ok": False, "pending": True,
+                                       "error": "아직 구글에서 돌아오지 않았습니다."})
+                return
+            try:
+                tok = _yt_exchange(_cal_oauth["code"],
+                                   _env_get("YOUTUBE_OAUTH_CLIENT_ID"),
+                                   _env_get("YOUTUBE_OAUTH_CLIENT_SECRET"))
+            except Exception as e:  # noqa: BLE001
+                _json_resp(self, 400, {"ok": False, "error": f"토큰 교환 실패: {e}"})
+                return
+            refresh = tok.get("refresh_token")
+            if not refresh:
+                _json_resp(self, 400, {
+                    "ok": False,
+                    "error": "refresh_token 이 오지 않았습니다. 구글 계정의 앱 권한을 "
+                             "지우고 다시 시도하세요.",
+                })
+                return
+            _env_set("GOOGLE_CALENDAR_REFRESH_TOKEN", refresh)
+            _cal_oauth.update({"state": "", "code": "", "error": ""})
+            _json_resp(self, 200, {"ok": True, "connected": True})
 
         # ── POST /api/youtube/oauth/start  → 구글 로그인 주소를 돌려준다
         elif path == "/api/youtube/oauth/start":

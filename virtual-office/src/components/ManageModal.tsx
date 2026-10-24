@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, lazy, Suspense } from 'react';
 import { useStore } from '../useStore';
 const GuideModal = lazy(() => import('./GuideModal'));
-import { api, deptColors, deptLabels, type ApprovalRow, type IntegrationStatus, type ServiceRow, type TaskRow } from '../api';
+import { api, deptColors, deptLabels, type ApprovalRow, type IntegrationStatus, type CalendarEvents, type CalendarStatus, type KbTree, type RouterStatus, type ServiceRow, type TaskRow } from '../api';
 
 interface Props {
   onClose: () => void;
@@ -9,7 +9,9 @@ interface Props {
   globalModel: string;
   /** '팀 열기' 를 누르면 팀 화면으로 넘긴다. 예전에는 onClose 만 불러서
    *  창이 닫히기만 하고 아무 데도 가지 않았다. */
-  onOpenTeam: () => void;
+  /* onOpenTeam 은 뺐다. '우리 팀' 은 '팀 열기' 버튼 하나였는데,
+     에이전트 탭이 같은 것을 더 자세히 보여 준다. 모달 안에서 모달을 또
+     여는 길이기도 했다. */
 }
 
 /* MCP 탭을 뺐다.
@@ -24,7 +26,6 @@ interface Props {
 const TABS = ['대시보드', '내 서비스', '연동'] as const;
 type Tab = typeof TABS[number];
 
-interface Idea { title: string; value: string; difficulty: string; revenue: string; step: string; }
 interface TaskItem { id: string; text: string; done: boolean; }
 interface Approval { id: string; label: string; }
 
@@ -198,8 +199,133 @@ function IntegCard({ icon, title, desc, status, saved, children, onSave, onHelp,
   );
 }
 
+/** 일정 시각을 짧게. 종일 일정은 시각을 쓰지 않는다 — '오전 12:00' 이
+ *  붙으면 자정에 뭔가 있는 것처럼 읽힌다. */
+function calWhen(iso: string, allDay?: boolean): string {
+  if (!iso) return '';
+  const d = new Date(allDay ? `${iso}T00:00:00` : iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  const today = new Date();
+  const days = Math.round(
+    (new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime()
+     - new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime())
+    / 86400000);
+  const day = days === 0 ? '오늘' : days === 1 ? '내일'
+    : `${d.getMonth() + 1}/${d.getDate()}`;
+  if (allDay) return `${day} 종일`;
+  const h = d.getHours();
+  const mm = `${d.getMinutes()}`.padStart(2, '0');
+  const ampm = h < 12 ? '오전' : '오후';
+  const h12 = h % 12 === 0 ? 12 : h % 12;
+  return `${day} ${ampm} ${h12}:${mm}`;
+}
+
+/** 몇 분 전인지. 타일과 패널이 같은 말투를 쓰게 한 곳에 둔다. */
+function ago(ts?: number): string {
+  if (!ts) return '';
+  const sec = Math.max(0, Math.floor(Date.now() / 1000 - ts));
+  if (sec < 90) return '방금';
+  if (sec < 3600) return `${Math.floor(sec / 60)}분 전`;
+  if (sec < 86400) return `${Math.floor(sec / 3600)}시간 전`;
+  const d = Math.floor(sec / 86400);
+  return d < 30 ? `${d}일 전` : `${Math.floor(d / 30)}달 전`;
+}
+
+/** FreeLLMAPI 라우터 현황.
+ *
+ *  화면 위쪽의 "AI 모델" 점은 Ollama 를 본다. 그런데 부서 다섯 중 넷이
+ *  `auto:hermes` 로 **이 라우터**를 탄다. 무료 한도를 공급자별로 나눠
+ *  쓰는 구조라, 한 곳이 막히면 그 즉시 병목이 되는데 화면 어디에도 그게
+ *  없었다.
+ *
+ *  라우터가 죽었을 때 **빈 칸을 보여 주지 않는다.** 무엇이 안 되는지
+ *  적는다 — 빈 칸은 "원래 이런가 보다" 로 읽힌다. */
+function RouterPanel({ state }: { state: RouterStatus | null }) {
+  if (!state) {
+    return (
+      <div className="rt-panel">
+        <div className="rt-head">🔀 FreeLLMAPI 라우터<span>불러오는 중…</span></div>
+      </div>
+    );
+  }
+  const bad = state.providers.filter(p => p.enabled && p.status !== 'healthy');
+  return (
+    <div className={`rt-panel ${state.ok ? '' : 'down'}`}>
+      <div className="rt-head">
+        🔀 FreeLLMAPI 라우터
+        <span>{state.ok
+          ? `포트 ${state.port} · 공급자 ${state.healthy}/${state.providers.length} 정상`
+          : (state.reason ?? '응답 없음')}</span>
+      </div>
+
+      {state.ok && (
+        <>
+          <div className="rt-kpis">
+            <div className="rt-kpi">
+              <b>{state.available}</b>
+              <span>지금 쓸 수 있는 모델</span>
+            </div>
+            <div className="rt-kpi dim">
+              <b>{state.total}</b>
+              <span>카탈로그 전체</span>
+            </div>
+            <div className="rt-kpi">
+              <b>{state.calls_today}</b>
+              <span>오늘 호출 (UTC)</span>
+            </div>
+          </div>
+
+          <div className="rt-provs">
+            {state.providers.map(p => (
+              <span key={p.name}
+                    className={`rt-prov ${!p.enabled ? 'off' : p.status === 'healthy' ? 'ok' : 'bad'}`}
+                    title={p.enabled ? p.status : '꺼져 있습니다'}>
+                {p.name}
+              </span>
+            ))}
+          </div>
+
+          {bad.length > 0 && (
+            <div className="rt-warn">
+              {bad.map(p => p.name).join(' · ')} 가 정상이 아닙니다 —
+              이 공급자로 가던 호출이 다른 곳으로 몰립니다.
+            </div>
+          )}
+
+          {state.today.length > 0 && (
+            <div className="rt-today">
+              {state.today.map(t => (
+                <div key={t.name} className="rt-today-row">
+                  <span className="rt-today-n">{t.name}</span>
+                  <span className="rt-today-c">{t.calls}회</span>
+                  <span className="rt-today-t">
+                    입력 {t.in.toLocaleString()} · 출력 {t.out.toLocaleString()} 토큰
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {state.recent.length > 0 && (
+            <div className="rt-recent">
+              <span className="rt-recent-label">최근</span>
+              {state.recent.slice(0, 6).map((r, i) => (
+                <span key={i} className={`rt-dot ${r.status === 'success' ? 'ok' : 'bad'}`}
+                      title={`${r.at} · ${r.name} · ${r.status}`} />
+              ))}
+              <span className="rt-recent-last">
+                {state.recent[0].name} · {state.recent[0].at.slice(5, 16)}
+              </span>
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
 /* ══════════════════════════════════════════════════════ */
-export default function ManageModal({ onClose, agentCount, globalModel, onOpenTeam }: Props) {
+export default function ManageModal({ onClose, agentCount, globalModel }: Props) {
   const [tab,         setTab]         = useState<Tab>('대시보드');
   const [toast,       setToast]       = useState('');
   const [connKeys,    setConnKeys]    = useState<Record<string, boolean>>({});
@@ -211,6 +337,12 @@ export default function ManageModal({ onClose, agentCount, globalModel, onOpenTe
   const [connHints,   setConnHints]   = useState<Record<string, string>>({});
   const [ytOauth,     setYtOauth]     = useState<{ connected: boolean; has_client: boolean } | null>(null);
   const [ytBusy,      setYtBusy]      = useState(false);
+  /* 구글 캘린더. 유튜브와 **같은** OAuth 클라이언트를 쓴다 — 서버의
+     CAL_SCOPE 주석에 이유를 적었다. 그래서 여기 Client ID/Secret 입력란을
+     따로 두지 않는다. */
+  const [calState,    setCalState]    = useState<CalendarStatus | null>(null);
+  const [calBusy,     setCalBusy]     = useState(false);
+  const [calEvents,   setCalEvents]   = useState<CalendarEvents | null>(null);
 
   /* 연동의 **실제** 상태. 서버가 저장된 키로 한 번 호출해 본 결과다.
    * connKeys(=.env 에 값이 있는가)와 구분해서 쓴다 — 저장과 연결은 다르다. */
@@ -219,6 +351,19 @@ export default function ManageModal({ onClose, agentCount, globalModel, onOpenTe
   /* 가이드를 열 절. '' 면 닫힘. 카드마다 자기 절로 바로 연다 — 문서 전체를
      열어 주고 찾으라고 하면 결국 다시 물어보게 된다. */
   const [guide,       setGuide]       = useState('');
+
+  /* 라우터와 위키는 모달이 열릴 때 한 번만 받는다. 라우터 조회는
+     sqlite 를 읽고 HTTP 를 한 번 치므로, 주기적으로 돌리면 모달을 열어
+     둔 동안 계속 두드리게 된다(서버가 20초 캐시를 두지만 그래도). */
+  useEffect(() => {
+    void api.routerStatus().then(setRouterState);
+    void api.knowledgeTree().then(setKbTree);
+    void api.calendarStatus().then(st => {
+      setCalState(st);
+      // 연결돼 있을 때만 일정을 부른다. 아니면 구글을 괜히 두드린다.
+      if (st?.connected) void api.calendarEvents().then(setCalEvents);
+    });
+  }, []);
 
   const refreshIntegrations = useCallback(async () => {
     const r = await api.listIntegrations();
@@ -238,10 +383,21 @@ export default function ManageModal({ onClose, agentCount, globalModel, onOpenTe
     }
   }, []);
 
-  // 비즈니스 아이디어
-  const [ideas,       setIdeas]       = useState<Idea[]>([]);
-  const [ideaLoading, setIdeaLoading] = useState(false);
-  const [ideaCtx,     setIdeaCtx]    = useState('');
+  /* 비즈니스 아이디어 생성은 뺐다.
+   *
+   * `/api/business/ideas` 로 태스크를 만들어 90초 폴링하던 버튼이었다.
+   * 그 경로는 프로젝트 파이프라인(계획 → 근거 → 결재)을 타지 않는다 —
+   * **안전장치를 우회해 모델을 돌리는 두 번째 입구**였다. 같은 일을
+   * 프로젝트 탭의 '새 프로젝트' 가 근거와 결재를 거쳐서 한다. */
+
+  /* FreeLLMAPI 라우터. 화면의 "AI 모델" 점은 Ollama 를 보는데, 실제로
+   * 답을 만드는 것은 대부분 이쪽이다. 무료 한도를 나눠 쓰는 구조라
+   * 어느 공급자가 죽었는지가 바로 병목이 된다. */
+  const [routerState, setRouterState] = useState<RouterStatus | null>(null);
+  /* 지식베이스. 타일에 **로컬** 수정 시각을 띄운다 — 전에는 깃허브
+   * 토큰 유무로 '연결됨' 이라고 했는데, 그건 위키가 언제 자랐느냐와
+   * 아무 상관이 없다. */
+  const [kbTree,      setKbTree]      = useState<KbTree | null>(null);
 
   /* 서버 저장소. 에이전트도 같은 곳에 쓴다 — 화면에서 지운 할 일이 다시
    * 살아나지 않고, 에이전트가 올린 결재가 여기 뜬다. */
@@ -251,7 +407,6 @@ export default function ManageModal({ onClose, agentCount, globalModel, onOpenTe
   const tasks     = taskStore.items;
   const services  = serviceStore.items;
   const approvals = approvalStore.items;
-  const [taskInput,   setTaskInput]   = useState('');
 
 
   // 내 서비스
@@ -297,6 +452,40 @@ export default function ManageModal({ onClose, agentCount, globalModel, onOpenTe
    * 구글은 인가 코드를 브라우저 리다이렉트로 돌려준다. 그래서 세 걸음이다 —
    * 서버가 콜백 받을 자리를 열고 로그인 주소를 주면, 사람이 새 창에서
    * 로그인하고, 우리는 코드가 돌아왔는지 물어본다. */
+  /** 구글 캘린더 연결. 유튜브와 같은 흐름이다 — 새 창에서 동의를 마치면
+   *  서버가 refresh_token 을 받아 .env 에 넣는다. 3초마다 최대 3분 기다린다. */
+  const connectCalendar = async () => {
+    setCalBusy(true);
+    try {
+      const start = await api.calOauthStart();
+      if (!start?.ok || !start.auth_url) {
+        showToast(`❌ ${start?.error ?? '연결을 시작하지 못했습니다'}`);
+        return;
+      }
+      window.open(start.auth_url, '_blank', 'noopener,width=520,height=680');
+      showToast('🔐 새 창에서 구글 로그인을 마쳐 주세요');
+      for (let i = 0; i < 60; i++) {
+        await new Promise(r => setTimeout(r, 3000));
+        const fin = await api.calOauthFinish();
+        if (fin?.ok) {
+          showToast('✅ 구글 캘린더 연결됨 — 일정을 읽어 옵니다');
+          setCalState(await api.calendarStatus());
+          // 바로 일정을 띄운다. 연결만 되고 아무것도 안 보이면 진짜
+          // 되는지 알 수 없다.
+          setCalEvents(await api.calendarEvents());
+          return;
+        }
+        if (fin && !fin.pending) {
+          showToast(`❌ ${fin.error ?? '연결 실패'}`);
+          return;
+        }
+      }
+      showToast('❌ 시간 초과 — 다시 시도해 주세요');
+    } finally {
+      setCalBusy(false);
+    }
+  };
+
   const connectYouTube = async () => {
     setYtBusy(true);
     try {
@@ -343,89 +532,10 @@ export default function ManageModal({ onClose, agentCount, globalModel, onOpenTe
   }, [refreshIntegrations]);
 
   /* 비즈니스 아이디어 생성 */
-  /* 결과 파싱.
-   *
-   * 서버가 "### 아이디어 N" + "키: 값" 형식을 요구하므로 그것을 먼저 본다.
-   * 모델이 형식을 안 지키는 일은 늘 있으므로, 못 쪼개면 통째로 한 장 보여
-   * 준다 — 답을 받아 놓고 빈 화면을 보여 주는 것보다 낫다. */
-  const parseIdeas = (raw: string): Idea[] => {
-    const strip = (v: string) => v.replace(/\*\*/g, '').replace(/^[-•\s]+/, '').trim();
-    const field = (block: string, keys: string[]) => {
-      for (const k of keys) {
-        const m = block.match(new RegExp(`^\\s*\\**${k}\\**\\s*[:：]\\s*(.+)$`, 'm'));
-        if (m) return strip(m[1]);
-      }
-      return '';
-    };
-    const blocks = raw
-      .split(/^\s*#{1,4}\s*아이디어\s*\d*\s*$/gm)
-      .map(b => b.trim())
-      .filter(Boolean);
-    const parsed = blocks
-      .map(b => ({
-        title:      field(b, ['제목', '아이디어 제목']),
-        value:      field(b, ['가치', '핵심 가치 제안', '핵심 가치']),
-        difficulty: field(b, ['난이도', '실행 난이도']) || '보통',
-        revenue:    field(b, ['수익', '예상 수익 모델', '수익 모델']),
-        step:       field(b, ['첫걸음', '첫 번째 실행 단계', '실행 단계']),
-      }))
-      .filter(i => i.title);
-    if (parsed.length) return parsed.slice(0, 3);
+  /* 아이디어 응답 파서(parseIdeas)도 함께 뺐다 — 부르는 곳이 사라졌다.
+     생성 버튼의 제거 사유는 위 routerState 주석에. */
 
-    const lines = raw.split('\n').map(strip).filter(Boolean);
-    return [{
-      title:      lines[0]?.replace(/^[#\d.)\s]+/, '') || '아이디어',
-      value:      lines.slice(1, 5).join(' '),
-      difficulty: field(raw, ['난이도', '실행 난이도']) || '보통',
-      revenue:    field(raw, ['수익', '예상 수익 모델', '수익 모델']),
-      step:       field(raw, ['첫걸음', '첫 번째 실행 단계', '실행 단계']),
-    }];
-  };
 
-  const generateIdeas = async () => {
-    setIdeaLoading(true);
-    setIdeas([]);
-    try {
-      const r = await fetch('/api/business/ideas', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ context: ideaCtx || '명테크 멀티-에이전트 워크스페이스, YouTube 채널, PayPal 결제' }),
-      });
-      const d = await r.json();
-      if (!d.task_id) {
-        setIdeaLoading(false);
-        showToast(`❌ 아이디어 생성 요청 실패${d.error ? ` — ${d.error}` : ''}`);
-        return;
-      }
-      // 태스크 결과 폴링 (최대 90초).
-      // GET /api/tasks/:id 는 { task, events } 를 돌려준다. 예전에는 td.status /
-      // td.result 를 최상위에서 읽어서 영원히 undefined 였다 — 태스크가 done 이
-      // 되어도 버튼은 90초 동안 돌다가 아무 말 없이 멈췄다.
-      const deadline = Date.now() + 90000;
-      const poll = async () => {
-        if (Date.now() > deadline) {
-          setIdeaLoading(false);
-          showToast('❌ 아이디어 생성 시간 초과 (90초)');
-          return;
-        }
-        const tr = await fetch(`/api/tasks/${d.task_id}`).catch(() => null);
-        if (!tr) { setTimeout(poll, 3000); return; }
-        const body = await tr.json().catch(() => null);
-        const td = body?.task ?? body;
-        if (!td) { setTimeout(poll, 3000); return; }
-
-        if (td.status === 'done' && td.result) {
-          setIdeas(parseIdeas(td.result as string));
-          setIdeaLoading(false);
-        } else if (td.status === 'failed') {
-          showToast(`❌ 아이디어 생성 실패${td.result ? ` — ${String(td.result).slice(0, 80)}` : ''}`);
-          setIdeaLoading(false);
-        } else {
-          setTimeout(poll, 3000);
-        }
-      };
-      poll();
-    } catch { setIdeaLoading(false); showToast('❌ 서버 미연결'); }
-  };
 
   /* YouTube + PayPal 동시 연결 */
   const connectBatch = async () => {
@@ -493,13 +603,8 @@ export default function ManageModal({ onClose, agentCount, globalModel, onOpenTe
    * 결재함을 시험하려면 테스트_시나리오.md 의 B-4 를 쓰면 된다. 실제
    * 결재 건으로 등급 묶음·일괄승인 건수 확인까지 같은 것을 본다. */
 
-  /* 태스크 추가 */
-  const addTask = async () => {
-    if (!taskInput.trim()) return;
-    const ok = await taskStore.add({ text: taskInput.trim(), done: false, source: 'user' });
-    if (!ok) { showToast('❌ 할 일 저장 실패 — 서버 확인'); return; }
-    setTaskInput('');
-  };
+  /* 할 일 추가는 '할 일'(프로젝트 탭) 로 옮겼다. 여기 타일의 숫자는
+     그대로 둔다 — 한눈에 몇 건 남았는지는 여기서도 쓸모가 있다. */
 
   /* ─────────────────────────────────────────────── */
   return (
@@ -533,63 +638,19 @@ export default function ManageModal({ onClose, agentCount, globalModel, onOpenTe
         {tab === '대시보드' && (
           <div className="mem-content">
 
-            {/* 비즈니스 리포트 버튼 */}
-            <button
-              onClick={generateIdeas}
-              disabled={ideaLoading}
-              style={{
-                display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
-                width: '100%', padding: '14px',
-                background: ideaLoading ? 'var(--bg3)' : 'var(--green)',
-                border: ideaLoading ? '1px solid var(--border)' : 'none',
-                borderRadius: 10, color: ideaLoading ? 'var(--muted)' : '#000',
-                fontSize: 14, fontWeight: 800, cursor: ideaLoading ? 'wait' : 'pointer',
-                marginBottom: 16, transition: 'all 0.2s',
-              }}
-            >
-              {ideaLoading ? '⏳ AI가 비즈니스 아이디어 분석 중...' : '💎 비즈니스 아이디어 생성'}
-            </button>
-
-            {/* 아이디어 컨텍스트 */}
-            <input
-              className="hm-input"
-              placeholder="컨텍스트 (예: YouTube + SaaS, 예상 월수익 100만원)"
-              value={ideaCtx}
-              onChange={e => setIdeaCtx(e.target.value)}
-              style={{ marginBottom: 12 }}
-            />
-
-            {/* 아이디어 카드 */}
-            {ideas.length > 0 && (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 16 }}>
-                {ideas.map((idea, i) => (
-                  <div key={i} style={{
-                    background: 'var(--bg3)', border: '1px solid rgba(15,253,106,0.2)',
-                    borderRadius: 10, padding: '12px 14px',
-                  }}>
-                    <div style={{ fontWeight: 700, fontSize: 13, color: 'var(--green)', marginBottom: 6 }}>
-                      {['🥇','🥈','🥉'][i]} {idea.title}
-                    </div>
-                    {idea.value && <div style={{ fontSize: 12, color: 'var(--text)', marginBottom: 4 }}>{idea.value}</div>}
-                    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                      {idea.difficulty && <span style={{ fontSize: 10, padding: '2px 6px', borderRadius: 4, background: 'rgba(255,255,255,0.05)', color: 'var(--muted)' }}>난이도: {idea.difficulty}</span>}
-                      {idea.revenue && <span style={{ fontSize: 10, padding: '2px 6px', borderRadius: 4, background: 'rgba(255,255,255,0.05)', color: 'var(--muted)' }}>{idea.revenue}</span>}
-                    </div>
-                    {idea.step && <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 6 }}>▶ {idea.step}</div>}
-                  </div>
-                ))}
-              </div>
-            )}
-
             {/* 타일 그리드 */}
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 8, marginBottom: 16 }}>
               {[
                 { icon: '🏢', label: '명테크', sub: '워크스페이스' },
                 { icon: '🤖', label: String(agentCount || 0), sub: '에이전트' },
                 { icon: '📋', label: String(tasks.filter(t=>!t.done).length), sub: '열린 할 일' },
-                // 미연결일 때 '0' 을 띄우면 지식이 0건이라는 뜻으로 읽힌다. 실제로는
-                //  GraphRAG 에 82 노드가 있다. 다른 카드처럼 연결 여부만 말한다.
-                { icon: '🧠', label: connKeys.GITHUB_TOKEN ? '연결됨' : '미연결', sub: '지식 노트' },
+                // 전에는 `connKeys.GITHUB_TOKEN` 으로 '연결됨/미연결' 을 띄웠다.
+                // 그건 **깃허브 토큰이 있느냐**는 말이지 위키가 언제 자랐느냐가
+                // 아니다. 둘은 실제로 다르다 — 수집분 다수가 깃에 올라가 있지
+                // 않다. 건수와 로컬 수정 시각을 보여 준다.
+                { icon: '🧠',
+                  label: kbTree?.available ? `${kbTree.total}건` : '확인 불가',
+                  sub: kbTree?.available ? `지식베이스 · ${ago(kbTree.mtime)}` : '지식베이스' },
                 { icon: '📦', label: String(services.length), sub: '등록 서비스' },
                 { icon: '💳', label: connKeys.PAYPAL_CLIENT_ID ? '연결됨' : '미연결', sub: 'PayPal' },
                 // 주 알림 채널은 디스코드다(notify.primary = discord). 전에는
@@ -619,59 +680,8 @@ export default function ManageModal({ onClose, agentCount, globalModel, onOpenTe
               ))}
             </div>
 
-            {/* 우리 팀 */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
-              <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)' }}>👥 우리 팀 — {agentCount}명 AI</span>
-              <button style={{
-                marginLeft: 'auto', padding: '4px 12px',
-                background: 'var(--green)', color: '#000',
-                border: 'none', borderRadius: 6, fontSize: 11, fontWeight: 700, cursor: 'pointer',
-              }} onClick={onOpenTeam}>팀 열기</button>
-            </div>
-
-            {/* 태스크 보드 */}
-            <div style={{ marginBottom: 16 }}>
-              <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)', marginBottom: 8 }}>
-                📋 태스크 보드 — 할 일 <span style={{ fontSize: 10, color: 'var(--muted)' }}>(에이전트가 올린 것도 여기 쌓입니다)</span>
-              </div>
-              <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
-                <input
-                  className="hm-input"
-                  style={{ flex: 1 }}
-                  placeholder="할 일 추가 (예: 썸네일 시안 3개 만들기)"
-                  value={taskInput}
-                  onChange={e => setTaskInput(e.target.value)}
-                  onKeyDown={e => e.key === 'Enter' && addTask()}
-                />
-                <button className="hm-save-btn" style={{ margin: 0, padding: '6px 14px', fontSize: 12 }} onClick={addTask}>+ 추가</button>
-              </div>
-              {tasks.length === 0 ? (
-                <div className="mem-beta-note" style={{ margin: 0 }}>할 일이 없어요 — 위에 추가하거나, 에이전트가 올릴 때까지 기다리세요.</div>
-              ) : (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                  {tasks.map(t => (
-                    <div key={t.id} style={{
-                      display: 'flex', alignItems: 'center', gap: 8,
-                      padding: '6px 10px', background: 'var(--bg3)', borderRadius: 8,
-                      border: '1px solid var(--border)',
-                    }}>
-                      <input type="checkbox" checked={t.done}
-                        onChange={() => taskStore.update(t.id, { done: !t.done })}
-                        style={{ accentColor: 'var(--green)', cursor: 'pointer' }}
-                      />
-                      <span style={{ flex: 1, fontSize: 12, color: t.done ? 'var(--muted)' : 'var(--text)', textDecoration: t.done ? 'line-through' : 'none' }}>{t.text}</span>
-                      {t.source && t.source !== 'user' && (
-                        <span style={{ fontSize: 10, color: 'var(--secondary)', flexShrink: 0 }}>
-                          {deptLabels[t.source] ?? t.source}
-                        </span>
-                      )}
-                      <button onClick={() => taskStore.remove(t.id)}
-                        style={{ background: 'none', border: 'none', color: 'var(--muted2)', cursor: 'pointer', fontSize: 14 }}>✕</button>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
+            {/* FreeLLMAPI 라우터 */}
+            <RouterPanel state={routerState} />
 
             {/* 승인 큐 */}
             <div>
@@ -679,7 +689,7 @@ export default function ManageModal({ onClose, agentCount, globalModel, onOpenTe
                 <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)' }}>✅ 승인 큐 — 에이전트가 중요한 일 전에 결재 요청</span>
                 <span style={{
                   marginLeft: 'auto', fontSize: 11, color: 'var(--muted)',
-                }}>등급·일괄승인은 CEO 룸 결재함에서</span>
+                }}>등급·일괄승인은 프로젝트 탭 결재함에서</span>
               </div>
               {approvals.length === 0 ? (
                 <div className="mem-beta-note" style={{ margin: 0 }}>
@@ -756,16 +766,39 @@ export default function ManageModal({ onClose, agentCount, globalModel, onOpenTe
                           taskStore.refresh();
                         }}>승인</button>
                         <button className="hm-approve-btn no" onClick={async () => {
+                          // 결재함과 같은 확인을 둔다 — 여기만 안 물으면
+                          // 두 화면이 서로 다른 위험도를 갖게 된다.
+                          if (!confirm(`"${a.label}"\n\n거절하면 이 일은 실행되지 않습니다. `
+                                       + '계속할까요?')) return;
                           await approvalStore.update(a.id, { status: 'rejected' });
                           showToast('거절했습니다 — 후속 작업은 만들지 않습니다');
                         }}>거절</button>
                       </>
                     )}
+                    {/* 이 ✕ 는 **하드 삭제**다(workspace_store.remove 가 행을
+                        아예 없앤다). 바로 옆 거절보다 센 동작인데 생김새는
+                        제일 약했고, 확인도 없었다. 결재함(ApprovalBox)에는
+                        이런 버튼이 아예 없다 — 관리 탭에만 있었다.
+
+                        대기 중인 건은 아예 못 지우게 한다. 지워야 할 이유가
+                        있다면 거절이 맞는 동작이고, 거절은 기록이 남는다. */}
                     <button
-                      onClick={() => approvalStore.remove(a.id)}
+                      onClick={() => {
+                        const pending = (a.status ?? 'pending') === 'pending';
+                        if (pending) {
+                          showToast('⚠️ 대기 중인 결재는 지울 수 없습니다 — 승인하거나 거절해 주세요');
+                          return;
+                        }
+                        if (!confirm(`"${a.label}" 기록을 목록에서 지웁니다.\n`
+                                     + '되돌릴 수 없습니다. 계속할까요?')) return;
+                        void approvalStore.remove(a.id);
+                      }}
                       style={{ background: 'none', border: 'none', color: 'var(--muted2)',
                                cursor: 'pointer', fontSize: 14 }}
-                      aria-label="승인 항목 삭제"
+                      title={(a.status ?? 'pending') === 'pending'
+                        ? '대기 중인 결재는 지울 수 없습니다'
+                        : '기록을 목록에서 지웁니다'}
+                      aria-label="결재 기록 삭제"
                     >✕</button>
                   </div>
                 );
@@ -801,7 +834,18 @@ export default function ManageModal({ onClose, agentCount, globalModel, onOpenTe
                       {svc.url && <div style={{ fontSize: 11, color: 'var(--muted)' }}>{svc.url}</div>}
                       {svc.github && <div style={{ fontSize: 10, color: 'var(--muted2)' }}>📦 {svc.github}</div>}
                     </div>
-                    <button onClick={() => serviceStore.remove(svc.id)}
+                    {/* 확인 없이 지우고 있었다. 결재 ✕ 와 같은 종류의 구멍이다 —
+                        지운 서비스는 에이전트 시스템 프롬프트에서도 빠지므로,
+                        다음 답변부터 그 서비스를 모르는 채로 답하게 된다. */}
+                    <button
+                      onClick={() => {
+                        if (!confirm(`"${svc.name}" 을(를) 목록에서 지웁니다.
+`
+                                     + '에이전트가 더는 이 서비스를 알지 못합니다. 계속할까요?')) return;
+                        void serviceStore.remove(svc.id);
+                      }}
+                      title="서비스 등록 해제"
+                      aria-label={`${svc.name} 등록 해제`}
                       style={{ background: 'none', border: 'none', color: 'var(--muted2)', cursor: 'pointer' }}>✕</button>
                   </div>
                 ))}
@@ -826,6 +870,142 @@ export default function ManageModal({ onClose, agentCount, globalModel, onOpenTe
                 borderRadius: 8, color: 'var(--primary)', fontSize: 12.5,
                 fontWeight: 600, cursor: 'pointer',
               }}>📖 연동 가이드 열기 — 발급 절차 · 권한 · 확인 방법</button>
+
+            {/* GitHub */}
+            <IntegCard icon="🐙" title="GitHub (서비스 레포)" desc="'내 서비스' 에 등록한 레포를 읽고, 결재 승인 후 수정 PR 을 엽니다. 머지는 직접. (위키 동기화는 이 토큰과 무관 — 로컬 git 으로 합니다)"
+              status={integStatus.github} saved={!!connKeys.GITHUB_TOKEN}
+              onGuide={() => setGuide('github')}
+              onProbe={() => void probeOne('github')}
+              probing={probing === 'github'}
+              onSave={() => save('GitHub', { GITHUB_TOKEN: ghToken })}
+              onHelp="https://github.com/settings/tokens"
+            >
+              <Field label="Personal Access Token" value={ghToken} saved={connHints.GITHUB_TOKEN} onChange={setGhToken} secret
+                hint="github_pat_… · Settings → Developer settings → Fine-grained tokens. 고칠 레포는 '내 서비스' 탭에 등록된 것을 씁니다" />
+            </IntegCard>
+
+            {/* HuggingFace */}
+            <IntegCard icon="🤗" title="HuggingFace (나중 단계)" desc="파인튜닝 모델 업로드용. 지금은 쓰지 않습니다 — 장기기억은 위키 축적으로 먼저 동작합니다. 지금 넣지 않아도 됩니다."
+              saved={!!connKeys.HUGGINGFACE_TOKEN}
+              onGuide={() => setGuide('huggingface')}
+              onSave={() => save('HuggingFace', { HUGGINGFACE_TOKEN: hfToken })}
+              onHelp="https://huggingface.co/settings/tokens"
+            >
+              <Field label="Access Token" placeholder="hf_..." value={hfToken} saved={connHints.HUGGINGFACE_TOKEN} onChange={setHfToken} secret
+                hint="huggingface.co/settings/tokens → write 권한" />
+            </IntegCard>
+
+            {/* Google Calendar — 전에는 '준비 중' 딱지 한 장이었다(백엔드가
+                없었으니 맞는 표시였다). 이제 유튜브와 같은 흐름으로 붙는다.
+
+                Client ID/Secret 입력란을 두지 않는다 — 유튜브 칸에 넣은
+                **같은** 구글 클라이언트를 쓴다(서버 CAL_SCOPE 주석 참고).
+                여기 또 두면 같은 값을 두 번 넣게 되고, 한쪽만 바꿨을 때
+                어느 쪽이 쓰이는지 알 수 없어진다. */}
+            <IntegCard icon="📅" title="Google Calendar (일정 읽기)"
+              desc="다가오는 일정을 읽어 마감일 판단에 씁니다. 읽기 전용 — 일정을 만들거나 고치지 않습니다."
+              saved={!!calState?.connected}
+              onGuide={() => setGuide('common')}
+              extraActions={
+                <button
+                  onClick={connectCalendar}
+                  disabled={calBusy || !calState?.has_client}
+                  title={calState?.has_client
+                    ? (calState?.connected ? '다시 연결합니다' : '구글 로그인 창을 엽니다')
+                    : '아래 YouTube OAuth 칸에 Client ID/Secret 을 먼저 저장하세요 — 같은 것을 씁니다'}
+                  style={{
+                    padding: '8px 14px', background: 'rgba(15,253,106,0.1)',
+                    border: '1px solid rgba(15,253,106,0.3)', borderRadius: 8,
+                    color: 'var(--green)', fontSize: 13,
+                    cursor: calBusy || !calState?.has_client ? 'not-allowed' : 'pointer',
+                    opacity: calBusy || !calState?.has_client ? 0.5 : 1,
+                  }}>
+                  {calBusy ? '⏳ 기다리는 중…'
+                    : calState?.connected ? '🔁 다시 연결' : '⚡ 자동 연결'}
+                </button>
+              }
+            >
+              {!calState?.has_client && (
+                <div className="mem-beta-note" style={{ margin: 0 }}>
+                  구글 OAuth Client ID/Secret 이 아직 없습니다 — 아래
+                  <strong> YouTube Analytics · 업로드 (OAuth)</strong> 칸에 넣으면
+                  캘린더도 같은 것을 씁니다. 구글 콘솔에 클라이언트를 또 만들
+                  필요는 없습니다.
+                </div>
+              )}
+
+              {calState?.has_client && !calState?.connected && (
+                <div className="mem-beta-note" style={{ margin: 0 }}>
+                  ⚡ 자동 연결을 누르면 구글 동의 창이 열립니다. 범위는
+                  <strong> 읽기 전용</strong>(calendar.readonly) 하나입니다.
+                  구글 클라우드 콘솔에서 <strong>Google Calendar API</strong> 가
+                  켜져 있어야 합니다.
+                </div>
+              )}
+
+              {/* 연결됐는데 조회가 실패하면 **그 이유**를 적는다. 빈 목록을
+                  보여 주면 "일정이 없나 보다" 로 읽히는데, 연결이 깨진 것과
+                  일정이 없는 것은 전혀 다른 상태다. */}
+              {calState?.connected && calEvents && !calEvents.ok && (
+                <div className="mem-beta-note" style={{ margin: 0, color: '#F0B96B' }}>
+                  ⚠️ {calEvents.error}
+                  {/* 403 은 거의 항상 "이 프로젝트에서 Calendar API 가 꺼져
+                      있다" 이고, 구글이 **켜러 갈 주소를 오류문에 담아 준다.**
+                      그걸 글자로만 두면 사장님이 콘솔에서 그 화면을 찾아
+                      헤매게 된다(실제로 그랬다). 눌러서 바로 가게 한다. */}
+                  {(() => {
+                    const m = calEvents.error?.match(
+                      /https:\/\/console\.developers\.google\.com\/\S+/);
+                    if (!m) return null;
+                    return (
+                      <div style={{ marginTop: 8 }}>
+                        <a href={m[0].replace(/[.,)]$/, '')} target="_blank" rel="noreferrer"
+                           style={{
+                             display: 'inline-block', padding: '7px 13px',
+                             background: 'rgba(245,158,11,0.15)',
+                             border: '1px solid rgba(245,158,11,0.45)',
+                             borderRadius: 8, color: '#F0B96B',
+                             fontSize: 12, fontWeight: 700, textDecoration: 'none',
+                           }}>
+                          ↗ 구글 콘솔에서 Calendar API 켜기
+                        </a>
+                        <div style={{ marginTop: 6, fontSize: 11, color: 'var(--muted2)' }}>
+                          그 화면에서 <b>사용 설정(Enable)</b> 을 누르고 1~2분 뒤
+                          아래 <b>🔁 다시 확인</b> 을 누르세요. 다시 로그인할
+                          필요는 없습니다 — 연결은 이미 돼 있습니다.
+                        </div>
+                        <button
+                          onClick={async () => { setCalEvents(await api.calendarEvents()); }}
+                          style={{
+                            marginTop: 8, padding: '6px 12px',
+                            background: 'var(--glass-bg)', border: '1px solid var(--border)',
+                            borderRadius: 8, color: 'var(--text)',
+                            fontSize: 12, cursor: 'pointer',
+                          }}>🔁 다시 확인</button>
+                      </div>
+                    );
+                  })()}
+                </div>
+              )}
+
+              {calEvents?.ok && (
+                <div className="cal-list">
+                  <div className="cal-list-head">
+                    다가오는 일정
+                    <span>{calEvents.events.length}건 · {calEvents.calendar}</span>
+                  </div>
+                  {calEvents.events.length === 0 ? (
+                    <div className="cal-empty">앞으로 2주간 잡힌 일정이 없습니다.</div>
+                  ) : calEvents.events.slice(0, 6).map(ev => (
+                    <div key={ev.id} className="cal-row">
+                      <span className="cal-when">{calWhen(ev.start, ev.all_day)}</span>
+                      <span className="cal-title">{ev.title}</span>
+                      {ev.where && <span className="cal-where">{ev.where}</span>}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </IntegCard>
 
             {/* ⚡ YouTube + PayPal 동시 연결 */}
             <div style={{
@@ -867,26 +1047,6 @@ export default function ManageModal({ onClose, agentCount, globalModel, onOpenTe
               )}
             </div>
 
-            {/* 텔레그램 봇 */}
-            <IntegCard icon="✈️" title="텔레그램 봇" desc="비서가 텔레그램으로 양방향 명령을 받고 보고합니다. 폰 어디서든 회사를 운영하세요."
-              saved={!!connKeys.TELEGRAM_BOT_TOKEN}
-              onGuide={() => setGuide('telegram')}
-              onSave={() => save('텔레그램 봇', { TELEGRAM_BOT_TOKEN: tgToken, TELEGRAM_CHAT_ID: tgChatId,
-                                            TELEGRAM_ALLOWED_USERS: tgAllowed })}
-              onHelp="https://core.telegram.org/bots#how-do-i-create-a-bot"
-            >
-              <Field label="Bot Token" placeholder="123456789:ABCdef..." value={tgToken} saved={connHints.TELEGRAM_BOT_TOKEN} onChange={setTgToken} secret
-                hint="@BotFather에서 /newbot으로 발급 (숫자:문자)" />
-              <Field label="Chat ID" placeholder="비워두면 자동 감지" value={tgChatId} saved={connHints.TELEGRAM_CHAT_ID} onChange={setTgChatId}
-                hint="봇한테 메시지 1번 보내고 비운 채 저장하면 자동 입력" />
-              {/* 이 칸이 비어 있으면 텔레그램에서 아무도 결재를 누를 수 없다.
-                  봇 토큰이 새더라도 남이 업로드·PR 을 승인하지 못해야 하므로,
-                  기본값은 '아무도' 다. */}
-              <Field label="결재 허용 사용자 ID (쉼표로 여러 명)" placeholder="예: 8791756428"
-                value={tgAllowed} saved={connHints.TELEGRAM_ALLOWED_USERS} onChange={setTgAllowed}
-                hint="봇에게 아무 메시지나 보내면 본인 ID 를 알려줍니다. 비우면 결재 버튼이 아무에게도 동작하지 않습니다" />
-            </IntegCard>
-
             {/* YouTube Data API */}
             <IntegCard icon="📺" title="YouTube Data API" desc="내 채널 지표에 더해, 지시문에 영상 링크 · 채널 링크 · @핸들 · '유튜브에서 ~ 찾아' 가 있으면 남의 영상·채널·검색 결과도 조회해 근거로 넣습니다. 비공개 지표와 업로드는 아래 OAuth."
               status={integStatus.youtube_data} saved={!!connKeys.YOUTUBE_API_KEY}
@@ -927,23 +1087,16 @@ export default function ManageModal({ onClose, agentCount, globalModel, onOpenTe
                 hint="Cloud Console에서 승인된 리디렉션 URI에 http://127.0.0.1:5814/yt-oauth-callback 추가" />
             </IntegCard>
 
-            {/* Google Calendar */}
-            <div style={{
-              background: 'var(--bg3)', border: '1px solid var(--border)',
-              borderRadius: 12, padding: 16, marginBottom: 12,
-            }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
-                <span style={{ fontSize: 20 }}>📅</span>
-                <div style={{ flex: 1 }}>
-                  <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text)' }}>Google Calendar</div>
-                  <div style={{ fontSize: 11, color: 'var(--muted)' }}>비서가 일정을 읽고 task 마감일과 자동 동기화합니다.</div>
-                </div>
-                <span style={{ fontSize: 10, padding: '2px 8px', borderRadius: 8, background: 'rgba(245,158,11,0.1)', border: '1px solid rgba(245,158,11,0.3)', color: '#f59e0b' }}>준비 중</span>
-              </div>
-              <div style={{ padding: '10px 12px', border: '1px dashed var(--border)', borderRadius: 8, textAlign: 'center', fontSize: 11, color: 'var(--muted)' }}>
-                곧 합류합니다 · 다음 업데이트
-              </div>
-            </div>
+            {/* 토스페이먼츠 */}
+            <IntegCard icon="🏦" title="토스페이먼츠" desc="키 저장만 됩니다. 조회 기능은 아직 없습니다 — PayPal 과 같은 방식으로 붙일 수 있습니다."
+              saved={!!connKeys.TOSS_SECRET_KEY}
+              onGuide={() => setGuide('toss')}
+              onSave={() => save('토스페이먼츠', { TOSS_SECRET_KEY: tossKey })}
+              onHelp="https://docs.tosspayments.com/"
+            >
+              <Field label="시크릿 키" value={tossKey} saved={connHints.TOSS_SECRET_KEY} onChange={setTossKey} secret
+                hint="토스페이먼츠 개발자센터 → API 키 → 시크릿 키(live_sk_... 실거래 / test_sk_... 테스트)" />
+            </IntegCard>
 
             {/* PayPal */}
             <IntegCard icon="💰" title="PayPal (수익 조회)" desc="잔액과 최근 30일 입금·수수료·순수익을 에이전트 분석의 근거로 넣습니다. 읽기 전용 — 송금·환불은 하지 않습니다."
@@ -966,40 +1119,26 @@ export default function ManageModal({ onClose, agentCount, globalModel, onOpenTe
               <Field label="Client Secret" value={ppClientSec} saved={connHints.PAYPAL_CLIENT_SECRET} onChange={setPpClientSec} secret />
             </IntegCard>
 
-            {/* 토스페이먼츠 */}
-            <IntegCard icon="🏦" title="토스페이먼츠" desc="키 저장만 됩니다. 조회 기능은 아직 없습니다 — PayPal 과 같은 방식으로 붙일 수 있습니다."
-              saved={!!connKeys.TOSS_SECRET_KEY}
-              onGuide={() => setGuide('toss')}
-              onSave={() => save('토스페이먼츠', { TOSS_SECRET_KEY: tossKey })}
-              onHelp="https://docs.tosspayments.com/"
+            {/* 텔레그램 봇 */}
+            <IntegCard icon="✈️" title="텔레그램 봇" desc="비서가 텔레그램으로 양방향 명령을 받고 보고합니다. 폰 어디서든 회사를 운영하세요."
+              saved={!!connKeys.TELEGRAM_BOT_TOKEN}
+              onGuide={() => setGuide('telegram')}
+              onSave={() => save('텔레그램 봇', { TELEGRAM_BOT_TOKEN: tgToken, TELEGRAM_CHAT_ID: tgChatId,
+                                            TELEGRAM_ALLOWED_USERS: tgAllowed })}
+              onHelp="https://core.telegram.org/bots#how-do-i-create-a-bot"
             >
-              <Field label="시크릿 키" value={tossKey} saved={connHints.TOSS_SECRET_KEY} onChange={setTossKey} secret
-                hint="토스페이먼츠 개발자센터 → API 키 → 시크릿 키(live_sk_... 실거래 / test_sk_... 테스트)" />
+              <Field label="Bot Token" placeholder="123456789:ABCdef..." value={tgToken} saved={connHints.TELEGRAM_BOT_TOKEN} onChange={setTgToken} secret
+                hint="@BotFather에서 /newbot으로 발급 (숫자:문자)" />
+              <Field label="Chat ID" placeholder="비워두면 자동 감지" value={tgChatId} saved={connHints.TELEGRAM_CHAT_ID} onChange={setTgChatId}
+                hint="봇한테 메시지 1번 보내고 비운 채 저장하면 자동 입력" />
+              {/* 이 칸이 비어 있으면 텔레그램에서 아무도 결재를 누를 수 없다.
+                  봇 토큰이 새더라도 남이 업로드·PR 을 승인하지 못해야 하므로,
+                  기본값은 '아무도' 다. */}
+              <Field label="결재 허용 사용자 ID (쉼표로 여러 명)" placeholder="예: 8791756428"
+                value={tgAllowed} saved={connHints.TELEGRAM_ALLOWED_USERS} onChange={setTgAllowed}
+                hint="봇에게 아무 메시지나 보내면 본인 ID 를 알려줍니다. 비우면 결재 버튼이 아무에게도 동작하지 않습니다" />
             </IntegCard>
 
-            {/* GitHub */}
-            <IntegCard icon="🐙" title="GitHub (서비스 레포)" desc="'내 서비스' 에 등록한 레포를 읽고, 결재 승인 후 수정 PR 을 엽니다. 머지는 직접. (위키 동기화는 이 토큰과 무관 — 로컬 git 으로 합니다)"
-              status={integStatus.github} saved={!!connKeys.GITHUB_TOKEN}
-              onGuide={() => setGuide('github')}
-              onProbe={() => void probeOne('github')}
-              probing={probing === 'github'}
-              onSave={() => save('GitHub', { GITHUB_TOKEN: ghToken })}
-              onHelp="https://github.com/settings/tokens"
-            >
-              <Field label="Personal Access Token" value={ghToken} saved={connHints.GITHUB_TOKEN} onChange={setGhToken} secret
-                hint="github_pat_… · Settings → Developer settings → Fine-grained tokens. 고칠 레포는 '내 서비스' 탭에 등록된 것을 씁니다" />
-            </IntegCard>
-
-            {/* HuggingFace */}
-            <IntegCard icon="🤗" title="HuggingFace (나중 단계)" desc="파인튜닝 모델 업로드용. 지금은 쓰지 않습니다 — 장기기억은 위키 축적으로 먼저 동작합니다. 지금 넣지 않아도 됩니다."
-              saved={!!connKeys.HUGGINGFACE_TOKEN}
-              onGuide={() => setGuide('huggingface')}
-              onSave={() => save('HuggingFace', { HUGGINGFACE_TOKEN: hfToken })}
-              onHelp="https://huggingface.co/settings/tokens"
-            >
-              <Field label="Access Token" placeholder="hf_..." value={hfToken} saved={connHints.HUGGINGFACE_TOKEN} onChange={setHfToken} secret
-                hint="huggingface.co/settings/tokens → write 권한" />
-            </IntegCard>
           </div>
         )}
 

@@ -167,6 +167,20 @@ export default function ApprovalBox({ open: boxOpen, onToggle, focusId,
     || p.status === 'paused');
 
   async function decide(row: ApprovalRow, status: 'approved' | 'rejected') {
+    // **거절도 묻는다.** 전에는 승인 중에서도 '실행' 종류만 물었고 거절은
+    // 한 번도 묻지 않았다. 거절은 되돌릴 수 있어 보이지만 아니다 — 후속
+    // 작업을 만들지 않고, 그 부서는 "허락받지 못했다" 는 전제로 넘어간다.
+    // 다시 올리려면 그 일을 처음부터 다시 돌려야 한다.
+    //
+    // 실제로 점검 중 대기 2건이 의도치 않게 거절됐다. 기록(`decided_by: ui`
+    // · `decided_at`)은 남아 있어서 **언제** 였는지는 1초 단위로 특정됐지만,
+    // 어느 버튼이었는지까지는 남지 않는다. 한 번 묻는 것이 그 간극을 메운다.
+    if (status === 'rejected') {
+      if (!confirm(`"${row.label}"\n\n거절하면 이 일은 실행되지 않습니다. `
+                   + `다시 올리려면 해당 부서가 처음부터 다시 돌려야 합니다.\n\n거절할까요?`)) {
+        return;
+      }
+    }
     // 되돌릴 수 없는 것은 한 번 묻는다. 파일 저장은 덮어쓸 뿐이라 묻지 않는다.
     if (status === 'approved' && row.kind === 'action') {
       const what = `${row.integration ?? ''}.${row.action ?? ''}`;

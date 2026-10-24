@@ -1096,10 +1096,57 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
   position: relative;
   z-index: 1;
 }
-/* 칸반은 세로로 늘어나게 둔다. 안에서 또 스크롤을 만들면 바깥 스크롤과
-   싸워서 어느 쪽이 움직일지 예측할 수 없게 된다. */
-.ceo-room .ceo-kanban { flex: none; }
-.ceo-room .ceo-col-scroll { max-height: none; overflow: visible; }
+/* 칸반 열마다 스크롤을 준다.
+
+   전에는 "안에서 또 스크롤을 만들면 바깥 스크롤과 싸운다" 는 이유로
+   풀어 뒀다. 그때 칸반은 CEO 룸 탭의 **전부**였으므로 맞는 판단이었다.
+   지금은 한 페이지의 여러 칸 중 하나다 — 완료 열에 18장이 쌓이자
+   그리드가 네 열을 모두 같은 높이로 늘려, 이 한 덩어리가 1974px 이 되고
+   아래 할 일·프로젝트 목록을 세 화면 밑으로 밀어냈다(실측).
+   묶지 않으면 아래 칸들이 묻힌다. 묶는 쪽이 맞다.
+   
+   바깥 스크롤과 싸우는 문제는 열이 **끝까지 내려갔을 때만** 생기고,
+   340px 면 네 장쯤 보인다 — 훑는 용도에는 충분하고, 더 볼 것이 있다는
+   신호도 남는다. */
+.pj-page .ceo-kanban { flex: none; padding-top: 0; }
+.pj-page .ceo-col-scroll {
+  max-height: 340px; overflow-y: auto; overflow-x: hidden;
+  /* 잘린 것이 아니라 더 있다는 것이 보이게 */
+  padding-right: 2px;
+}
+
+/* ── 프로젝트 탭 = 결재함 + 프로젝트 목록 ───────────────────────────
+   'CEO 룸' 탭을 프로젝트에 합쳤다. 둘은 원래 각자 탭의 전부였으므로
+   각자 스크롤러를 들고 있다(.ceo-room 은 flex:1 + overflow-y:auto,
+   .pj-wrap 은 height:100% + overflow-y:auto). 그대로 쌓으면
+   스크롤바가 둘 생기고 높이도 반씩 나눠 가진다.
+
+   그래서 스크롤은 여기 **한 곳**만 가진다. 아래 두 규칙이 자식들의
+   스크롤을 끄는 부분이고, 끄지 않으면 위의 증상이 그대로 남는다. */
+.pj-page {
+  flex: 1; min-height: 0;
+  display: flex; flex-direction: column;
+  overflow-y: auto; overflow-x: hidden;
+  position: relative; z-index: 1;
+}
+.pj-page > .ceo-room { flex: none; overflow: visible; }
+.pj-page .pj-wrap    { height: auto; overflow: visible; }
+
+/* 폭을 맞춘다 — 한 페이지인데 두 페이지처럼 보이지 않게.
+
+   900px 가 아니라 1320px 다. 900px 는 **글을 읽는 폭**이고(한 줄
+   60~75자), 이 페이지는 카드와 4열 칸반이다. 900px 에서는 칸반 한 열이
+   210px 로 눌리고, 1600px 화면에서는 양옆이 350px 씩 비었다.
+   카드·칸반·표는 읽는 글이 아니므로 그 제한을 받을 이유가 없다. */
+.pj-page > .ceo-room,
+.pj-page > .ceo-kanban {
+  width: 100%; max-width: 1320px; min-width: 0;
+  margin: 0 auto; padding: 20px 18px 0;
+}
+.pj-page > .ceo-kanban { padding-bottom: 60px; }
+/* 할 일·프로젝트 목록도 같은 폭으로. 셋이 다른 폭이면 한 페이지로
+   안 읽힌다 — 그게 애초에 폭을 맞춘 이유다. */
+.pj-page .pj-wrap { max-width: 1320px; }
 .ceo-kpi-bar {
   display: flex;
   align-items: center;
@@ -2425,6 +2472,129 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
   border-radius: 50%;
   display: block;
 }
+/* ── 입력창 (Gemini/ChatGPT 식) ──
+   하나의 둥근 상자 안에 글과 도구가 함께 산다. 전에는 선택기·입력·전송이
+   한 줄에 나란히 있어서 좁은 화면에서 서로를 밀어냈다. */
+.hs-composer {
+  margin: 0 32px 20px;
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  background: var(--bg2);
+  display: flex;
+  flex-direction: column;
+  transition: border-color .15s ease;
+}
+.hs-composer:focus-within { border-color: rgba(139, 92, 246, 0.45); }
+
+.hs-composer-text {
+  /* 높이는 JS 가 scrollHeight 로 맞춘다(상한 200px). resize 를 끄지 않으면
+     사용자가 끌어 늘린 높이가 남아 자동 확장과 싸운다. */
+  resize: none;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.7;
+  padding: 14px 18px 4px;
+  max-height: 200px;
+  overflow-y: hidden;
+}
+.hs-composer-text::placeholder { color: var(--muted2); }
+.hs-composer-text::-webkit-scrollbar { width: 4px; }
+.hs-composer-text::-webkit-scrollbar-thumb {
+  background: var(--muted2); border-radius: 2px;
+}
+
+.hs-composer-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 10px 10px 12px;
+}
+.hs-composer-who {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.hs-plus-wrap { position: relative; display: flex; }
+.hs-plus {
+  width: 30px; height: 30px;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text);
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+}
+.hs-plus:hover { background: var(--bg3); }
+.hs-plus.open { background: var(--primary-dim); border-color: var(--primary); }
+
+/* 메뉴 밖을 누르면 닫히게 — 투명한 바닥을 깐다. */
+.hs-plus-backdrop { position: fixed; inset: 0; z-index: 40; }
+.hs-plus-menu {
+  position: absolute;
+  bottom: 38px; left: 0;
+  z-index: 41;
+  min-width: 268px;
+  padding: 6px;
+  border-radius: 14px;
+  border: 1px solid var(--border);
+  /* 처음에 `var(--bg1)` 을 썼는데 **그 변수는 정의돼 있지 않다** — 선언
+     목록에 --bg2·--bg3 만 있다. 없는 변수는 조용히 빈 값이 되어 배경이
+     통째로 사라졌고, 뒤의 대화가 그대로 비쳤다.
+     색을 새로 지어내지 않고 이미 있는 토큰을 쓴다. */
+  background: var(--bg2);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.6);
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  max-height: 60vh;
+  overflow-y: auto;
+}
+.hs-plus-head {
+  display: flex; align-items: baseline; gap: 6px;
+  padding: 7px 10px 4px;
+  font-size: 10px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.hs-plus-head span { text-transform: none; letter-spacing: 0; opacity: .7; }
+.hs-plus-sep { height: 1px; background: var(--border); margin: 5px 4px; }
+
+.hs-plus-item {
+  display: flex; align-items: center; gap: 9px;
+  padding: 7px 10px;
+  border: 0; border-radius: 9px;
+  background: transparent;
+  color: var(--text);
+  font-size: 12.5px;
+  cursor: pointer;
+  text-align: left;
+  width: 100%;
+}
+.hs-plus-item:hover { background: var(--bg3); }
+.hs-plus-item.on { background: var(--primary-dim); }
+.hs-plus-ico { width: 18px; text-align: center; flex-shrink: 0; }
+.hs-plus-name { flex-shrink: 0; }
+.hs-plus-hint {
+  margin-left: auto;
+  font-size: 10px;
+  color: var(--muted);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.hs-plus-check { color: var(--primary); font-size: 11px; }
+
+@media (max-width: 720px) {
+  .hs-composer { margin: 0 12px 14px; }
+  .hs-plus-menu { min-width: 0; width: calc(100vw - 48px); }
+}
 .sess-note {
   margin: 0 20px 10px;
   font-size: 11px;
@@ -3132,10 +3302,21 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 }
 
 /* 드롭다운 패널 */
+/* 알림 패널.
+
+   `right:0` 로 벨에 붙이고 `width:320px` 를 고정했더니 375px 화면에서
+   왼쪽이 **65px 잘려 나갔다**(실측: left −65 ~ right 255). "finance_dept"
+   가 "nance_dept" 로 보였다.
+
+   `max-width` 만으로는 안 됐다 — 벨 오른쪽에 메뉴 버튼이 더 있어서
+   기준점(`right:0`)이 화면 끝이 아니다. 패널 오른쪽이 242px 에 서고,
+   폭이 294px 면 왼쪽은 여전히 −53 이다. 좁은 화면에서는 벨에 붙이는
+   것을 포기하고 화면에 고정한다(아래 미디어 쿼리). */
 .nb-dropdown {
   position: absolute;
   top: calc(100% + 8px); right: 0;
   width: 320px;
+  max-width: calc(100vw - 16px);
   background: var(--bg2);
   border: 1px solid var(--glass-border);
   border-radius: 16px;
@@ -4016,6 +4197,46 @@ button.pj-deliv-item[aria-expanded="true"] { background: var(--glass-hi); border
    할 일을 스레드 카드로 쌓는다. 카드는 접힌 상태가 기본이라 목록을 훑을 때는
    제목 줄만 보이고, 눌러야 본문이 열린다 — 스무 장이 쌓여도 한 화면에 든다. */
 .nt-wrap { display: flex; flex-direction: column; gap: 12px; padding: 16px; overflow-y: auto; }
+/* 노트(할 일)가 '노트' 탭에서 프로젝트 탭 안으로 들어왔다. 탭 하나를
+   혼자 쓸 때는 자기 스크롤이 맞았지만, 지금은 `.pj-page` 가 스크롤을
+   맡는다 — 그대로 두면 한 페이지 안에 스크롤바가 둘 생긴다.
+   폭도 목록(.pj-wrap 900px 중앙)에 맞춘다. */
+.pj-page > .nt-wrap {
+  overflow: visible;
+  width: 100%; max-width: 1320px; min-width: 0;
+  margin: 0 auto; padding: 0 18px;
+}
+
+/* 에이전트가 올린 태스크. 관리 탭 '태스크 보드' 에 있던 것이 여기로 왔다.
+   노트 카드와 눈에 띄게 다르게 둔다 — 한 줄짜리이고, 내가 적은 것이 아니라
+   올라온 것이라는 게 보여야 한다. */
+.nt-agent {
+  padding: 10px 12px; margin-bottom: 4px;
+  background: var(--primary-dk); border: 1px solid var(--primary-dim);
+  border-radius: 10px;
+}
+.nt-agent-head {
+  display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap;
+  margin-bottom: 8px; font-size: 12px; font-weight: 700; color: var(--text);
+}
+.nt-agent-head span { font-size: 11px; font-weight: 500; color: var(--muted); }
+.nt-agent-row {
+  display: flex; align-items: center; gap: 9px;
+  padding: 5px 2px; font-size: 12.5px;
+}
+.nt-agent-row + .nt-agent-row { border-top: 1px solid var(--border); }
+.nt-agent-text { flex: 1; min-width: 0; color: var(--text); line-height: 1.45; }
+.nt-agent-from {
+  flex: none; padding: 1px 7px; font-size: 10px; font-weight: 600;
+  color: var(--secondary); background: var(--secondary-dim); border-radius: 999px;
+}
+.nt-agent-when { flex: none; font-size: 10.5px; color: var(--muted2); }
+.nt-agent-x {
+  flex: none; width: 20px; height: 20px; padding: 0; line-height: 1;
+  font-size: 11px; color: var(--muted2); background: none; border: none;
+  border-radius: 4px; cursor: pointer; transition: var(--t-ui) .12s;
+}
+.nt-agent-x:hover { color: var(--text); background: var(--glass-hi); }
 
 .nt-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 .nt-title { display: flex; align-items: baseline; gap: 10px; font-size: 16px; font-weight: 700; }
@@ -4893,4 +5114,490 @@ button.pj-deliv-item[aria-expanded="true"] { background: var(--glass-hi); border
   .pj-verify-pick { flex-wrap: wrap; }
   .pj-verify-pick .pj-btn { flex: 1; }
   .pj-verify-claim b, .pj-verify-real b { display: block; min-width: 0; }
+}
+
+
+/* ══ 지식베이스 탭 ══════════════════════════════════════════════════
+
+   ar5iv 를 본으로 삼았다. 그쪽이 PDF 보다 읽기 좋은 이유는 화려해서가
+   아니라 **글 읽기용 한 칸**이기 때문이다: 한 줄이 너무 길지 않고, 그림이
+   본문 흐름 안에 있고, 목차가 옆에 떠 있다. 그 셋만 지킨다.
+
+   세 칸 — 왼쪽 트리 / 가운데 문서 / 오른쪽 목차. 좁아지면 접는다(맨 아래). */
+
+.kb-root {
+  flex: 1; min-height: 0;
+  display: grid;
+  grid-template-columns: 286px minmax(0, 1fr) 212px;
+  /* min-height:0 이 세 칸 모두에 필요하다. 없으면 자식의 overflow 가
+     먹지 않고 grid 가 내용만큼 늘어나 페이지 전체가 스크롤된다. */
+  overflow: hidden;
+}
+
+/* ── 왼쪽: 트리 ── */
+.kb-side {
+  display: flex; flex-direction: column; min-height: 0;
+  border-right: 1px solid var(--border);
+  background: var(--bg2);
+}
+.kb-search { position: relative; padding: 12px 12px 6px; }
+.kb-search-input {
+  width: 100%; padding: 8px 28px 8px 10px;
+  font: inherit; font-size: 13px;
+  color: var(--text); background: var(--glass-bg);
+  border: 1px solid var(--border); border-radius: 8px;
+  transition: var(--t-ui) .15s;
+}
+.kb-search-input:focus {
+  outline: none; border-color: var(--primary); background: var(--primary-dk);
+}
+.kb-search-input::placeholder { color: var(--muted2); }
+.kb-search-x {
+  position: absolute; right: 18px; top: 18px;
+  width: 20px; height: 20px; padding: 0; line-height: 1;
+  font-size: 11px; color: var(--muted);
+  background: none; border: none; cursor: pointer; border-radius: 4px;
+}
+.kb-search-x:hover { color: var(--text); background: var(--glass-hi); }
+
+.kb-search-row {
+  display: flex; align-items: center; gap: 8px;
+  padding: 0 12px 10px;
+}
+.kb-deep-btn {
+  padding: 4px 10px; font-size: 11px; border-radius: 6px; cursor: pointer;
+  color: var(--text); background: var(--glass-bg);
+  border: 1px solid var(--border); transition: var(--t-ui) .15s;
+}
+.kb-deep-btn:hover:not(:disabled) { background: var(--primary-dim); border-color: var(--primary); }
+.kb-deep-btn:disabled { opacity: .4; cursor: default; }
+.kb-side-count { margin-left: auto; font-size: 11px; color: var(--muted2); }
+.kb-deep-note {
+  margin: 0 12px 8px; padding: 6px 8px;
+  font-size: 11px; line-height: 1.5; color: var(--muted);
+  background: var(--primary-dk); border: 1px solid var(--primary-dim);
+  border-radius: 6px;
+}
+.kb-deep-note b { color: var(--text); }
+.kb-deep-note span { color: var(--muted2); }
+
+.kb-tree { flex: 1; min-height: 0; overflow-y: auto; padding: 0 6px 10px; }
+.kb-side-empty { padding: 20px 14px; font-size: 12px; color: var(--muted2); text-align: center; }
+.kb-side-empty.err { color: #f0a0a0; }
+
+.kb-folder { margin-bottom: 2px; }
+.kb-folder-head {
+  display: flex; align-items: center; gap: 6px;
+  width: 100%; padding: 6px 8px;
+  font: inherit; font-size: 12px; font-weight: 600; color: var(--text);
+  background: none; border: none; border-radius: 6px;
+  cursor: pointer; text-align: left; transition: var(--t-ui) .12s;
+}
+.kb-folder-head:hover { background: var(--glass-bg); }
+.kb-caret { width: 10px; font-size: 9px; color: var(--muted2); }
+.kb-folder-name { flex: 1; min-width: 0; }
+.kb-folder-n {
+  padding: 1px 6px; font-size: 10px; font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted); background: var(--glass-bg); border-radius: 999px;
+}
+
+.kb-files { padding-left: 8px; }
+.kb-file {
+  display: flex; align-items: center; gap: 7px;
+  width: 100%; padding: 5px 8px;
+  font: inherit; font-size: 12px; color: var(--muted);
+  background: none; border: none; border-left: 2px solid transparent;
+  border-radius: 0 6px 6px 0; cursor: pointer; text-align: left;
+  transition: var(--t-ui) .12s;
+}
+.kb-file:hover { background: var(--glass-bg); color: var(--text); }
+.kb-file.on {
+  background: var(--primary-dim); border-left-color: var(--primary);
+  color: var(--text); font-weight: 600;
+}
+/* 제목이 길다 — 논문 제목은 100자가 넘는 것이 흔하다. 두 줄까지 보이게
+   하고 그 뒤로 자른다. 한 줄로 자르면 어느 논문인지 분간이 안 된다. */
+.kb-file-t {
+  flex: 1; min-width: 0; line-height: 1.35;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.kb-file-d { font-size: 10px; color: var(--muted2); white-space: nowrap; }
+
+/* 출처 점. 색이 의미를 나른다 — 근거의 무게가 다르다. */
+.kb-dot { width: 6px; height: 6px; border-radius: 50%; flex: none; }
+.kb-dot.node { background: var(--secondary); }     /* 사람이 정리 */
+.kb-dot.ref  { background: var(--primary); }       /* 기계가 수집 */
+.kb-dot.exp  { background: #F59E0B; }              /* AI 가 생산 */
+.kb-dot.inj  { background: #60A5FA; }
+.kb-dot.unk  { background: var(--muted2); }
+
+.kb-side-foot {
+  padding: 8px 12px; font-size: 11px; color: var(--muted2);
+  border-top: 1px solid var(--border);
+}
+.kb-side-foot b { color: var(--muted); font-weight: 600; }
+
+/* ── 가운데: 문서 ──
+   여기만 세리프를 쓴다. 다른 곳은 전부 산세리프인데 **읽는 화면**만
+   다르게 둔다 — "조작하는 곳이 아니라 읽는 곳" 이라는 신호다. 새 폰트를
+   받지는 않는다(스택만 쌓는다. 첫 화면이 그만큼 늦는다). */
+.kb-main { min-height: 0; overflow-y: auto; overflow-x: hidden; }
+.kb-main.empty { display: flex; align-items: center; justify-content: center; }
+.kb-loading, .kb-err { padding: 40px; font-size: 13px; color: var(--muted); text-align: center; }
+.kb-err { color: #f0a0a0; }
+
+.kb-welcome { max-width: 520px; padding: 32px; text-align: left; }
+.kb-welcome h2 { margin: 0 0 10px; font-size: 19px; font-weight: 700; color: var(--text); }
+.kb-welcome p { margin: 0 0 20px; font-size: 13px; line-height: 1.7; color: var(--muted); }
+.kb-legend { display: flex; flex-direction: column; gap: 8px; }
+.kb-legend-item {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 12px; color: var(--muted2);
+}
+.kb-legend-item b { color: var(--text); font-weight: 600; }
+
+.kb-doc {
+  /* 한 줄이 760px 보다 길면 눈이 다음 줄머리를 못 찾는다. 그 선에서 묶는다. */
+  max-width: 760px; min-width: 0;
+  margin: 0 auto; padding: 28px 28px 80px;
+}
+.kb-doc-head { padding-bottom: 18px; margin-bottom: 22px; border-bottom: 1px solid var(--border); }
+.kb-doc-badges { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
+.kb-badge {
+  padding: 2px 8px; font-size: 10px; font-weight: 700; border-radius: 999px;
+  letter-spacing: .04em;
+}
+.kb-badge.node { color: #0B2D2A; background: var(--secondary); }
+.kb-badge.ref  { color: #F8FAFC; background: var(--primary); }
+.kb-badge.exp  { color: #27180A; background: #F59E0B; }
+.kb-badge.inj  { color: #0A1F38; background: #60A5FA; }
+.kb-badge.unk, .kb-badge.dim {
+  color: var(--muted); background: var(--glass-bg); border: 1px solid var(--border);
+}
+.kb-doc-meta { font-size: 11px; color: var(--muted2); font-variant-numeric: tabular-nums; }
+.kb-doc-title {
+  margin: 0 0 10px; font-size: 25px; font-weight: 700; line-height: 1.3;
+  color: var(--text); text-wrap: balance;
+}
+.kb-doc-desc {
+  margin: 0 0 10px; padding-left: 12px;
+  font-size: 14px; line-height: 1.7; color: var(--muted);
+  border-left: 2px solid var(--primary);
+}
+.kb-doc-path {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 10.5px; color: var(--muted2); word-break: break-all;
+}
+
+.kb-body {
+  font-family: 'Noto Serif KR', Georgia, 'Times New Roman', serif;
+  font-size: 15px; line-height: 1.85; color: #E6EDF6;
+}
+.kb-p { margin: 0 0 1.1em; }
+.kb-body .kb-h {
+  /* 제목은 산세리프로 둔다 — 본문과 층을 나눠, 훑을 때 제목이 먼저 잡힌다. */
+  font-family: 'Inter', 'Noto Sans KR', system-ui, sans-serif;
+  color: var(--text); line-height: 1.35; text-wrap: balance;
+  scroll-margin-top: 20px;          /* 목차로 뛸 때 제목이 맨 위에 붙지 않게 */
+}
+.kb-body .kb-h1 { margin: 1.9em 0 .7em; font-size: 21px; font-weight: 700;
+                  padding-bottom: .35em; border-bottom: 1px solid var(--border); }
+.kb-body .kb-h2 { margin: 1.7em 0 .6em; font-size: 17.5px; font-weight: 700; }
+.kb-body .kb-h3 { margin: 1.5em 0 .5em; font-size: 15px; font-weight: 700; color: var(--muted); }
+.kb-body .kb-h4 { margin: 1.3em 0 .4em; font-size: 13.5px; font-weight: 700; color: var(--muted2);
+                  text-transform: uppercase; letter-spacing: .06em; }
+.kb-body > *:first-child { margin-top: 0; }
+
+.kb-body a { color: var(--secondary); text-decoration: none; border-bottom: 1px solid transparent; }
+.kb-body a:hover { border-bottom-color: var(--secondary); }
+/* LaTeX 수식. 조판하지 않는다(KaTeX 를 들이지 않는 이유는 inline() 주석에).
+   수식이라는 것만 눈에 보이게 한다 — 달러 기호가 문장 가운데 흩어져 있는
+   것보다는 읽힌다. */
+.kb-math {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: .85em; padding: .1em .35em; border-radius: 4px;
+  color: #CDBBFF; background: var(--primary-dk);
+  border: 1px solid var(--primary-dim);
+}
+.kb-code {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: .86em; padding: .12em .4em; border-radius: 4px;
+  color: var(--secondary); background: var(--glass-bg);
+}
+.kb-pre {
+  position: relative; margin: 0 0 1.3em; padding: 14px 16px;
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 12.5px; line-height: 1.65; color: #D6E2F0;
+  background: var(--bg); border: 1px solid var(--border); border-radius: 10px;
+  overflow-x: auto;                 /* 긴 줄이 페이지를 옆으로 밀지 않게 */
+}
+.kb-pre-lang {
+  position: absolute; top: 6px; right: 10px;
+  font-size: 9.5px; letter-spacing: .08em; text-transform: uppercase;
+  color: var(--muted2);
+}
+.kb-quote {
+  margin: 0 0 1.3em; padding: 2px 0 2px 16px;
+  font-size: 14px; color: var(--muted);
+  border-left: 3px solid var(--primary-dim);
+}
+.kb-hr { margin: 2em 0; border: none; border-top: 1px solid var(--border); }
+
+.kb-list { margin: 0 0 1.2em; }
+.kb-ul, .kb-ol { margin: 0; padding-left: 1.5em; }
+.kb-ul li, .kb-ol li { margin-bottom: .4em; }
+.kb-ul .kb-ul, .kb-ol .kb-ol, .kb-ul .kb-ol, .kb-ol .kb-ul { margin-top: .4em; }
+
+.kb-table-wrap { margin: 0 0 1.4em; overflow-x: auto; }
+.kb-table {
+  width: 100%; border-collapse: collapse;
+  font-family: 'Inter', 'Noto Sans KR', system-ui, sans-serif;
+  font-size: 12.5px;
+}
+.kb-table th, .kb-table td {
+  padding: 8px 11px; text-align: left; vertical-align: top;
+  border-bottom: 1px solid var(--border);
+}
+.kb-table th {
+  font-weight: 700; color: var(--text);
+  background: var(--glass-bg); white-space: nowrap;
+}
+.kb-table td { color: var(--muted); font-variant-numeric: tabular-nums; }
+.kb-table tr:hover td { background: var(--glass-bg); }
+
+/* 그림. 번호를 단다 — 본문의 "Figure 3 참조" 와 화면을 맞춰 보려면 필요하다.
+
+   **원본보다 키우지 않는다.** 처음에 `width:100%` 로 두었더니 186×133px
+   짜리 조각이 704px 로 늘어나 3.8배 뭉개졌다 — PDF 에서 뽑은 그림은
+   원래 작다(BERT 논문 34장이 전부 200px 안쪽이다). `width:auto` 로
+   제 크기를 쓰고, 큰 그림만 `max-width:100%` 가 줄인다. */
+.kb-figs { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 14px; margin: 0 0 1.5em; }
+.kb-fig { margin: 0; max-width: 100%; }
+.kb-fig img {
+  display: block; width: auto; height: auto;
+  max-width: 100%;
+  background: #fff;                 /* 논문 그림은 배경이 투명한 흰 선화가 많다 */
+  border: 1px solid var(--border); border-radius: 8px;
+}
+/* 캡션이 그림보다 넓게 퍼지지 않도록 — 그림이 작을 때 캡션만 길면
+   어느 그림의 설명인지 흐려진다. */
+.kb-fig figcaption { max-width: 320px; }
+.kb-fig a { border: none; }
+.kb-fig figcaption {
+  margin-top: 6px;
+  font-family: 'Inter', 'Noto Sans KR', system-ui, sans-serif;
+  font-size: 11px; line-height: 1.5; color: var(--muted2);
+}
+.kb-fig figcaption b { color: var(--muted); font-weight: 700; }
+
+/* 위키링크. 문서가 있으면 누를 수 있고, 없으면 그렇다는 것을 보여 준다. */
+.kb-wl {
+  font: inherit; padding: 0 2px; cursor: pointer;
+  color: var(--primary); background: none; border: none;
+  border-bottom: 1px dashed var(--primary-dim);
+}
+.kb-wl:hover { color: var(--text); background: var(--primary-dim); border-radius: 3px; }
+.kb-wl.dead {
+  color: var(--muted2); cursor: default; border-bottom-style: dotted;
+  background: none;
+}
+
+.kb-doc-foot { margin-top: 36px; padding-top: 18px; border-top: 1px solid var(--border); }
+.kb-doc-foot h3 {
+  margin: 0 0 10px;
+  font-family: 'Inter', 'Noto Sans KR', system-ui, sans-serif;
+  font-size: 12px; font-weight: 700; letter-spacing: .04em;
+  text-transform: uppercase; color: var(--muted2);
+}
+.kb-doc-foot h3 span { color: var(--muted); }
+.kb-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.kb-chip {
+  padding: 5px 11px;
+  font-family: 'Inter', 'Noto Sans KR', system-ui, sans-serif;
+  font-size: 12px; color: var(--text);
+  background: var(--glass-bg); border: 1px solid var(--border);
+  border-radius: 999px; cursor: pointer; transition: var(--t-ui) .15s;
+}
+.kb-chip:hover { background: var(--primary-dim); border-color: var(--primary); }
+.kb-chip.dead { color: var(--muted2); cursor: default; border-style: dashed; }
+.kb-chip.dead:hover { background: var(--glass-bg); border-color: var(--border); }
+
+.kb-pdf {
+  display: block; width: 100%; height: calc(100vh - 300px); min-height: 480px;
+  border: none; background: var(--bg);
+}
+
+/* ── 오른쪽: 목차 ── */
+.kb-rail {
+  min-height: 0; overflow-y: auto;
+  padding: 28px 14px 60px;
+  border-left: 1px solid var(--border);
+  font-family: 'Inter', 'Noto Sans KR', system-ui, sans-serif;
+}
+.kb-rail-title {
+  margin-bottom: 10px; font-size: 10.5px; font-weight: 700;
+  letter-spacing: .08em; text-transform: uppercase; color: var(--muted2);
+}
+.kb-rail-list { display: flex; flex-direction: column; gap: 1px; }
+.kb-rail-item {
+  padding: 4px 8px; font: inherit; font-size: 11.5px; line-height: 1.45;
+  color: var(--muted); background: none; border: none;
+  border-left: 2px solid var(--border);
+  cursor: pointer; text-align: left; transition: var(--t-ui) .12s;
+  /* 제목이 길어도 세 줄까지. 목차가 본문보다 길어지면 목차가 아니다. */
+  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.kb-rail-item:hover { color: var(--text); border-left-color: var(--primary); }
+.kb-rail-item.l1 { font-weight: 700; color: var(--text); }
+.kb-rail-item.l2 { padding-left: 14px; }
+.kb-rail-item.l3 { padding-left: 22px; font-size: 11px; }
+.kb-rail-item.l4 { padding-left: 30px; font-size: 10.5px; color: var(--muted2); }
+
+/* ── 좁은 화면 ──
+   세 칸을 억지로 유지하면 본문이 300px 가 된다. 목차부터 접고,
+   더 좁아지면 트리를 위로 올려 가로 스크롤 목록으로 바꾼다. */
+@media (max-width: 1280px) {
+  .kb-root { grid-template-columns: 262px minmax(0, 1fr); }
+  .kb-rail { display: none; }
+}
+@media (max-width: 1024px) {
+  .kb-root { grid-template-columns: 1fr; grid-template-rows: auto minmax(0, 1fr); }
+  .kb-side {
+    border-right: none; border-bottom: 1px solid var(--border);
+    max-height: 42vh;
+  }
+  .kb-doc { padding: 20px 16px 60px; }
+  .kb-doc-title { font-size: 21px; }
+  .kb-pdf { height: 70vh; }
+}
+
+/* ══ FreeLLMAPI 라우터 패널 (관리 탭) ════════════════════════════════
+
+   화면 위쪽 "AI 모델" 점은 Ollama 를 본다. 그런데 부서 다섯 중 넷이
+   `auto:hermes` 로 이 라우터를 탄다. 무료 한도를 공급자별로 나눠 쓰므로
+   한 곳이 막히면 그대로 병목이 되는데, 그게 화면에 없었다.
+
+   색은 의미로만 쓴다 — 정상은 청록, 이상은 호박. 보라(--primary)는 이
+   화면의 강조색이라 상태에 쓰면 "좋다/나쁘다" 와 섞인다. */
+.rt-panel {
+  padding: 13px 14px; margin-bottom: 16px;
+  background: var(--bg3); border: 1px solid var(--border); border-radius: 10px;
+}
+.rt-panel.down { border-color: rgba(245, 158, 11, .4); background: rgba(245, 158, 11, .06); }
+.rt-head {
+  display: flex; align-items: baseline; gap: 9px; flex-wrap: wrap;
+  font-size: 12.5px; font-weight: 700; color: var(--text);
+}
+.rt-head span { font-size: 11px; font-weight: 500; color: var(--muted); }
+.rt-panel.down .rt-head span { color: #F0B96B; }
+
+.rt-kpis { display: flex; gap: 20px; flex-wrap: wrap; margin: 11px 0 10px; }
+.rt-kpi { display: flex; flex-direction: column; gap: 1px; }
+.rt-kpi b {
+  font-size: 19px; font-weight: 800; line-height: 1.1;
+  color: var(--secondary); font-variant-numeric: tabular-nums;
+}
+.rt-kpi.dim b { color: var(--muted); }
+.rt-kpi span { font-size: 10.5px; color: var(--muted2); }
+
+.rt-provs { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 8px; }
+.rt-prov {
+  padding: 2px 9px; font-size: 11px; font-weight: 600; border-radius: 999px;
+  border: 1px solid transparent;
+}
+.rt-prov.ok  { color: var(--secondary); background: var(--secondary-dim); }
+.rt-prov.bad { color: #F0B96B; background: rgba(245, 158, 11, .14); }
+.rt-prov.off { color: var(--muted2); background: var(--glass-bg); border-color: var(--border); }
+
+.rt-warn {
+  padding: 7px 10px; margin-bottom: 8px;
+  font-size: 11.5px; line-height: 1.5; color: #F0B96B;
+  background: rgba(245, 158, 11, .1); border-radius: 7px;
+}
+
+.rt-today { display: flex; flex-direction: column; gap: 3px; margin-bottom: 8px; }
+.rt-today-row { display: flex; align-items: baseline; gap: 8px; font-size: 11.5px; }
+.rt-today-n { min-width: 86px; font-weight: 600; color: var(--text); }
+.rt-today-c { color: var(--secondary); font-variant-numeric: tabular-nums; }
+.rt-today-t { color: var(--muted2); font-variant-numeric: tabular-nums; }
+
+/* 최근 호출을 점으로. 숫자보다 **연달아 실패했는지**가 먼저 눈에 들어와야
+   한다 — 한 번 실패는 흔하고, 여섯 번 연속은 공급자가 막힌 것이다. */
+.rt-recent { display: flex; align-items: center; gap: 5px; font-size: 11px; }
+.rt-recent-label { color: var(--muted2); margin-right: 2px; }
+.rt-dot { width: 7px; height: 7px; border-radius: 50%; }
+.rt-dot.ok  { background: var(--secondary); }
+.rt-dot.bad { background: #ef4444; }
+.rt-recent-last { margin-left: 6px; color: var(--muted2); font-variant-numeric: tabular-nums; }
+
+/* ── 구글 캘린더 카드의 일정 목록 (연동 탭) ─────────────────────────
+   연결만 해 놓고 아무것도 안 보이면 진짜 되는지 알 수 없다. 다가오는
+   일정 몇 건을 카드 안에서 바로 보여 준다. */
+.cal-list {
+  margin-top: 4px; padding: 9px 11px;
+  background: var(--bg); border: 1px solid var(--border); border-radius: 8px;
+}
+.cal-list-head {
+  display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap;
+  margin-bottom: 7px; font-size: 11.5px; font-weight: 700; color: var(--text);
+}
+.cal-list-head span { font-size: 10.5px; font-weight: 500; color: var(--muted2); }
+.cal-empty { font-size: 11.5px; color: var(--muted2); }
+.cal-row {
+  display: flex; align-items: baseline; gap: 9px;
+  padding: 4px 0; font-size: 11.5px;
+}
+.cal-row + .cal-row { border-top: 1px solid var(--border); }
+/* 시각을 고정폭으로 맞춘다 — 세로로 줄이 서야 "언제" 가 한눈에 훑힌다. */
+.cal-when {
+  flex: none; min-width: 94px;
+  color: var(--secondary); font-variant-numeric: tabular-nums;
+}
+.cal-title {
+  flex: 1; min-width: 0; color: var(--text);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.cal-where { flex: none; max-width: 120px; color: var(--muted2);
+             overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ── 태스크 현황 숫자 = 아래 미니 리스트의 필터 ──────────────────────
+   전에는 그 상태의 첫 태스크 하나를 열었다. 0건이면 아무 일도 안
+   일어나서 넷 중 둘이 죽은 버튼이었다. 지금은 눌린 상태가 보이고,
+   0건은 눌리지 않는다는 것이 보인다. */
+.hs-task-stat-btn.on {
+  background: var(--primary-dim);
+  border-color: var(--primary);
+}
+.hs-task-stat-btn:disabled {
+  opacity: .38; cursor: default;
+}
+.hs-task-stat-btn:disabled:hover { background: inherit; }
+
+.hs-task-filter-note {
+  display: flex; align-items: center; gap: 8px; width: 100%;
+  padding: 5px 9px; margin-bottom: 4px;
+  font: inherit; font-size: 11px; text-align: left;
+  color: var(--muted); background: var(--primary-dk);
+  border: 1px solid var(--primary-dim); border-radius: 7px;
+  cursor: pointer; transition: var(--t-ui) .12s;
+}
+.hs-task-filter-note:hover { background: var(--primary-dim); color: var(--text); }
+.hs-task-filter-note span { flex: 1; min-width: 0; }
+.hs-task-filter-note b { flex: none; font-weight: 600; color: var(--primary); }
+/* 필터가 걸리면 목록이 길어질 수 있다 — 사이드바를 통째로 늘리지 않고
+   여기서 묶는다. */
+.hs-task-mini-list { max-height: 300px; overflow-y: auto; }
+
+/* 좁은 화면: 알림 패널을 벨이 아니라 화면에 붙인다.
+   벨 오른쪽에 메뉴 버튼이 있어 `right:0` 기준점이 화면 끝이 아니므로,
+   절대 배치로는 왼쪽이 잘린다(실측 −53px). 고정 배치로 양옆 8px 만 띄운다. */
+@media (max-width: 480px) {
+  .nb-dropdown {
+    position: fixed;
+    top: 56px; left: 8px; right: 8px;
+    width: auto; max-width: none;
+  }
 }

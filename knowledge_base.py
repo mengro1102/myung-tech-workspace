@@ -569,6 +569,25 @@ _KO_EN = {
     "실물": ["real-world"], "실기": ["real-world"], "데이터셋": ["dataset"],
     "파라미터": ["parameter"], "확산": ["diffusion"], "강화학습": ["reinforcement learning"],
     "모방학습": ["imitation learning"], "세계모델": ["world model"],
+    # 자율주행 (2026-10-23 추가)
+    #
+    # 이 사전이 비어 있어서 생긴 일: "자율주행 서베이" 아이디어에서
+    # research._terms() 가 뽑은 검색어가 `['references', 'ID', 'results']`
+    # 였다. arXiv 에 그걸로 물어 무관한 논문 8건이 왔고, 계획 수립기는 그
+    # 8건만 보고 **"자율주행 관련 논문이 없다"** 고 결론냈다 — 같은 순간
+    # 위키 조회는 자율주행 논문 4건을 제대로 가져오고 있었는데도.
+    #
+    # 이 사전 주석이 예고한 그대로다: "두 벌로 갈리면 위키에서는 찾는데
+    # arXiv 에서는 못 찾는 상태가 된다."
+    "자율주행": ["autonomous driving", "self-driving"],
+    "자율차": ["autonomous vehicle"], "자율주행차": ["autonomous vehicle"],
+    "인지": ["perception"], "지각": ["perception"],
+    "경로계획": ["path planning", "motion planning"],
+    "주행": ["driving"], "차선": ["lane"], "차량": ["vehicle"],
+    "센서융합": ["sensor fusion"], "센서 융합": ["sensor fusion"],
+    "라이다": ["lidar"], "레이더": ["radar"], "점군": ["point cloud"],
+    "조감도": ["bird's-eye view"], "객체검출": ["object detection"],
+    "객체 검출": ["object detection"], "서베이": ["survey"],
     "관측": ["observation"], "행동": ["action"], "청크": ["chunk"],
 }
 

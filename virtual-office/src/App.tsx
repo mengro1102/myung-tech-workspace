@@ -16,6 +16,7 @@ import NotificationBell, { Notification } from './components/NotificationBell';
 const VirtualOffice = lazy(() => import('./pages/VirtualOffice'));
 const ProjectsTab = lazy(() => import('./components/ProjectsTab'));
 const NotesTab = lazy(() => import('./components/NotesTab'));
+const KnowledgeTab = lazy(() => import('./components/KnowledgeTab'));
 const ApprovalBox = lazy(() => import('./components/ApprovalBox'));
 const LessonsBox = lazy(() => import('./components/LessonsBox'));
 import { api, AgentSummary, deptLabels, type ApprovalRow, type AssistantSession,
@@ -155,6 +156,14 @@ function MainScreen() {
   const [healthDetail, setHealthDetail] = useState<HealthStatus | null>(null);
   const [taskList,     setTaskList]   = useState<TaskItem[]>([]);
   const [drawerTaskId, setDrawerTaskId] = useState<string | null>(null);
+  /* 태스크 현황에서 고른 상태. null 이면 전부.
+
+     전에는 숫자를 누르면 그 상태의 **첫 태스크 하나**를 열었다. 둘이
+     잘못이었다 — 0건이면 find 가 undefined 라 아무 일도 안 일어났고
+     (지금 대기 0 · 처리중 0 이라 넷 중 둘이 죽은 버튼이었다), 10건일 때
+     그중 하나를 임의로 여는 것도 "10건" 을 누른 사람이 기대하는 동작이
+     아니다. 바로 아래 미니 리스트의 필터로 쓴다. */
+  const [taskFilter, setTaskFilter] = useState<string | null>(null);
   const [toasts,       setToasts]     = useState<ToastItem[]>([]);
   const [notifications, setNotifications] = useState<Notification[]>([]);
   /* 알림의 읽음·삭제는 서버에 남긴다.
@@ -199,10 +208,26 @@ function MainScreen() {
   const [showMemory,  setShowMemory]  = useState(false);
   const [showModel,   setShowModel]   = useState(false);
   const [showManage,  setShowManage]  = useState(false);
-  const [activeTab,   setActiveTab]   = useState<'main' | 'office' | 'ceo' | 'agents' | 'projects' | 'notes'>('main');
+  const [activeTab,   setActiveTab]   = useState<'main' | 'office' | 'agents' | 'projects' | 'knowledge'>('main');
   // CEO 룸 KPI 용. 결재·프로젝트는 태스크 큐와 다른 컬렉션이라, 이걸 세지
   // 않으면 프로젝트가 셋 돌아가는 중에도 대시보드가 전부 0 으로 보인다.
   const [ceoApprovals, setCeoApprovals] = useState<ApprovalRow[]>([]);
+
+  /* 브라우저 탭 제목에 결재 대기 건수를 띄운다.
+   *
+   * 제목이 "명테크 Agent Studio v1.3" 로 **고정**이었다. 결재 2건이
+   * 사장님을 기다리고 있어도 탭에서는 보이지 않는다 — 다른 창을 보고
+   * 있으면 알 길이 없다. 버전 번호는 탭에서 할 일이 없으므로 뺐다
+   * (index.html 의 제목도 같이 줄였다).
+   *
+   * 지금 어느 탭을 보고 있는지도 붙인다. 명테크를 두 창 띄워 두면
+   * 제목이 같아서 구분이 안 됐다. */
+  useEffect(() => {
+    const n = ceoApprovals.length;
+    const where = ({ main: '메인', office: '사무실', agents: '에이전트',
+                     projects: '프로젝트', knowledge: '지식베이스' } as const)[activeTab];
+    document.title = `${n > 0 ? `(${n}) ` : ''}명테크 · ${where}`;
+  }, [ceoApprovals.length, activeTab]);
   const [ceoProjectList, setCeoProjectList] = useState<ProjectRow[]>([]);
   /* 카드를 눌렀을 때 '그것' 이 열리게 하는 표식. 예전에는 결재 카드는 아무
    * 반응이 없었고, 프로젝트 카드는 셋 다 똑같이 프로젝트 탭만 열어서 어느
@@ -214,6 +239,39 @@ function MainScreen() {
   const [lessonsOpen, setLessonsOpen] = useState(false);
   const [overrideTask, setOverrideTask] = useState<TaskItem | null>(null);
   const [showGridMenu, setShowGridMenu] = useState(false);
+
+  /* Escape 로 닫는다.
+   *
+   * 모달 여섯 개(관리·지식 네트워크·LLM 모델·팀·CEO 개입·가이드)와 태스크
+   * 상세·알림·메뉴 **어느 것도** Escape 를 받지 않았다. 노트 에디터만
+   * 처리하고 있었다(NotesTab). 열고 나면 ✕ 를 찾아 누르는 수밖에 없었는데,
+   * 모달이 화면을 덮는 동안 ✕ 는 구석에 있고 크기도 작다.
+   *
+   * 각 모달을 고치는 대신 여기 한 곳에서 받는다 — 모달 상태가 전부 이
+   * 컴포넌트에 있으므로, 여섯 파일을 건드릴 이유가 없다.
+   *
+   * **덮인 순서의 역순으로 하나씩** 닫는다. 한 번에 다 닫으면, 관리 탭에서
+   * 가이드를 열어 둔 사람이 Escape 한 번에 둘 다 잃는다. */
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      // 글을 쓰는 중이면 그쪽이 먼저다(노트 에디터가 자기 Escape 를 쓴다).
+      const el = document.activeElement as HTMLElement | null;
+      if (el && /^(INPUT|TEXTAREA)$/.test(el.tagName)) return;
+
+      if (showGridMenu)           { setShowGridMenu(false); return; }
+      if (showNotifications)      { setShowNotifications(false); return; }
+      if (drawerTaskId)           { setDrawerTaskId(null); return; }
+      if (overrideTask)           { setOverrideTask(null); return; }
+      if (showModel)              { setShowModel(false); return; }
+      if (showMemory)             { setShowMemory(false); return; }
+      if (showTeam)               { setShowTeam(false); return; }
+      if (showManage)             { setShowManage(false); return; }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [showGridMenu, showNotifications, drawerTaskId, overrideTask,
+      showModel, showMemory, showTeam, showManage]);
   const gridMenuRef = useRef<HTMLDivElement>(null);
   /* 공통 두뇌. 예전에는 여기 하드코딩된 값이 전부라 새로고침하면 사라졌고
    * 추론에는 아무 영향도 없었다. 이제 서버(runtime_config.json)에서 읽고,
@@ -229,8 +287,23 @@ function MainScreen() {
     let stop = false;
     void fetchBriefing().then(text => {
       if (stop) return;
-      setMessages(prev => (prev.length === 1 && prev[0].id === 'init')
-        ? [{ ...prev[0], text, ts: nowStr() }] : prev);
+      setMessages(prev => {
+        // 전에는 `prev.length === 1 && id === 'init'` 일 때만 썼다. 즉
+        // **대화 기록이 비었을 때만** 새 브리핑이 들어갔다. 한 번이라도
+        // 쓰고 나면 localStorage 에 기록이 남으므로 그 뒤로는 영원히 옛
+        // 브리핑을 본다 — 오후 7시 45분에 "새벽입니다" 를 읽었고, 그 아래
+        // [지금 막힌 것] 숫자도 16시간 전 것이었다(실측).
+        //
+        // 브리핑은 대화가 아니라 현황판이다. 맨 앞 브리핑만 새것으로
+        // 갈아 끼우고 주고받은 말은 그대로 둔다.
+        const i = prev.findIndex(m => m.role === 'assistant'
+                                   && m.text.startsWith('■ 브리핑'));
+        if (i < 0) return [{ id: uid('b'), role: 'assistant' as const,
+                             sender: '명테크 AI', text, ts: nowStr() }, ...prev];
+        const next = [...prev];
+        next[i] = { ...next[i], text, ts: nowStr() };
+        return next;
+      });
     });
     return () => { stop = true; };
   }, []);
@@ -258,6 +331,26 @@ function MainScreen() {
   // 화면이 튀면 그게 더 나쁘다.
   const chatAtBottom = useRef(true);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  // `+` 메뉴. 부서 선택기가 입력줄을 늘 차지하던 것을 여기로 옮겼다.
+  const [plusOpen, setPlusOpen] = useState(false);
+
+  /** 쓰는 만큼 늘리고, 상한을 넘으면 안에서 스크롤한다.
+   *
+   *  `height='auto'` 로 **먼저 되돌려야** 한다 — 그러지 않으면 scrollHeight 가
+   *  현재 높이에 갇혀 줄어들지 않는다(지웠는데 커진 채로 남는다).
+   *
+   *  상한 전에는 overflow 를 숨긴다. 켜 두면 한 줄짜리에도 가느다란 바가
+   *  깜빡인다. */
+  const growTextarea = useCallback(() => {
+    const el = textareaRef.current;
+    if (!el) return;
+    const MAX = 200;                 // 약 8줄. 그 이상은 읽기도 쓰기도 불편하다
+    el.style.height = 'auto';
+    el.style.height = `${Math.min(el.scrollHeight, MAX)}px`;
+    el.style.overflowY = el.scrollHeight > MAX ? 'auto' : 'hidden';
+  }, []);
+
+  useEffect(() => { growTextarea(); }, [input, growTextarea]);
   const sidebarResizeRef = useRef<{ dragging: boolean; startX: number; startW: number }>({ dragging: false, startX: 0, startW: 220 });
 
   // 뷰포트 변화 감지 — matchMedia로 신뢰성 보장
@@ -367,7 +460,7 @@ function MainScreen() {
           if (recentNotifTimerRef.current) clearTimeout(recentNotifTimerRef.current);
           recentNotifTimerRef.current = setTimeout(() => setRecentNotif(null), 5000);
         } else if (isDone) {
-          const n: Notification = { id: `notif-${e.event_id}`, type: 'success', message: `${e.sender} 보고`, time: new Date(e.timestamp ?? Date.now()), read: false, link: () => setActiveTab('ceo') };
+          const n: Notification = { id: `notif-${e.event_id}`, type: 'success', message: `${e.sender} 보고`, time: new Date(e.timestamp ?? Date.now()), read: false, link: () => setActiveTab('projects') };
           setNotifications(prev => {
             if (notifSeenRef.current.dismissed.includes(n.id)) return prev;   // 지운 것은 다시 만들지 않는다
             if (prev.some(x => x.id === n.id)) return prev;
@@ -482,10 +575,14 @@ function MainScreen() {
   }), [ceoCards]);
 
   useEffect(() => {
-    // 결재는 사이드바의 "지금 막힌 것" 도 쓴다. CEO 탭에서만 받아 오면
-    // 메인 화면에서는 늘 0 으로 보여, 브리핑이 "결재 1건" 이라고 말하는데
-    // 바로 옆 사이드바는 "막혀 있는 일 없음" 이라고 하는 상태가 된다.
-    if (activeTab !== 'ceo' && activeTab !== 'main') return;
+    // 결재는 사이드바의 "지금 막힌 것" 도 쓴다. 결재함이 있는 탭에서만
+    // 받아 오면 메인 화면에서는 늘 0 으로 보여, 브리핑이 "결재 1건" 이라고
+    // 말하는데 바로 옆 사이드바는 "막혀 있는 일 없음" 이라고 하는 상태가 된다.
+    //
+    // 전에는 'ceo' 였다. 그 탭을 프로젝트에 합쳤으니 여기도 따라와야 한다 —
+    // 안 바꾸면 조건이 `!== 'main'` 으로 줄어들어, 정작 결재함이 있는
+    // 프로젝트 탭에서 결재가 갱신되지 않는다.
+    if (activeTab !== 'projects' && activeTab !== 'main') return;
     let stop = false;
     const tick = async () => {
       const [a, p] = await Promise.all([
@@ -778,7 +875,7 @@ function MainScreen() {
             // 되지만 사장님이 멈춰 있으면 아무것도 진행되지 않는다.
             if (cycleStatus === 'waiting' && (activity.approvals_pending ?? 0) > 0
                 && (activity.projects_waiting ?? 0) === 0) {
-              setActiveTab('ceo');
+              setActiveTab('projects');
             } else {
               setActiveTab('projects');
             }
@@ -924,53 +1021,36 @@ function MainScreen() {
         <button className={`hs-tab ${activeTab === 'projects' ? 'active' : ''}`} onClick={() => setActiveTab('projects')}>
           🚀 프로젝트
         </button>
-        <button className={`hs-tab ${activeTab === 'notes' ? 'active' : ''}`} onClick={() => setActiveTab('notes')}>
-          📝 노트
-        </button>
-        <button className={`hs-tab ${activeTab === 'ceo' ? 'active' : ''}`} onClick={() => setActiveTab('ceo')}>
-          👔 CEO 룸
+        {/* 전에는 '📝 노트' 였다 — 사장님 할 일 체크리스트. 그건 프로젝트
+            탭의 결재함 옆으로 옮겼다(둘 다 사람만 할 수 있는 일이다).
+            이 자리는 위키를 뒤지는 곳이 된다. */}
+        <button className={`hs-tab ${activeTab === 'knowledge' ? 'active' : ''}`} onClick={() => setActiveTab('knowledge')}>
+          🧬 지식베이스
         </button>
       </div>
 
-      {/* ── Notes Tab ── */}
-      {activeTab === 'notes' && (
+      {/* ── Knowledge Tab — 위키를 IDE 처럼 뒤지고 논문처럼 읽는다 ── */}
+      {activeTab === 'knowledge' && (
         <Suspense fallback={<div className="hs-lazy-fallback">
-          <div className="hs-lazy-spinner" /> 노트 불러오는 중…
+          <div className="hs-lazy-spinner" /> 지식베이스 불러오는 중…
         </div>}>
-          <NotesTab />
+          <KnowledgeTab />
         </Suspense>
       )}
 
-      {/* ── Projects Tab ── */}
+      {/* ── Projects Tab — 결재·교훈·칸반 + 프로젝트 목록 ──
+          전에는 'CEO 룸' 이라는 별도 탭이었다. 거기 있던 것은 전부
+          프로젝트에 딸린 것이다 — 결재는 프로젝트가 올린 제안이고,
+          교훈은 막힌 프로젝트에서 뽑은 것이고, KPI·칸반은 프로젝트
+          상태 집계다. 따로 두면 "승인하려면 탭을 옮기고, 무엇을
+          승인하는지 보려면 다시 돌아오는" 왕복이 생긴다.
+          사장님만 할 수 있는 일(결재)이 먼저 보이도록 위에 둔다.
+
+          스크롤은 `.pj-page` 하나만 가진다. 결재함(.ceo-room)과 목록(.pj-wrap)이
+          각자 overflow-y:auto 를 들고 있어서, 그냥 나란히 두면 스크롤바가 둘
+          생기고 높이도 반씩 나눠 가진다. */}
       {activeTab === 'projects' && (
-        <Suspense fallback={<div className="hs-lazy-fallback">
-          <div className="hs-lazy-spinner" /> 프로젝트 불러오는 중…
-        </div>}>
-          <ProjectsTab focusId={focusProject} onFocused={() => setFocusProject(null)} />
-        </Suspense>
-      )}
-
-      {/* ── Office Tab ── */}
-      {activeTab === 'office' && (
-        <Suspense fallback={<div className="hs-lazy-fallback">
-          <span className="hs-lazy-spinner" />
-          2D 사무실을 불러오는 중…
-        </div>}>
-        <OfficeView
-          agents={agents}
-          cycleStatus={cycleStatus}
-          taskSummary={taskSummary}
-          onDeptChat={(d, msg) => {
-            setActiveTab('main');
-            setDept(d);
-            setTimeout(() => send(msg, d), 100);
-          }}
-        />
-        </Suspense>
-      )}
-
-      {/* ── CEO 룸 탭 ── */}
-      {activeTab === 'ceo' && (
+        <div className="pj-page">
         <div className="ceo-room">
           {/* KPI. 현황판과 같은 ceoCards 에서 센다 — 예전에는 KPI 가 태스크
               큐만, 현황판은 셋을 다 세서 같은 화면에 '완료 1' 과 '완료 02' 가
@@ -1032,6 +1112,30 @@ function MainScreen() {
                         onToggle={() => setLessonsOpen(v => !v)} />
           </Suspense>
 
+        </div>
+
+        {/* 할 일 — 전에는 '노트' 탭이었다. 사람만 할 수 있는 일(토큰 발급,
+            계정 로그인, 결재 판단)이 쌓이는 곳이라, 결재함과 같은 성질이다.
+            탭을 따로 두면 "내가 뭘 해야 하더라" 를 보려고 또 옮겨야 한다. */}
+        <Suspense fallback={<div className="hs-lazy-fallback">
+          <div className="hs-lazy-spinner" /> 할 일 불러오는 중…
+        </div>}>
+          <NotesTab />
+        </Suspense>
+
+        <Suspense fallback={<div className="hs-lazy-fallback">
+          <div className="hs-lazy-spinner" /> 프로젝트 불러오는 중…
+        </div>}>
+          <ProjectsTab focusId={focusProject} onFocused={() => setFocusProject(null)} />
+        </Suspense>
+
+        {/* 칸반 — 맨 아래다. 전에는 결재함 바로 밑이었는데, 완료 열에
+            18장이 쌓이자 그리드가 네 열을 모두 같은 높이로 늘려 이 한
+            덩어리가 1974px 이 됐다(실측). 그 아래의 할 일·프로젝트
+            목록이 세 화면 밑으로 밀려서, 사장님이 매번 한참 내려야 했다.
+
+            손대는 것(결재·할 일·프로젝트)이 위에, 훑는 것(칸반)이 아래다.
+            열마다 스크롤도 줬다 — hermes.css 의 .ceo-col-scroll 주석 참고. */}
           {/* 현황판. 결재·프로젝트·태스크를 한 자로 잰다 — 셋은 생김새가
               달라도 사장님이 묻는 것은 같다: 지금 어디에 무엇이 걸려 있나. */}
           <div className="ceo-kanban">
@@ -1080,6 +1184,26 @@ function MainScreen() {
         </div>
       )}
 
+      {/* ── Office Tab ── */}
+      {activeTab === 'office' && (
+        <Suspense fallback={<div className="hs-lazy-fallback">
+          <span className="hs-lazy-spinner" />
+          2D 사무실을 불러오는 중…
+        </div>}>
+        <OfficeView
+          agents={agents}
+          cycleStatus={cycleStatus}
+          taskSummary={taskSummary}
+          onDeptChat={(d, msg) => {
+            setActiveTab('main');
+            setDept(d);
+            setTimeout(() => send(msg, d), 100);
+          }}
+        />
+        </Suspense>
+      )}
+
+
       {/* ── 에이전트 관리 탭 ── */}
       {activeTab === 'agents' && (
         <AgentManageTab
@@ -1109,6 +1233,11 @@ function MainScreen() {
               ['백엔드',   backendOk,                  '연결됨', '미연결'],
               ['AI 모델',  healthDetail?.vllm?.ok ?? false, '정상',   healthDetail?.vllm?.error ? 'Ollama 미연결' : '확인 중'],
               ['지식 베이스', healthDetail?.knowledge_base?.ok ?? false, '동기화됨', '경로 오류'],
+              // 맹비서를 넣는다. 메인 채팅의 **기본 상대**인데 이 줄만
+              // 없었다 — 게이트웨이가 꺼져 있어도 현황판은 전부 초록이라,
+              // 사장님은 메시지를 보내고 나서야 안 된다는 걸 알았다(실측).
+              ['맹비서', assistantUp === true, '연결됨',
+               assistantUp === null ? '확인 중' : '꺼짐'],
             ] as [string, boolean, string, string][]).map(([label, ok, okTxt, errTxt]) => (
               <div key={label} className="hs-status-row">
                 <span className={`hs-dot ${ok ? 'green' : 'red'}`} />
@@ -1141,21 +1270,38 @@ function MainScreen() {
               ['muted', taskSummary.done,        '완료',   'done'],
               ['red',   taskSummary.failed,      '실패',   'failed'],
             ] as [string, number, string, string][]).map(([cls, num, lbl, status]) => (
-              <button key={status} className={`hs-task-stat hs-task-stat-btn`}
-                onClick={() => {
-                  const t = taskList.find(t => t.status === status);
-                  if (t) setDrawerTaskId(t.task_id);
-                }}>
+              <button key={status}
+                className={`hs-task-stat hs-task-stat-btn${taskFilter === status ? ' on' : ''}`}
+                disabled={num === 0}
+                aria-pressed={taskFilter === status}
+                title={num === 0 ? `${lbl} 중인 태스크가 없습니다`
+                  : taskFilter === status ? '눌러서 전체로' : `${lbl} ${num}건만 보기`}
+                onClick={() => setTaskFilter(f => (f === status ? null : status))}>
                 <span className={`hs-task-stat-num ${cls}`}>{num}</span>
                 <span className="hs-task-stat-lbl">{lbl}</span>
               </button>
             ))}
           </div>
 
-          {/* 최근 태스크 미니 리스트 */}
+          {/* 최근 태스크 미니 리스트. 위 숫자를 누르면 여기가 걸러진다.
+              고른 상태가 있을 때는 5건으로 자르지 않는다 — "완료 18건" 을
+              눌렀는데 5건만 나오면 숫자가 틀린 것처럼 보인다. */}
           {taskList.length > 0 && (
             <div className="hs-task-mini-list">
-              {taskList.slice(0, 5).map(t => {
+              {taskFilter && (
+                <button className="hs-task-filter-note" onClick={() => setTaskFilter(null)}>
+                  <span>
+                    {taskFilter === 'pending' ? '대기' : taskFilter === 'in_progress' ? '처리중'
+                      : taskFilter === 'done' ? '완료' : '실패'}
+                    {' '}{taskList.filter(t => t.status === taskFilter).length}건만 보는 중
+                  </span>
+                  <b>✕ 전체</b>
+                </button>
+              )}
+              {(taskFilter
+                ? taskList.filter(t => t.status === taskFilter)
+                : taskList.slice(0, 5)
+              ).map(t => {
                 const statusColor = t.status === 'done' ? '#0ffd6a' : t.status === 'failed' ? '#ef4444' : t.status === 'in_progress' ? '#60a5fa' : '#f59e0b';
                 const deptIcons: Record<string, string> = { orchestration_dept: '🧠', research_dept: '🔬', finance_dept: '📈', dev_dept: '⚙️', content_dept: '✍️' };
                 return (
@@ -1170,12 +1316,12 @@ function MainScreen() {
           )}
 
           {/* 지금 막힌 것 — 사장님이 아니면 아무도 못 푸는 일.
-              자세한 현황은 CEO 룸이 맡는다. 여기까지 숫자를 늘어놓으면
-              같은 것을 두 군데서 세게 되고, 어긋나면 둘 다 못 믿는다. */}
+              자세한 현황은 프로젝트 탭의 결재함이 맡는다. 여기까지 숫자를
+              늘어놓으면 같은 것을 두 군데서 세게 되고, 어긋나면 둘 다 못 믿는다. */}
           <div className="hs-sidebar-section-title">지금 막힌 것</div>
           <button className={`hs-blocked ${ceoApprovals.length ? 'on' : ''}`}
-            onClick={() => setActiveTab('ceo')}
-            title="CEO 룸 결재함으로">
+            onClick={() => setActiveTab('projects')}
+            title="프로젝트 탭의 결재함으로">
             {ceoApprovals.length > 0 ? (
               <>
                 <span className="hs-blocked-n">{ceoApprovals.length}</span>
@@ -1186,8 +1332,11 @@ function MainScreen() {
             )}
           </button>
 
-          {/* 상태보고 */}
-          <div className="hs-sidebar-section-title">상태보고</div>
+          {/* 전에는 '상태보고' 였고, 누르면 그 부서에 **상태보고를 시켰다**
+              — 호출 하나를 쓰고 답을 기다려야 했다. 사장님이 원하신 것은
+              "지금 누가 무엇을 하고 있나" 를 보는 것이지 보고서를 받는 게
+              아니다. 이름을 사실대로 바꾸고, 누르면 사무실 탭으로 보낸다. */}
+          <div className="hs-sidebar-section-title">에이전트 활동</div>
           <div className="hs-dept-list">
             {([
               ['orchestration_dept', '🧠', '오케스트레이션'],
@@ -1204,8 +1353,8 @@ function MainScreen() {
                 <button
                   key={d}
                   className={`hs-dept-card ${busy ? 'busy' : ''}`}
-                  onClick={() => { setDept(d); send(`${label}팀 현재 상태와 진행 중인 태스크를 보고해줘.`, d); }}
-                  title={busy ? `${label}팀 — ${busy.doing || '작업 중'}` : `${label}팀 상태보고 요청`}
+                  onClick={() => setActiveTab('office')}
+                  title={busy ? `${label}팀 — ${busy.doing || '작업 중'}` : `${label}팀 — 대기 중. 눌러서 사무실로`}
                 >
                   <span className="hs-dept-icon">{icon}</span>
                   <span className="hs-dept-name">
@@ -1304,45 +1453,92 @@ function MainScreen() {
           </div>
 
 
-          {/* Chat input */}
-          <div className="hs-input-bar">
-            {/* 인라인 스타일이던 것을 클래스로 옮겼다. 좁은 화면에서 줄어들지도
-                줄바꿈되지도 않아 전송 버튼을 화면 밖으로 밀어냈다. */}
-            <select
-              className="hs-dept-select"
-              aria-label="지시할 부서 선택"
-              value={dept}
-              onChange={e => setDept(e.target.value)}
-            >
-              {/* 맹비서가 기본 대화 상대. 부서는 아래에 남긴다 — 한쪽을
-                  지우면 다른 쪽이 할 수 있던 일이 사라진다. */}
-              <option value="assistant">🤖 맹비서</option>
-              <option value="orchestration_dept">🧠 오케스트레이션</option>
-              <option value="research_dept">🔬 학술연구</option>
-              <option value="finance_dept">📈 금융투자</option>
-              <option value="dev_dept">⚙️ 개발</option>
-              <option value="content_dept">✍️ 콘텐츠</option>
-            </select>
+          {/* Chat input — 쓰는 만큼 늘고, 도구는 `+` 하나로 모았다. */}
+          <div className="hs-composer">
+            <textarea
+              ref={textareaRef}
+              className="hs-composer-text"
+              rows={1}
+              placeholder={dept === 'assistant'
+                ? (assistantUp === false
+                    ? '맹비서가 꺼져 있습니다 — 1. 전체 시작.bat 을 실행해 주세요'
+                    : '맹비서에게 무엇이든… (Enter 전송 · Shift+Enter 줄바꿈)')
+                : `${deptLabels[dept] ?? dept}에 지시… (Enter 전송 · Shift+Enter 줄바꿈)`}
+              value={input}
+              onChange={e => setInput(e.target.value)}
+              onKeyDown={handleKeyDown}
+            />
 
-            {/* 인라인 flex 를 제거했다 — 클래스에 이미 flex:1 이 있고, 인라인이
-                우선하는 바람에 모바일에서 줄바꿈(flex-basis:100%)이 먹지 않았다. */}
-            <div className="hs-textarea-wrap">
-              <textarea
-                ref={textareaRef}
-                className="hs-textarea"
-                rows={1}
-                placeholder="에이전트에게 무엇이든... (Enter 전송 · Shift+Enter 줄바꿈)"
-                value={input}
-                onChange={e => setInput(e.target.value)}
-                onKeyDown={handleKeyDown}
-              />
+            <div className="hs-composer-bar">
+              {/* `+` — 대화 상대와 빠른 명령. 되는 것만 넣는다. */}
+              <div className="hs-plus-wrap">
+                <button className={`hs-plus ${plusOpen ? 'open' : ''}`}
+                        aria-label="도구와 대화 상대"
+                        aria-expanded={plusOpen}
+                        onClick={() => setPlusOpen(v => !v)}>
+                  {plusOpen ? '✕' : '＋'}
+                </button>
+
+                {plusOpen && (
+                  <>
+                    <div className="hs-plus-backdrop" onClick={() => setPlusOpen(false)} />
+                    <div className="hs-plus-menu" role="menu">
+                      <div className="hs-plus-head">대화 상대</div>
+                      {([['assistant', '🤖', '맹비서', '세션이 이어집니다'],
+                         ['orchestration_dept', '🧠', '오케스트레이션', '부서에 일을 시킵니다'],
+                         ['research_dept', '🔬', '학술연구', ''],
+                         ['finance_dept', '📈', '금융투자', ''],
+                         ['dev_dept', '⚙️', '개발', ''],
+                         ['content_dept', '✍️', '콘텐츠', '']] as const).map(
+                        ([id, icon, name, hint]) => (
+                          <button key={id} className={`hs-plus-item ${dept === id ? 'on' : ''}`}
+                                  onClick={() => { setDept(id); setPlusOpen(false); }}>
+                            <span className="hs-plus-ico">{icon}</span>
+                            <span className="hs-plus-name">{name}</span>
+                            {hint && <span className="hs-plus-hint">{hint}</span>}
+                            {dept === id && <span className="hs-plus-check">✓</span>}
+                          </button>
+                        ))}
+
+                      <div className="hs-plus-sep" />
+                      <div className="hs-plus-head">
+                        빠른 명령 <span>맹비서 스킬</span>
+                      </div>
+                      {/* 맹비서가 실제로 가진 스킬에 붙은 것만 넣는다.
+                          없는 명령을 넣으면 눌렀을 때 아무 일도 안 일어난다. */}
+                      {([['/현황', '📊', '명테크 현황', 'myungtech-status'],
+                         ['/결재', '📋', '결재 대기 보기', 'myungtech-approvals'],
+                         ['위키에서 찾아줘: ', '🧬', '위키에서 찾기', 'wiki-prompts']] as const).map(
+                        ([text, icon, name, skill]) => (
+                          <button key={text} className="hs-plus-item"
+                                  onClick={() => {
+                                    setDept('assistant');       // 스킬은 맹비서의 것이다
+                                    setInput(prev => prev ? `${text}${prev}` : text);
+                                    setPlusOpen(false);
+                                    setTimeout(() => textareaRef.current?.focus(), 0);
+                                  }}>
+                            <span className="hs-plus-ico">{icon}</span>
+                            <span className="hs-plus-name">{name}</span>
+                            <span className="hs-plus-hint">{skill}</span>
+                          </button>
+                        ))}
+                    </div>
+                  </>
+                )}
+              </div>
+
+              {/* 지금 누구와 말하는지는 늘 보여야 한다 — `+` 안에 숨기면
+                  부서에 지시하던 중인 것을 잊는다. */}
+              <span className="hs-composer-who">
+                {dept === 'assistant' ? '🤖 맹비서' : `${deptLabels[dept] ?? dept}`}
+              </span>
+
+              <button
+                className="hs-send-btn"
+                onClick={() => send(input, dept)}
+                disabled={running || !input.trim()}
+              >↑</button>
             </div>
-
-            <button
-              className="hs-send-btn"
-              onClick={() => send(input, dept)}
-              disabled={running || !input.trim()}
-            >↑</button>
           </div>
         </main>
       </div>}
@@ -1421,7 +1617,6 @@ function MainScreen() {
           onClose={() => setShowManage(false)}
           agentCount={agents.length}
           globalModel={globalModel}
-          onOpenTeam={() => { setShowManage(false); setShowTeam(true); }}
         />
       )}
 

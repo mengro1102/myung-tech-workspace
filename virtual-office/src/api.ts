@@ -78,6 +78,116 @@ async function safeJson<T>(p: Promise<Response>): Promise<T | null> {
   }
 }
 
+/* ── 구글 캘린더 ──
+   유튜브 OAuth 와 **같은** 구글 클라이언트를 쓴다(서버 CAL_SCOPE 주석).
+   범위는 읽기 전용 하나다. */
+export interface CalendarStatus {
+  connected: boolean;
+  has_client: boolean;     // 유튜브 칸의 Client ID/Secret 이 있는가
+  pending?: boolean;
+  error?: string;
+  scope?: string;
+}
+
+export interface CalendarEvent {
+  id: string;
+  title: string;
+  start: string;           // ISO. 종일이면 날짜만
+  end: string;
+  all_day: boolean;
+  where: string;
+  link: string;
+}
+
+export interface CalendarEvents {
+  ok: boolean;
+  connected: boolean;
+  events: CalendarEvent[];
+  calendar?: string;
+  /** ok=false 일 때 **왜** 안 되는지. 빈 목록과 구분해야 한다 —
+      연결이 깨진 것과 일정이 없는 것은 전혀 다른 상태다. */
+  error?: string;
+}
+
+/* ── FreeLLMAPI 라우터 ──
+   화면의 "AI 모델" 점은 Ollama 를 본다. 그런데 부서 다섯 중 넷이
+   `auto:hermes` 로 이 라우터를 탄다. 무료 한도를 공급자별로 나눠 쓰는
+   구조라 한 곳이 막히면 그대로 병목이 된다. */
+export interface RouterProvider {
+  name: string;
+  status: string;        // 'healthy' 등 freeapi.db 의 값 그대로
+  enabled: boolean;
+}
+
+export interface RouterStatus {
+  ok: boolean;           // 포트가 열렸고 **모델 목록까지** 받았을 때만 true
+  up?: boolean;
+  available: number;     // 지금 쓸 수 있는 모델. -1 이면 못 받았다
+  total: number;
+  providers: RouterProvider[];
+  healthy: number;
+  today: { name: string; calls: number; in: number; out: number }[];
+  calls_today: number;
+  recent: { at: string; name: string; status: string }[];
+  port: number;
+  reason?: string;       // ok=false 일 때 무엇이 안 되는지
+}
+
+/* ── 지식베이스 (GraphRAG 위키) ── */
+
+/** 출처. 같은 폴더에 섞여 있던 셋을 구분한다 — 사람이 정리한 노드,
+ *  arXiv 에서 모은 논문, 에이전트가 만든 산출물. 근거의 무게가 다르다. */
+export type KbOrigin = 'node' | 'reference' | 'experience' | 'injected' | 'unknown';
+
+export interface KbFile {
+  path: string;          // 위키 루트 기준 상대경로 (예: concepts/ppo.md)
+  name: string;
+  title: string;
+  size: number;
+  mtime: number;         // **로컬** 수정시각(초). 깃 동기화 시각이 아니다.
+  origin: KbOrigin;
+  kind?: 'pdf';
+}
+
+export interface KbFolder {
+  path: string;
+  label: string;
+  hint: string;
+  count: number;
+  mtime: number;         // 폴더 안에서 가장 최근 파일
+  files: KbFile[];
+}
+
+export interface KbTree {
+  available: boolean;
+  root?: string;
+  folders: KbFolder[];
+  total: number;
+  mtime: number;
+  now?: number;
+  error?: string;
+}
+
+export interface KbNeighbor {
+  slug: string;
+  title: string;
+  path: string;          // 빈 값이면 그래프에만 있고 문서가 없는 링크
+  hops: number;
+  why: string;           // 'related' | 'wikilink' 등 엣지 종류
+}
+
+export interface KbDoc {
+  path: string;
+  title: string;
+  front: Record<string, string>;
+  text: string;
+  size: number;
+  mtime: number;
+  origin: KbOrigin;
+  neighbors: KbNeighbor[];
+  error?: string;
+}
+
 export type StoreCollection = 'tasks' | 'services' | 'approvals' | 'notes' | 'notif_state';
 
 export interface StoreItem {
@@ -384,6 +494,31 @@ export const api = {
     safeJson<{ slug: string; content: string }>(
       fetch(`${API_BASE}/knowledge/read?slug=${encodeURIComponent(slug)}`)
     ),
+
+  /* ── 지식베이스 탭 ──
+     knowledgeNodes 는 slug 목록만 준다. 227건의 논문을
+     `2coool-2nd-workshop-on-the-challenge-of-out-of-label-haz…` 로
+     늘어놓는 것이 전부라서, 제목·수정시각·출처가 붙은 트리를 따로 받는다. */
+  knowledgeTree: () => safeJson<KbTree>(fetch(`${API_BASE}/knowledge/tree`)),
+  /** FreeLLMAPI 라우터 현황. 서버가 맹비서의 stack_status 를 불러 센다 —
+      같은 숫자를 두 군데서 세지 않으려고. */
+  routerStatus: () => safeJson<RouterStatus>(fetch(`${API_BASE}/router/status`)),
+
+  /* 구글 캘린더. 유튜브 OAuth 와 같은 클라이언트·같은 리다이렉트를 쓴다. */
+  calendarStatus: () => safeJson<CalendarStatus>(fetch(`${API_BASE}/calendar/status`)),
+  calendarEvents: (days = 14) =>
+    safeJson<CalendarEvents>(fetch(`${API_BASE}/calendar/events?days=${days}`)),
+  calOauthStart: () =>
+    safeJson<{ ok: boolean; auth_url?: string; redirect_uri?: string; error?: string }>(
+      fetch(`${API_BASE}/calendar/oauth/start`, { method: 'POST' })),
+  calOauthFinish: () =>
+    safeJson<{ ok: boolean; pending?: boolean; connected?: boolean; error?: string }>(
+      fetch(`${API_BASE}/calendar/oauth/finish`, { method: 'POST' })),
+  knowledgeDoc: (path: string) =>
+    safeJson<KbDoc>(fetch(`${API_BASE}/knowledge/doc?path=${encodeURIComponent(path)}`)),
+  /** 그림·PDF 는 JSON 이 아니라 바이트다. `<img src>`·`<iframe src>` 에 그대로 넣는다. */
+  knowledgeFileUrl: (path: string) =>
+    `${API_BASE}/knowledge/file?path=${encodeURIComponent(path)}`,
   /* ⚡ 지식 주입 → raw/ 저장 → (기본)자동 git 동기화 */
   knowledgeInject: (payload: { title: string; content: string; source_url?: string; sync?: boolean }) =>
     safeJson<{ ok: boolean; injected?: string; error?: string; sync_steps?: any[]; status?: KnowledgeStatus }>(

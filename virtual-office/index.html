@@ -1,10 +1,16 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="ko">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <!-- 폰트는 src/styles/fonts.css 에서 셀프 호스팅한다(외부 CDN 의존 제거). -->
-  <title>명테크 Agent Studio v1.3</title>
+  <!-- 파비콘. 없으면 브라우저 탭에 빈 아이콘이 떠서, 탭을 여러 개
+       열어 둘 때 어느 것이 명테크인지 못 찾는다. 파일을 추가하지 않고
+       SVG 를 data URI 로 박는다 — 요청이 하나 줄고 캐시 걱정도 없다.
+       머리말의 보라색 'M' 배지와 같은 모양이다. -->
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%238B5CF6'/%3E%3Ctext x='16' y='23' font-family='Inter,system-ui,sans-serif' font-size='19' font-weight='800' fill='%23fff' text-anchor='middle'%3EM%3C/text%3E%3C/svg%3E" />
+  <meta name="description" content="명테크 Agent Studio — 1인 기업 멀티 에이전트 워크스페이스" />
+  <title>명테크 Agent Studio</title>
 </head>
 <body class="bg-brand-dark text-gray-200 min-h-screen">
   <div id="root"></div>
