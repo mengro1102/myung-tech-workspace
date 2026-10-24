@@ -68,10 +68,10 @@ D:\myung-tech-workspace\
 │   └── graphs\nodes.py        ← LangGraph 에이전트 노드
 │
 ├── departments\
-│   ├── orchestration_dept\    ← 오케스트레이션팀 (마스터 AI)
+│   ├── orchestration_dept\    ← 오케스트레이션부 (마스터 AI)
 │   ├── research_dept\         ← 학술연구팀
 │   ├── finance_dept\          ← 금융투자팀
-│   ├── dev_dept\              ← 개발팀
+│   ├── dev_dept\              ← 개발부
 │   └── content_dept\          ← 콘텐츠/디자인팀
 │       ├── department_manifest.json   ← 부서 설정
 │       └── agents\
@@ -339,7 +339,17 @@ PDF 경로는 표를 전부 잃고 본문이 한 덩어리가 됩니다. 각 문
 
 ### 부서별 에이전트
 
-**🧠 오케스트레이션팀** (1명)
+> **이름은 `virtual-office/src/api.ts` 의 `deptLabels` 가 정본입니다.**
+> 접미사는 `~부` 로 통일했습니다 — 서버 id 가 전부 `_dept`(부서)입니다.
+> 전에는 같은 부서가 자리마다 네 가지 이름으로 나왔습니다(학술연구부 /
+> 학술연구팀 / 연구실 / 학술연구부). 화면에서 부서 이름을 쓸 때는
+> 하드코딩하지 말고 `deptLabels[id]` 를 읽으세요.
+>
+> 사무실의 **방** 이름('개발실', 'CEO실 · 회의실')은 장소 이름이라
+> 부서명과 다를 수 있습니다 — 그 방에는 실제로 CEO 책상과 회의 테이블이
+> 함께 있습니다.
+
+**🧠 오케스트레이션부** (1명)
 | ID | 이름 | 역할 | 레벨 |
 |----|------|------|------|
 | orch_master_01 | 김효율 모더레이터 | Master Orchestrator | 5 |
@@ -357,7 +367,7 @@ PDF 경로는 표를 전부 잃고 본문이 한 덩어리가 됩니다. 각 문
 | fin_pm_01 | 이재무 | Project Manager |
 | fin_worker_01 | 분석가 | Financial Analyst |
 
-**⚙️ 개발팀** (3명)
+**⚙️ 개발부** (3명)
 | ID | 이름 | 역할 |
 |----|------|------|
 | dev_pm_01 | 김아키텍트 | Project Manager |

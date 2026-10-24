@@ -11,8 +11,8 @@ import '../styles/office.css';
 const DEPT_META = [
   { id: 'research_dept',      hex: '#2ecc71', label: '학술연구부'    },
   { id: 'finance_dept',       hex: '#3b82f6', label: '금융투자부'    },
-  { id: 'orchestration_dept', hex: '#f59e0b', label: '오케스트레이션' },
-  { id: 'dev_dept',           hex: '#ef4444', label: '개발팀'        },
+  { id: 'orchestration_dept', hex: '#f59e0b', label: '오케스트레이션부' },
+  { id: 'dev_dept',           hex: '#ef4444', label: '개발부'        },
   { id: 'content_dept',       hex: '#a855f7', label: '콘텐츠생산부'  },
 ] as const;
 

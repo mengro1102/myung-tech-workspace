@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import { deptLabels } from '../api';
 import PixelOffice from './PixelOffice';
 import AgentChat from './AgentChat';
 import { deptColor, deptTint } from '../deptTheme';
@@ -27,14 +28,33 @@ interface Props {
   onDeptChat: (dept: string, msg: string) => void;
 }
 
-const DEPT_META: Record<string, { icon: string; label: string; color: string; bg: string; room: string }> = {
+/* 부서 칩·말풍선에 쓰는 메타.
+ *
+ * **이름은 `deptLabels`(정본) 하나만 쓴다.** 전에는 이 파일이 `label`
+ * (연구실·금융실·CEO실…)과 `room`(학술연구팀·CEO·오케스트레이션…)을 따로
+ * 들고 있어서, 한 부서가 같은 파일 안에서도 두 이름으로 불렸다. 정본까지
+ * 합치면 research_dept 하나가 네 가지 이름으로 나왔다.
+ *
+ * 특히 'CEO실' 이 문제였다. 부서 칩 목록에 그 이름이 뜨면 **CEO 가
+ * 에이전트 부서인 것처럼** 읽힌다 — CEO 는 사장님이다.
+ *
+ * 방(ROOMS)의 '개발실'·'CEO실 · 회의실' 은 그대로 둔다. 그건 **장소**
+ * 이름이고 부서와 달라도 틀린 게 아니다. 오케스트레이션 방에는 실제로
+ * CEO 책상과 회의 테이블이 같이 있다(officeLayout 좌석 배치 참고). */
+const DEPT_META: Record<string, { icon: string; color: string; bg: string }> = {
   // 색은 deptTheme.ts 가 기준 — 사무실 방 색과 같다.
-  orchestration_dept: { icon: '🧠', label: 'CEO실',     color: deptColor('orchestration_dept'), bg: deptTint('orchestration_dept', 0.08), room: 'CEO·오케스트레이션' },
-  research_dept:      { icon: '🔬', label: '연구실',    color: deptColor('research_dept'),      bg: deptTint('research_dept', 0.08),      room: '학술연구팀' },
-  finance_dept:       { icon: '📈', label: '금융실',    color: deptColor('finance_dept'),       bg: deptTint('finance_dept', 0.08),       room: '금융투자팀' },
-  dev_dept:           { icon: '⚙️', label: '개발실',    color: deptColor('dev_dept'),           bg: deptTint('dev_dept', 0.08),           room: '개발팀' },
-  content_dept:       { icon: '✍️', label: '콘텐츠실', color: deptColor('content_dept'),       bg: deptTint('content_dept', 0.08),       room: '콘텐츠생산팀' },
+  orchestration_dept: { icon: '🧠', color: deptColor('orchestration_dept'), bg: deptTint('orchestration_dept', 0.08) },
+  research_dept:      { icon: '🔬', color: deptColor('research_dept'),      bg: deptTint('research_dept', 0.08) },
+  finance_dept:       { icon: '📈', color: deptColor('finance_dept'),       bg: deptTint('finance_dept', 0.08) },
+  dev_dept:           { icon: '⚙️', color: deptColor('dev_dept'),           bg: deptTint('dev_dept', 0.08) },
+  content_dept:       { icon: '✍️', color: deptColor('content_dept'),       bg: deptTint('content_dept', 0.08) },
 };
+
+/** 부서 이름. 정본에 없으면 id 를 그대로 보여 준다 — 조용히 빈 칸을
+ *  남기면 "부서가 사라졌다" 로 읽힌다. */
+function deptName(id: string): string {
+  return deptLabels[id] ?? id;
+}
 
 const ROLE_EMOJI: Record<string, string> = {
   'Master Orchestrator': '👑', 'Project Manager': '📋',
@@ -108,7 +128,7 @@ export default function OfficeView({ agents, cycleStatus, taskSummary, onDeptCha
 
   const senderLabel = (s: string) => {
     const meta = DEPT_META[s];
-    if (meta) return meta.room;
+    if (meta) return deptName(s);
     const a = agents.find(x => x.agent_id === s || x.character_name === s);
     return a?.character_name ?? s;
   };
@@ -172,11 +192,11 @@ export default function OfficeView({ agents, cycleStatus, taskSummary, onDeptCha
                   <div key={deptId} className="ov-dept-bubble">
                     <div className="ov-dept-bubble-msg" style={{ borderColor: meta.color }}>
                       <span style={{ fontSize: 11, fontFamily: 'JetBrains Mono, monospace', color: meta.color }}>
-                        {recentMsg ? cleanPayload(recentMsg.payload).slice(0, 40) : `${meta.room} 작업 중`}
+                        {recentMsg ? cleanPayload(recentMsg.payload).slice(0, 40) : `${deptName(deptId)} 작업 중`}
                       </span>
                     </div>
                     <div className="ov-dept-bubble-tag" style={{ background: `${meta.color}20`, borderColor: `${meta.color}50`, color: meta.color }}>
-                      {meta.icon} {meta.label}
+                      {meta.icon} {deptName(deptId)}
                     </div>
                   </div>
                 );
@@ -220,8 +240,8 @@ export default function OfficeView({ agents, cycleStatus, taskSummary, onDeptCha
             return (
               <button key={deptId} className={`ov-dept-chip ${hasActive ? 'active' : ''}`}
                 style={{ '--dept-color': meta.color } as React.CSSProperties}
-                onClick={() => onDeptChat(deptId, `${meta.room} 현재 상태 보고해줘`)}>
-                {meta.icon} {meta.label}
+                onClick={() => onDeptChat(deptId, `${deptName(deptId)} 현재 상태 보고해줘`)}>
+                {meta.icon} {deptName(deptId)}
                 {hasActive && <span className="ov-dept-dot" style={{ background: meta.color }} />}
               </button>
             );
@@ -355,7 +375,7 @@ export default function OfficeView({ agents, cycleStatus, taskSummary, onDeptCha
                 <div>
                   <div className="office-modal-name">{activeAgent.character_name}</div>
                   <div className="office-modal-role">{ROLE_EMOJI[activeAgent.role] ?? '🤖'} {activeAgent.role}</div>
-                  <div className="office-modal-dept" style={{ color: meta.color }}>{meta.icon} {meta.room}</div>
+                  <div className="office-modal-dept" style={{ color: meta.color }}>{meta.icon} {deptName(activeAgent.department ?? '')}</div>
                 </div>
               </div>
               <div className="office-modal-status">

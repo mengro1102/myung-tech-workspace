@@ -555,7 +555,12 @@ function KbViewer({ file, doc, busy, onNavPath, resolveSlug }: ViewProps) {
   if (file.kind === 'pdf') {
     const url = api.knowledgeFileUrl(file.path);
     return (
-      <div className="kb-main" ref={bodyRef}>
+      /* `kb-main pdf` — 남은 높이를 **정확히** 채운다.
+         전에는 `height: calc(100vh - 300px)` 였다. 300px 는 머리말·탭·문서
+         머리글을 눈대중으로 뺀 값이라 어느 화면에서도 맞지 않았다 —
+         768px 창에서 PDF 가 480px(63%)만 쓰고, 큰 화면에서는 아래가 남았다.
+         flex 로 두면 크롬 높이를 몰라도 늘 남은 만큼을 쓴다. */
+      <div className="kb-main pdf" ref={bodyRef}>
         <header className="kb-doc-head">
           <div className="kb-doc-badges">
             <span className="kb-badge ref">PDF 원문</span>

@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { deptLabels } from '../api';
 
 interface Task {
   task_id: string;
@@ -20,13 +21,17 @@ interface TaskEvent {
   task_id?: string;
 }
 
-const DEPT_META: Record<string, { icon: string; label: string; color: string }> = {
-  orchestration_dept: { icon: '🧠', label: 'CEO실',      color: '#0ffd6a' },
-  research_dept:      { icon: '🔬', label: '학술연구팀', color: '#60a5fa' },
-  finance_dept:       { icon: '📈', label: '금융투자팀', color: '#f59e0b' },
-  dev_dept:           { icon: '⚙️', label: '개발팀',     color: '#a78bfa' },
-  content_dept:       { icon: '✍️', label: '콘텐츠팀',  color: '#f472b6' },
-  studio_ui:          { icon: '👤', label: '사장님',     color: '#94a3b8' },
+/* 아이콘·색만 들고, **이름은 `deptLabels`(정본)를 읽는다.**
+   전에는 여기도 자기 이름표를 갖고 있어서 같은 부서가 'CEO실'·'학술연구팀'
+   으로 나왔다 — 정본(학술연구부)과도, 사무실 칩과도 달랐다.
+   studio_ui·cycle_runner 는 부서가 아니라 여기서만 쓰는 발신자라 남긴다. */
+const DEPT_META: Record<string, { icon: string; label?: string; color: string }> = {
+  orchestration_dept: { icon: '🧠', color: '#0ffd6a' },
+  research_dept:      { icon: '🔬', color: '#60a5fa' },
+  finance_dept:       { icon: '📈', color: '#f59e0b' },
+  dev_dept:           { icon: '⚙️', color: '#a78bfa' },
+  content_dept:       { icon: '✍️', color: '#f472b6' },
+  studio_ui:          { icon: '👤', label: '사장님',        color: '#94a3b8' },
   cycle_runner:       { icon: '🔄', label: '오케스트레이터', color: '#0ffd6a' },
 };
 
@@ -38,7 +43,11 @@ const STATUS_META: Record<string, { label: string; color: string; bg: string }> 
 };
 
 function deptOf(id: string) {
-  return DEPT_META[id] ?? { icon: '🤖', label: id, color: '#64748b' };
+  const m = DEPT_META[id];
+  // 이름은 정본 우선. DEPT_META 의 label 은 부서가 아닌 발신자
+  // (사장님·오케스트레이터)에만 남아 있다.
+  if (m) return { ...m, label: m.label ?? deptLabels[id] ?? id };
+  return { icon: '🤖', label: deptLabels[id] ?? id, color: '#64748b' };
 }
 
 function fmtTime(iso: string) {
@@ -53,9 +62,18 @@ function fmtTime(iso: string) {
 export default function TaskDrawer({
   taskId,
   onClose,
+  onOverride,
 }: {
   taskId: string | null;
   onClose: () => void;
+  /** 진행 중인 태스크에 사장님이 명령을 끼워 넣는다(CEO 개입).
+   *
+   *  `CeoOverrideModal` 은 다 만들어져 있었는데 **여는 길이 없었다** —
+   *  `setOverrideTask` 를 태스크로 호출하는 코드가 한 줄도 없어서 화면에서
+   *  절대 열리지 않는 죽은 기능이었다. 이 서랍이 그 자리다. 여기는 버튼이
+   *  ✕ 하나뿐이라, 태스크를 보다가 방향이 틀린 걸 알아도 할 수 있는 게
+   *  없었다. */
+  onOverride?: (task: Task) => void;
 }) {
   const [task,   setTask]   = useState<Task | null>(null);
   const [events, setEvents] = useState<TaskEvent[]>([]);
@@ -97,6 +115,15 @@ export default function TaskDrawer({
                 </span>
               )}
             </div>
+
+            {/* 개입 — **진행 중일 때만** 보여 준다. 끝난 태스크에 명령을
+                끼워 넣는 것은 의미가 없고, 눌러 놓고 아무 일도 안 일어나는
+                버튼을 또 만들게 된다. */}
+            {onOverride && (task.status === 'in_progress' || task.status === 'pending') && (
+              <button className="td-override" onClick={() => onOverride(task)}>
+                👔 개입하기 — 이 태스크에 지시를 끼워 넣습니다
+              </button>
+            )}
 
             {/* 지시 내용 */}
             <div className="td-section-label">📋 지시 내용</div>

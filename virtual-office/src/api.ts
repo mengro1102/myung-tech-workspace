@@ -766,12 +766,21 @@ export const api = {
 
 export interface FsEntry { name: string; is_dir: boolean; size: number; path: string; }
 
+/** 부서 이름의 **정본**. 화면 어디서든 여기를 읽는다.
+ *
+ *  접미사를 `~부` 로 맞췄다. 서버 id 가 전부 `_dept`(부서)이고 다섯 중
+ *  셋이 이미 '부' 였다 — '팀' 으로 맞추면 셋을 바꿔야 하고 id 와도
+ *  어긋난다. 전에는 이 정본 자체가 섞여 있었다(개발팀·오케스트레이션팀만
+ *  '팀'), 그래서 같은 부서가 자리마다 다른 이름으로 나왔다.
+ *
+ *  낱말은 건드리지 않는다. 이름을 새로 짓는 것은 다른 일이고, 여기서
+ *  고치는 것은 **같은 것이 여러 이름으로 불리던 상태**다. */
 export const deptLabels: Record<string, string> = {
   research_dept:      '학술연구부',
   finance_dept:       '금융투자부',
   content_dept:       '콘텐츠생산부',
-  dev_dept:           '개발팀',
-  orchestration_dept: '오케스트레이션팀',
+  dev_dept:           '개발부',
+  orchestration_dept: '오케스트레이션부',
 };
 
 /* 부서 색은 deptTheme.ts 가 기준이다. 여기서 따로 정하면 사무실 방 색과

@@ -17,6 +17,10 @@ const VirtualOffice = lazy(() => import('./pages/VirtualOffice'));
 const ProjectsTab = lazy(() => import('./components/ProjectsTab'));
 const NotesTab = lazy(() => import('./components/NotesTab'));
 const KnowledgeTab = lazy(() => import('./components/KnowledgeTab'));
+/* 채팅 말풍선의 마크다운. 프로젝트 탭 산출물 보기와 **같은 렌더러**를 쓴다 —
+   두 벌을 두면 같은 글이 화면마다 다르게 보인다. */
+const Markdown = lazy(() => import('./components/GuideModal')
+  .then(m => ({ default: m.Markdown })));
 const ApprovalBox = lazy(() => import('./components/ApprovalBox'));
 const LessonsBox = lazy(() => import('./components/LessonsBox'));
 import { api, AgentSummary, deptLabels, type ApprovalRow, type AssistantSession,
@@ -50,6 +54,26 @@ interface HealthStatus {
 }
 
 const CHAT_HISTORY_KEY = 'myungtech_chat_history_v2';
+/** 보내지 않은 입력. 새로고침에도 남는다 — 긴 지시를 쓰다가 F5 를 누르면
+ *  그대로 사라지던 것을 막는다(탭 전환에는 원래도 살아남았다). */
+const DRAFT_KEY = 'myungtech_draft_v1';
+
+type TabId = 'main' | 'office' | 'agents' | 'projects' | 'knowledge';
+
+/** 주소창의 `#projects` ↔ 탭.
+ *
+ *  전에는 URL 이 늘 `/` 라서 셋이 안 됐다 — 새로고침하면 메인으로
+ *  튕기고(실측), 뒤로가기가 앱을 나가고, 탭을 가리키는 링크를 줄 수 없었다.
+ *
+ *  라우터를 들이지 않고 해시를 쓴다. `react-router-dom` 이 설치돼 있지만
+ *  이 화면은 쓰지 않고, 경로 체계를 바꾸면 서버의 `_serve_ui` 폴백과
+ *  터널 설정까지 같이 봐야 한다. 해시는 서버가 아예 보지 않는다. */
+const TABS: readonly TabId[] = ['main', 'office', 'agents', 'projects', 'knowledge'];
+
+function TAB_FROM_HASH(): TabId {
+  const h = window.location.hash.replace(/^#\/?/, '') as TabId;
+  return TABS.includes(h) ? h : 'main';
+}
 
 function loadChatHistory(): ChatMsg[] {
   try {
@@ -106,6 +130,68 @@ function nowStr() {
   return new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' });
 }
 
+/** 말풍선 본문. 조판 · 접기 · 복사를 맡는다.
+ *
+ *  전에는 `<div style={{whiteSpace:'pre-line'}}>{text}</div>` 한 줄이었다.
+ *  그래서 셋이 한꺼번에 문제였다:
+ *
+ *    · 에이전트가 쓴 `### 제목`·`**굵게**`·`- 목록` 이 날글자로 보였다
+ *      (실측: 렌더된 strong/ul/h3 가 0개)
+ *    · 2,540자 답변이 2,022px 이라 채팅 영역(644px)의 3.1배를 덮었다
+ *    · 4,000자 보고서를 옮기려면 손으로 드래그해야 했다
+ *
+ *  **사용자 말풍선은 조판하지 않는다.** 내가 친 `**강조**` 가 굵게 바뀌면,
+ *  보낸 글과 보이는 글이 달라진다. */
+const LONG_CHARS = 700;        // 이 아래는 접지 않는다 — 짧은 답까지 접으면 성가시다
+const FOLD_PX = 420;           // 접었을 때 보여 주는 높이. 대략 12~14줄
+
+function ChatBody({ text, role }: { text: string; role: ChatMsg['role'] }) {
+  const [open, setOpen] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const long = text.length > LONG_CHARS;
+
+  const copy = async () => {
+    try {
+      // **원문(마크다운)을 복사한다.** 조판된 글자를 복사하면 붙여 넣는
+      // 곳에서 제목·목록 구조가 사라진다.
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1600);
+    } catch {
+      setCopied(false);
+    }
+  };
+
+  // 사용자가 친 글은 그대로. 대기 문구(⏳)도 조판할 것이 없다.
+  const plain = role === 'user' || text.startsWith('⏳');
+
+  return (
+    <div className={`hs-msg-content ${long && !open ? 'folded' : ''}`}>
+      <div className="hs-msg-text">
+        {plain
+          ? <div style={{ whiteSpace: 'pre-line' }}>{text}</div>
+          : <Suspense fallback={<div style={{ whiteSpace: 'pre-line' }}>{text}</div>}>
+              <Markdown src={text} />
+            </Suspense>}
+      </div>
+
+      {long && !open && <div className="hs-msg-fade" />}
+
+      <div className="hs-msg-tools">
+        {long && (
+          <button className="hs-msg-tool" onClick={() => setOpen(v => !v)}>
+            {open ? '▴ 접기' : `▾ 전체 보기 (${text.length.toLocaleString()}자)`}
+          </button>
+        )}
+        <button className="hs-msg-tool" onClick={() => void copy()}
+                title="원문(마크다운)을 복사합니다">
+          {copied ? '✓ 복사됨' : '⧉ 복사'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 /* ═══════════════════════════════════════════════════════════ */
 function MainScreen() {
   const [agents,      setAgents]      = useState<AgentSummary[]>([]);
@@ -116,7 +202,16 @@ function MainScreen() {
       text: '■ 브리핑\n\n지금 상태를 읽고 있습니다…', ts: nowStr(),
     }];
   });
-  const [input,       setInput]       = useState('');
+  // 새로고침에도 남는다. 보낼 때 지운다(send 안쪽).
+  const [input, setInput] = useState(() => {
+    try { return localStorage.getItem(DRAFT_KEY) ?? ''; } catch { return ''; }
+  });
+  useEffect(() => {
+    try {
+      if (input) localStorage.setItem(DRAFT_KEY, input);
+      else localStorage.removeItem(DRAFT_KEY);
+    } catch { /* 사생활 보호 모드에서는 저장이 막힌다 — 그래도 입력은 된다 */ }
+  }, [input]);
   // 맹비서 세션. 메인 채팅이 여기로 간다 — 전에는 /api/workflow/run 으로
   // 부서 태스크를 큐에 넣었고, 그 경로는 근거·검토·방법 절을 우회했다.
   const [assistantSid, setAssistantSid] = useState<string>('');
@@ -208,7 +303,7 @@ function MainScreen() {
   const [showMemory,  setShowMemory]  = useState(false);
   const [showModel,   setShowModel]   = useState(false);
   const [showManage,  setShowManage]  = useState(false);
-  const [activeTab,   setActiveTab]   = useState<'main' | 'office' | 'agents' | 'projects' | 'knowledge'>('main');
+  const [activeTab,   setActiveTab]   = useState<TabId>(TAB_FROM_HASH);
   // CEO 룸 KPI 용. 결재·프로젝트는 태스크 큐와 다른 컬렉션이라, 이걸 세지
   // 않으면 프로젝트가 셋 돌아가는 중에도 대시보드가 전부 0 으로 보인다.
   const [ceoApprovals, setCeoApprovals] = useState<ApprovalRow[]>([]);
@@ -222,6 +317,24 @@ function MainScreen() {
    *
    * 지금 어느 탭을 보고 있는지도 붙인다. 명테크를 두 창 띄워 두면
    * 제목이 같아서 구분이 안 됐다. */
+  /* 탭 ↔ 주소창을 맞춘다.
+   *
+   *  `replaceState` 가 아니라 `hash` 대입을 쓴다 — 히스토리에 쌓여야
+   *  **뒤로가기가 이전 탭으로** 간다. 그게 이 수정의 절반이다.
+   *  첫 렌더에서는 건드리지 않는다(주소에 이미 그 탭이 들어 있다). */
+  const hashSynced = useRef(false);
+  useEffect(() => {
+    if (!hashSynced.current) { hashSynced.current = true; return; }
+    if (TAB_FROM_HASH() !== activeTab) window.location.hash = activeTab;
+  }, [activeTab]);
+
+  /* 뒤로/앞으로 버튼. 주소가 바뀌면 탭도 따라간다. */
+  useEffect(() => {
+    const onHash = () => setActiveTab(TAB_FROM_HASH());
+    window.addEventListener('hashchange', onHash);
+    return () => window.removeEventListener('hashchange', onHash);
+  }, []);
+
   useEffect(() => {
     const n = ceoApprovals.length;
     const where = ({ main: '메인', office: '사무실', agents: '에이전트',
@@ -937,9 +1050,25 @@ function MainScreen() {
               <div className="hs-grid-items">
                 {[
                   {
-                    icon: '📊', label: '시스템 현황판', active: showSidebar,
+                    /* 현황판은 **메인 탭에만** 그려진다. 그런데 이 항목은
+                       다섯 탭 어디서나 눌렸고, 나머지 넷에서는 보이지 않는
+                       상태만 뒤집었다 — 프로젝트 탭에서 눌러 꺼 놓고
+                       메인으로 돌아오면 현황판이 사라져 있었다(실측).
+
+                       "아무 일도 안 일어나는 버튼" 을 만드느니, 누르면
+                       **보여 주러 간다.** 다른 탭에서 누르면 메인으로
+                       옮기고 현황판을 켠다. 메인에서는 예전처럼 토글이다. */
+                    icon: '📊', label: '시스템 현황판',
+                    active: showSidebar && activeTab === 'main',
                     bg: 'rgba(139,92,246,0.15)', color: '#8B5CF6',
-                    action: () => setShowSidebar(v => !v),
+                    action: () => {
+                      if (activeTab !== 'main') {
+                        setActiveTab('main');
+                        setShowSidebar(true);
+                        return;
+                      }
+                      setShowSidebar(v => !v);
+                    },
                   },
                   {
                     icon: '🧬', label: '지식 네트워크', active: false,
@@ -1338,13 +1467,18 @@ function MainScreen() {
               아니다. 이름을 사실대로 바꾸고, 누르면 사무실 탭으로 보낸다. */}
           <div className="hs-sidebar-section-title">에이전트 활동</div>
           <div className="hs-dept-list">
+            {/* 아이콘만 여기서 들고, **이름은 `deptLabels`(정본)** 를 읽는다.
+                전에는 접미사 없는 이름('학술연구')을 따로 적어 둬서, 같은
+                부서가 사이드바에서는 '학술연구', 사무실·에이전트 탭에서는
+                '학술연구부' 로 나왔다. */}
             {([
-              ['orchestration_dept', '🧠', '오케스트레이션'],
-              ['research_dept',      '🔬', '학술연구'],
-              ['finance_dept',       '📈', '금융투자'],
-              ['dev_dept',           '⚙️', '개발'],
-              ['content_dept',       '✍️', '콘텐츠생산'],
-            ] as [string, string, string][]).map(([d, icon, label]) => {
+              ['orchestration_dept', '🧠'],
+              ['research_dept',      '🔬'],
+              ['finance_dept',       '📈'],
+              ['dev_dept',           '⚙️'],
+              ['content_dept',       '✍️'],
+            ] as [string, string][]).map(([d, icon]) => {
+              const label = deptLabels[d] ?? d;
               const mine   = agents.filter(a => a.department === d);
               const busy   = mine.find(a => a.status !== 'Idle');
               // 숫자만 있으면 무엇의 개수인지 알 수 없었다(인원? 태스크?).
@@ -1429,7 +1563,7 @@ function MainScreen() {
                   </div>
                   <div className="hs-msg-body">
                     <div className="hs-msg-sender">{m.sender} · {m.ts}</div>
-                    <div style={{ whiteSpace: 'pre-line' }}>{m.text}</div>
+                    <ChatBody text={m.text} role={m.role} />
                   </div>
                 </div>
               ))}
@@ -1533,8 +1667,12 @@ function MainScreen() {
                 {dept === 'assistant' ? '🤖 맹비서' : `${deptLabels[dept] ?? dept}`}
               </span>
 
+              {/* 이름이 없어서 보조 기술에는 "버튼" 으로만 읽혔다 —
+                  화면의 아이콘 버튼 중 유일하게 이름이 없었다. */}
               <button
                 className="hs-send-btn"
+                aria-label="보내기"
+                title={running ? '답을 기다리는 중입니다' : '보내기 (Enter)'}
                 onClick={() => send(input, dept)}
                 disabled={running || !input.trim()}
               >↑</button>
@@ -1621,7 +1759,16 @@ function MainScreen() {
       )}
 
       {/* Task Drawer */}
-      <TaskDrawer taskId={drawerTaskId} onClose={() => setDrawerTaskId(null)} />
+      <TaskDrawer taskId={drawerTaskId} onClose={() => setDrawerTaskId(null)}
+        onOverride={t => {
+          // 서랍을 닫고 개입 모달을 연다. 둘을 겹쳐 두면 Escape 한 번에
+          // 어느 쪽이 닫히는지 사장님이 알 수 없다.
+          setDrawerTaskId(null);
+          setOverrideTask({
+            task_id: t.task_id, instruction: t.instruction,
+            target_dept: t.target_dept, status: t.status,
+          } as TaskItem);
+        }} />
 
       {/* 상단 우측 실시간 알림 토스트 */}
       {recentNotif && (

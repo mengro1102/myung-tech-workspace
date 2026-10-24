@@ -401,6 +401,24 @@ def dept_roster(dept_id: str, budget: int = 900) -> str:
     return out[:budget]
 
 
+# 한국 한자어에는 거의 쓰이지 않는 간체자. 이 글자가 여러 개 나오면
+# 답변이 중국어로 넘어간 것이다.
+#
+# 한국어 문서에도 한자가 섞일 수 있으므로(例: 個, 會) 번체·공용 한자는
+# 넣지 않는다. 간체로만 쓰는 글자와 중국어 기능어만 본다.
+CN_ONLY_CHARS = frozenset(
+    "这那们么见过还给说对时问题进发动开关实现业务数据继续翻译为中团队"
+    "个会来没样很东西点儿长话知道最好做让想要能够因此所以但是如果虽然已经正在将会应该"
+)
+# 몇 개부터 "넘어갔다" 로 볼 것인가. 한두 글자는 인용이나 고유명사일 수
+# 있어서 바로 재시도하면 멀쩡한 답을 버리게 된다.
+CN_DRIFT_MIN = 8
+
+
+def cn_drift_count(text: str) -> int:
+    return sum(1 for ch in text if ch in CN_ONLY_CHARS)
+
+
 def _system_prompt(dept_name: str, has_kb: bool, dept_id: str = "") -> str:
     base = (f"당신은 명테크의 {dept_name} 소속 AI 에이전트입니다. "
             "주어진 지시를 한국어로 간결하고 구조적으로 수행하세요.")
@@ -473,9 +491,23 @@ def _system_prompt(dept_name: str, has_kb: bool, dept_id: str = "") -> str:
             "답변에 활용할 때는 반드시 주어진 출처 경로를 그대로 인용하세요. "
             "**검색 결과에 없는 내용을 사실처럼 서술하거나 경로를 지어내지 마세요.** "
             "근거가 부족하면 '위키에 근거 없음'이라고 명시하고 추론임을 밝히세요.")
+    # **마지막에 한 번 더.** 위에서 "한국어로" 라고 한 번 말하지만, 그 뒤로
+    # 경계·구성원·근거 사용법이 길게 이어진다. 모델은 뒤쪽 지시를 더 강하게
+    # 따르므로 끝에 다시 둔다.
+    #
+    # 실제로 오케스트레이션부 답변이 '콘텐' 까지 쓰다가 중국어로 넘어가고
+    # "继续翻译为中文"(계속 중국어로 번역) 까지 뱉은 적이 있다. 로컬 모델이
+    # Qwen(중국 모델)이라 불확실해지면 지배 언어로 미끄러진다.
+    base += (
+        "\n\n[반드시 지킬 것 — 언어]\n"
+        "답변 전체를 **한국어**로 쓰세요. 기술 용어와 고유명사는 영어를 그대로 "
+        "써도 됩니다(PPO, LoRA, GitHub 등).\n"
+        "- **중국어(간체·번체)와 일본어를 쓰지 마세요.** 한 글자도 섞지 마세요.\n"
+        "- 길게 쓰다가 언어가 바뀌려 하면, 멈추고 한국어로 이어 쓰세요.\n"
+        "- 번역하라는 지시를 스스로 만들어 내지 마세요."
+    )
+
     return base
-
-
 def _harvest_marks(result: str) -> list[tuple[str, str]]:
     """결과에서 [할일]·[결재요청] 줄을 꺼낸다. (종류, 내용) 목록.
 
@@ -557,6 +589,39 @@ def _dispatch_task(task: dict) -> None:
 
         emit(dept_id, requester, f"추론 시작 — {model} ({backend})")
         result = call_llm(backend, model, messages)
+
+        # ── 언어가 미끄러졌으면 한 번 다시 시킨다 ──────────────────
+        #
+        # 지시만으로는 보장이 안 된다. 로컬 모델이 Qwen(중국 모델)이라,
+        # 한국어로 길게 쓰다가 불확실해지면 중국어로 넘어간다 — 실제로
+        # 보고서 한 편이 통째로 중국어가 된 적이 있다.
+        #
+        # 재시도는 **한 번만**. 두 번, 세 번 돌리면 무료 한도를 그만큼 쓴다.
+        drift = cn_drift_count(result)
+        if drift >= CN_DRIFT_MIN:
+            emit(dept_id, requester,
+                 f"답변이 중국어로 넘어감(간체자 {drift}자) — 한국어로 다시 시킵니다")
+            retry = messages + [
+                {"role": "assistant", "content": result[:400]},
+                {"role": "user", "content":
+                 "방금 답변이 중간에 중국어로 바뀌었습니다. "
+                 "같은 내용을 **처음부터 끝까지 한국어로만** 다시 써 주세요. "
+                 "기술 용어·고유명사의 영어는 그대로 두되, 중국어는 한 글자도 쓰지 마세요."},
+            ]
+            second = call_llm(backend, model, retry)
+            if cn_drift_count(second) < drift:
+                result = second
+                drift = cn_drift_count(second)
+            # 재시도가 더 나쁘면 첫 답을 쓴다 — 나쁜 쪽으로 바꾸지 않는다.
+
+        if drift >= CN_DRIFT_MIN:
+            # 그래도 섞여 있으면 **숨기지 않고 적는다.** 조용히 두면
+            # 사장님이 중국어 보고서를 그대로 받아들인다.
+            emit(dept_id, requester, f"중국어가 남음(간체자 {drift}자) — 경고를 붙여 저장")
+            result = ("> ⚠️ **이 답변에는 중국어가 섞여 있습니다** "
+                      f"(간체자 {drift}자). 로컬 모델(Qwen 계열)이 한국어로 길게 "
+                      "쓰다가 중국어로 넘어간 것입니다. 다시 시켜도 고쳐지지 "
+                      "않았습니다 — 내용을 그대로 믿지 마세요.\n\n") + result
 
         elapsed = time.time() - started
         footer = ""
