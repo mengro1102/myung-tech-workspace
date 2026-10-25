@@ -311,6 +311,9 @@ def cmd_growth() -> int:
 
 
 def cmd_health() -> int:
+    # 주소를 맨 앞에 적는다. 전에는 "서버: 정상" 이라고만 해서, 디스코드에서
+    # 보신 사장님이 **어디로 들어가야 하는지 알 수 없었다.**
+    print(f"  주소: http://localhost:9000")
     h = call("/api/health")
     for k, ko in (("server", "서버"), ("vllm", "AI 모델"),
                   ("knowledge_base", "지식베이스"), ("workspace", "작업 폴더")):
@@ -324,11 +327,111 @@ def cmd_health() -> int:
     return 0
 
 
+TAILSCALE = r"C:\Program Files\Tailscale\tailscale.exe"
+
+
+def _probe(url: str, timeout: int = 6) -> tuple[bool, str]:
+    """그 주소가 실제로 응답하나. 추측하지 않고 두드려 본다."""
+    try:
+        req = urllib.request.Request(url, method="GET")
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return True, f"HTTP {r.status}"
+    except urllib.error.HTTPError as e:
+        # 404 여도 서버는 살아 있다. 200 만 성공으로 보면 "죽었다" 고
+        # 잘못 말하게 된다.
+        return True, f"HTTP {e.code}"
+    except Exception as e:                                  # noqa: BLE001
+        return False, str(e)[:70]
+
+
+def _tailscale_serve() -> tuple[str, str]:
+    """(밖에서 쓸 주소, 설명). serve 설정을 **읽어서** 답한다.
+
+    `tailscale serve` 가 있어야 밖에서 닿는다. 명테크 서버는
+    `127.0.0.1:9000` 에만 바인드하므로, serve 프록시가 없으면 테일넷
+    주소로 열어도 아무것도 안 뜬다 — 주소만 알려 주면 사장님이 안 되는
+    주소를 들고 헤매게 된다.
+    """
+    import subprocess
+    try:
+        out = subprocess.run([TAILSCALE, "serve", "status"],
+                             capture_output=True, text=True, timeout=15,
+                             errors="replace").stdout
+    except Exception as e:                                  # noqa: BLE001
+        return "", f"tailscale 조회 실패: {str(e)[:60]}"
+    host = ""
+    for line in out.splitlines():
+        line = line.strip()
+        if line.startswith("https://"):
+            host = line.split()[0]
+            break
+    if not host:
+        return "", "serve 설정이 없습니다 — 밖에서는 열리지 않습니다"
+    # 9000 으로 프록시되고 있는지까지 본다. 다른 포트면 명테크가 아니다.
+    if ":9000" not in out:
+        return host, "serve 는 있으나 9000(명테크)로 가지 않습니다"
+    public = "(인터넷 공개)" if "Funnel on" in out else "(내 기기에서만)"
+    return host, public
+
+
+def cmd_dashboard() -> int:
+    """명테크 화면을 어디서 열고, 지금 열리나."""
+    print("명테크 대시보드")
+    print()
+
+    local = "http://localhost:9000"
+    ok, detail = _probe(local + "/api/health")
+    print(f"  집 안(이 PC)   : {local}")
+    print(f"    상태         : {'열립니다' if ok else '안 열립니다'}  ({detail})")
+
+    host, note = _tailscale_serve()
+    if host:
+        # 밖에서는 **루트(/)** 를 두드린다. `/api/health` 는 로그인을 요구해
+        # 401 이 돌아오는데(의도된 동작이다), 그걸 그대로 적으면 사장님은
+        # 고장난 줄 아신다. 로그인 화면이 뜨는 것이 정상이다.
+        ok2, detail2 = _probe(host + "/", timeout=12)
+        print(f"  밖에서        : {host}  {note}")
+        print(f"    상태         : {'열립니다' if ok2 else '안 열립니다'}  ({detail2})")
+        if ok2:
+            print("    ※ 밖에서는 로그인 화면이 먼저 뜹니다 (집 안에서는 바로 들어갑니다)")
+    else:
+        print(f"  밖에서        : {note}")
+
+    # 서버 프로세스가 진짜로 떠 있나. HTTP 가 되면 떠 있는 것이지만,
+    # 안 될 때 "꺼졌는지 / 떠 있는데 막혔는지" 를 구분해야 한다.
+    try:
+        import subprocess
+        r = subprocess.run(
+            ["powershell", "-NoProfile", "-Command",
+             "Get-CimInstance Win32_Process -Filter \"Name='python.exe'\" | "
+             "Where-Object { $_.CommandLine -like '*server.py*' } | "
+             "ForEach-Object { $_.ProcessId }"],
+            capture_output=True, text=True, timeout=25, errors="replace")
+        pids = [x for x in r.stdout.split() if x.isdigit()]
+        print(f"  서버 프로세스 : {'PID ' + ', '.join(pids) if pids else '없음'}")
+    except Exception as e:                                  # noqa: BLE001
+        print(f"  서버 프로세스 : 조회 못 함 ({str(e)[:50]})")
+
+    # 맹비서(게이트웨이)와 이어져 있나. 화면은 떠도 이게 끊기면 채팅이
+    # 안 된다 — 사장님 눈에는 "대시보드가 고장" 으로 보인다.
+    try:
+        h = call("/api/assistant/health", timeout=10)
+        print(f"  맹비서 연결   : {'정상' if h.get('ok') else '끊김'}"
+              f"  {h.get('error') or h.get('platform') or ''}")
+    except Exception as e:                                  # noqa: BLE001
+        print(f"  맹비서 연결   : 조회 못 함 ({str(e)[:50]})")
+
+    if not ok:
+        print()
+        print("  → PC 에서 D:\AI_Workspace\실행\1. 전체 시작.bat 을 띄우십시오.")
+    return 0
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(add_help=True)
     ap.add_argument("cmd", nargs="?", default="overview",
                     choices=["overview", "projects", "project", "tasks",
-                             "lessons", "health", "growth"])
+                             "lessons", "health", "growth", "dashboard"])
     ap.add_argument("arg", nargs="?", default="")
     a = ap.parse_args()
     try:
@@ -347,6 +450,8 @@ def main() -> int:
             return cmd_lessons()
         if a.cmd == "growth":
             return cmd_growth()
+        if a.cmd == "dashboard":
+            return cmd_dashboard()
         return cmd_health()
     except urllib.error.URLError as exc:
         print(f"명테크 서버에 연결하지 못했습니다: {exc.reason}")
