@@ -144,7 +144,17 @@ export default function AskHermes({ ctx, onClose }:
         {busy && (
           <div className="ask-turn assistant">
             <span className="ask-who">맹비서</span>
-            <div className="ask-text">⏳ 읽고 생각하는 중… (30초 가까이 걸립니다)</div>
+            {/* 걸리는 시간을 넉넉히 말한다. "30초" 라고 적어 두었다가 실제로
+                3분이 걸리자 멈춘 것처럼 보였다 — 무료 모델 라우터가 느린
+                모델을 고르면 그만큼 걸린다. */}
+            <div className="ask-text">
+              ⏳ 문서를 읽고 생각하는 중…
+              <br />
+              <span className="ask-wait-note">
+                보통 30초, 무료 모델이 붐비면 2–3분까지 걸립니다. 그동안 문서는
+                계속 보실 수 있습니다.
+              </span>
+            </div>
           </div>
         )}
         <div ref={bottom} />

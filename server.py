@@ -104,7 +104,13 @@ ASSISTANT_BASE = "http://127.0.0.1:8642"
 # 한쪽이 반드시 틀린다 — 짧으면 멀쩡한 답을 끊고, 길면 죽은 게이트웨이를
 # 하염없이 기다린다.
 ASSISTANT_TIMEOUT_READ = 20
-ASSISTANT_TIMEOUT_CHAT = 180
+# 라우터(auto:hermes)가 무료 모델을 고르는데, 고른 모델이 느리면 한참
+# 걸린다. 180초로는 지식베이스 문서를 읽고 답하는 질문이 실제로 끊겼다
+# (2026-10-25 실측 — 게이트웨이는 멀쩡한데 타임아웃).
+#
+# 400초로 둔다. 더 길게 잡으면 브라우저가 먼저 포기하고, 사장님은 화면이
+# 멈춘 것으로 본다.
+ASSISTANT_TIMEOUT_CHAT = 400
 
 
 def _assistant_key() -> str:
@@ -157,8 +163,18 @@ def _assistant_call(method: str, path: str, payload: dict | None = None,
         return e.code, {"error": why or f"맹비서가 거절했습니다 ({e.code})",
                         "detail": detail}
     except Exception as e:  # noqa: BLE001
-        # 게이트웨이가 내려가 있는 경우가 대부분이다. 추측하지 말고 그대로.
-        return 503, {"error": f"맹비서에 닿지 못했습니다: {e}",
+        # **사유를 구분한다.** 전에는 무엇이 터지든 "게이트웨이가 꺼져
+        # 있을 수 있습니다" 라고 했다. 그런데 실제로 가장 흔한 것은
+        # 타임아웃이고(라우터가 느린 무료 모델을 고른 경우), 그때
+        # 게이트웨이는 멀쩡하다 — 사장님이 멀쩡한 것을 재시작하러 간다.
+        txt = str(e)
+        if isinstance(e, TimeoutError) or "timed out" in txt.lower():
+            return 504, {
+                "error": f"맹비서가 {ASSISTANT_TIMEOUT_CHAT}초 안에 답하지 못했습니다",
+                "hint": "게이트웨이는 살아 있습니다. 무료 모델 라우터가 느린 "
+                        "모델을 골랐을 수 있습니다 — 잠시 뒤 다시 물어보시거나 "
+                        "질문을 짧게 나눠 주십시오."}
+        return 503, {"error": f"맹비서에 닿지 못했습니다: {txt}",
                      "hint": "게이트웨이가 꺼져 있을 수 있습니다 — "
                              "1. 전체 시작.bat"}
 
