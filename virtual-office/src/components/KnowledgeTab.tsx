@@ -30,7 +30,8 @@
  * 그 셋을 공용 컴포넌트에 넣으면 연동 가이드와 프로젝트 산출물 보기까지
  * 같이 흔든다. 위키 문서에만 필요한 것이라 여기 둔다.
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { AskContext } from './AskHermes';
 import {
   api,
   type KbDoc,
@@ -39,6 +40,10 @@ import {
   type KbOrigin,
   type KbTree,
 } from '../api';
+
+/* 보던 문서를 두고 그 자리에서 맹비서에게 묻는 패널. 열 때까지 필요
+   없으므로 lazy 다 — 지식베이스를 읽기만 하는 사람에게 짐을 지우지 않는다. */
+const AskHermes = lazy(() => import('./AskHermes'));
 
 /* ── 출처 꼬리표 ──────────────────────────────────────────────────
    같은 폴더에 섞여 있던 셋을 구분한다. 근거의 무게가 다르다 — 사람이
@@ -382,6 +387,21 @@ interface SideProps {
 function KbSidebar({ tree, cur, onPick }: SideProps) {
   const [q, setQ] = useState('');
   const [open, setOpen] = useState<Record<string, boolean>>({});
+
+  /* 열려 있는 문서의 폴더는 펼친다.
+   *
+   * 폴더를 전부 접어 두는 것이 기본인데(390건을 다 펴면 사이드바가 수천
+   * 픽셀이 된다), 그러면 **새로고침으로 복원한 문서가 어디 있는지 안
+   * 보인다** — 본문은 떠 있는데 사이드바에는 아무것도 강조되지 않는다.
+   *
+   * 사장님이 직접 접은 폴더는 건드리지 않는다. `cur` 이 바뀔 때만, 그
+   * 폴더가 아직 한 번도 안 열렸을 때만 편다. */
+  useEffect(() => {
+    if (!cur) return;
+    const folder = cur.slice(0, cur.lastIndexOf('/'));
+    if (!folder) return;
+    setOpen(o => (folder in o ? o : { ...o, [folder]: true }));
+  }, [cur]);
   // 본문 검색은 서버가 한다. 제목 필터와 **다른 일**이라 따로 둔다 —
   // 제목에 없는 말이 본문에 있는 경우가 논문에서는 대부분이다.
   const [deep, setDeep] = useState<{ q: string; hits: string[] } | null>(null);
@@ -518,9 +538,11 @@ interface ViewProps {
   /** `[[slug]]` 를 실제 문서로 옮긴다. 문서가 없는 slug 면 undefined 를
    *  돌려주고, 렌더러는 그걸 눌리지 않는 회색 꼬리표로 그린다. */
   resolveSlug: (slug: string) => string | undefined;
+  /** 머리글의 "맹비서에게 묻기". 보던 문서를 그대로 두고 패널이 뜬다. */
+  onAsk: () => void;
 }
 
-function KbViewer({ file, doc, busy, onNavPath, resolveSlug }: ViewProps) {
+function KbViewer({ file, doc, busy, onNavPath, resolveSlug, onAsk }: ViewProps) {
   const bodyRef = useRef<HTMLDivElement>(null);
 
   // 문서를 바꾸면 맨 위로. 안 올리면 긴 논문을 읽던 자리에 새 문서의
@@ -553,7 +575,15 @@ function KbViewer({ file, doc, busy, onNavPath, resolveSlug }: ViewProps) {
   // PDF 는 브라우저 내장 뷰어에 넘긴다. md 로 바꿔 그리려 들면 레이아웃·
   // 수식·표가 다 깨지고, 그러느라 원문을 못 보게 된다.
   if (file.kind === 'pdf') {
-    const url = api.knowledgeFileUrl(file.path);
+    /* `#zoom=80` — 브라우저 PDF 뷰어에 배율을 지정한다.
+     *
+     * 그냥 열면 뷰어가 창 너비에 맞춰 잡는데, 이 iframe 폭에서는 133% 가
+     * 나왔다. iframe 을 더 키우기는 어려우니(앱 크롬이 위를 차지한다)
+     * 안쪽 배율을 줄여 한 번에 보이는 양을 늘린다.
+     *
+     * `?path=` 뒤에 붙는 `#` 는 서버로 가지 않는다 — 브라우저가 뷰어에
+     * 넘기는 값이라 API 요청에는 영향이 없다. */
+    const url = api.knowledgeFileUrl(file.path) + '#zoom=80';
     return (
       /* `kb-main pdf` — 남은 높이를 **정확히** 채운다.
          전에는 `height: calc(100vh - 300px)` 였다. 300px 는 머리말·탭·문서
@@ -565,6 +595,9 @@ function KbViewer({ file, doc, busy, onNavPath, resolveSlug }: ViewProps) {
           <div className="kb-doc-badges">
             <span className="kb-badge ref">PDF 원문</span>
             <span className="kb-doc-meta">{size(file.size)} · 로컬 수정 {when(file.mtime)}</span>
+            {/* PDF 는 맹비서가 read_file 로 직접 읽는다(PyMuPDF). 그래서
+                이 버튼이 md 와 똑같이 동작한다 — 본문을 옮겨 적지 않는다. */}
+            <button className="kb-ask" onClick={onAsk}>🤖 맹비서에게 묻기</button>
           </div>
           <h1 className="kb-doc-title">{file.title}</h1>
           <div className="kb-doc-path">{file.path}</div>
@@ -601,6 +634,7 @@ function KbViewer({ file, doc, busy, onNavPath, resolveSlug }: ViewProps) {
               로컬 수정 {when(doc.mtime)}
               {doc.front.created && <> · 작성 {doc.front.created}</>}
             </span>
+            <button className="kb-ask" onClick={onAsk}>🤖 맹비서에게 묻기</button>
           </div>
           <h1 className="kb-doc-title">{doc.title}</h1>
           {doc.front.description && (
@@ -666,6 +700,18 @@ function KbRail({ doc }: { doc: KbDoc | null }) {
 
 /* ── 탭 ──────────────────────────────────────────────────────────── */
 
+/** 주소창의 `#knowledge/concepts/ppo.md` 에서 문서 경로만 꺼낸다.
+ *
+ *  탭은 App.tsx 가 해시로 기억하는데 **그 안에서 열어 둔 문서**는 기억하지
+ *  않았다. 논문을 읽다가 새로고침하면 빈 환영 화면으로 돌아갔다.
+ *
+ *  덤으로 특정 문서를 가리키는 링크를 줄 수 있게 된다. */
+function pathFromHash(): string {
+  const h = decodeURIComponent(window.location.hash.replace(/^#\/?/, ''));
+  if (!h.startsWith('knowledge/')) return '';
+  return h.slice('knowledge/'.length);
+}
+
 export default function KnowledgeTab() {
   const [tree, setTree] = useState<KbTree | null>(null);
   const [file, setFile] = useState<KbFile | null>(null);
@@ -673,6 +719,18 @@ export default function KnowledgeTab() {
   const [busy, setBusy] = useState(false);
 
   useEffect(() => { void api.knowledgeTree().then(setTree); }, []);
+
+  /** 열어 둔 문서를 주소에 적는다.
+   *
+   *  `replaceState` 를 쓴다 — 탭 전환과 달리 문서를 넘길 때마다 히스토리에
+   *  쌓으면, 뒤로가기 한 번이 **이전 탭이 아니라 이전 문서**로 가서 탭을
+   *  빠져나오는 데 수십 번을 눌러야 한다. */
+  const writeHash = useCallback((path: string) => {
+    const next = path ? `#knowledge/${encodeURI(path)}` : '#knowledge';
+    if (window.location.hash !== next) {
+      window.history.replaceState(null, '', window.location.pathname + next);
+    }
+  }, []);
 
   /** slug → 경로. 위키링크와 그래프 이웃은 맨 이름(`ppo`)으로 가리키는데
    *  화면이 열어야 하는 것은 경로(`concepts/ppo.md`)다.
@@ -702,27 +760,107 @@ export default function KnowledgeTab() {
     setFile(found ?? {
       path, name: path.split('/').pop() ?? path, title: path,
       size: 0, mtime: 0, origin: 'unknown',
+      // 트리에 없는 .pdf 도 PDF 로 열어야 한다. kind 가 빠지면 마크다운
+      // 뷰어로 가서 "md 파일만 읽습니다" 오류가 뜬다.
+      ...(path.toLowerCase().endsWith('.pdf') ? { kind: 'pdf' as const } : {}),
     });
-    if (path.endsWith('.pdf')) { setDoc(null); return; }
+    writeHash(path);
+    if (path.toLowerCase().endsWith('.pdf')) { setDoc(null); return; }
     setBusy(true);
     setDoc(await api.knowledgeDoc(path));
     setBusy(false);
-  }, [tree]);
+  }, [tree, writeHash]);
+
+  /* 주소에 적힌 문서를 연다 — 새로고침·링크로 들어왔을 때.
+   *
+   * 트리를 받은 **뒤에** 연다. 먼저 열면 파일 메타(제목·크기·출처)를 못
+   * 찾아 제목 자리에 경로가 그대로 뜬다.
+   *
+   * 한 번만 한다. 그 뒤에는 사장님이 고른 것이 주소를 바꾸므로, 계속
+   * 지켜보면 서로 덮어쓴다. */
+  const restored = useRef(false);
+  useEffect(() => {
+    if (restored.current || !tree?.available) return;
+    restored.current = true;
+    const p = pathFromHash();
+    if (p) void openPath(p);
+  }, [tree, openPath]);
+
+  /* 주소가 **밖에서** 바뀌면 문서도 따라간다.
+   *
+   * 링크를 붙여 넣거나 뒤로/앞으로를 누를 때다. 이게 없으면 주소는 PDF 를
+   * 가리키는데 화면은 아까 보던 md 가 그대로 남는다 — 주소와 화면이 서로
+   * 다른 것을 말하게 된다(실제로 그랬다).
+   *
+   * 우리가 쓴 것(replaceState)은 hashchange 를 일으키지 않으므로 서로
+   * 덮어쓸 걱정은 없다. 지금 연 것과 같으면 다시 받지도 않는다. */
+  const openedRef = useRef('');
+  useEffect(() => { openedRef.current = file?.path ?? ''; }, [file]);
+  useEffect(() => {
+    const onHash = () => {
+      const p = pathFromHash();
+      if (p && p !== openedRef.current) void openPath(p);
+    };
+    window.addEventListener('hashchange', onHash);
+    return () => window.removeEventListener('hashchange', onHash);
+  }, [openPath]);
 
   const pick = useCallback((f: KbFile) => {
     setFile(f);
+    writeHash(f.path);
     if (f.kind === 'pdf') { setDoc(null); return; }
     setBusy(true);
     void api.knowledgeDoc(f.path).then(d => { setDoc(d); setBusy(false); });
-  }, []);
+  }, [writeHash]);
+
+  /* ── 맹비서에게 묻기 ────────────────────────────────────────────
+     맥락으로 **경로만** 넘긴다. 본문을 붙이면 토큰을 쓰는 데다 맹비서가
+     이웃 노드를 못 본다 — read_file 과 지식 그래프를 스스로 쓰게 두는
+     쪽이 낫다. */
+  const [asking, setAsking] = useState(false);
+  /* md 는 서버가 준 abs_path 를 쓴다. PDF 는 doc 을 받지 않으므로 트리가
+     준 위키 루트에 상대 경로를 붙인다 — **루트를 화면에 박아 두지
+     않는다.** 박아 두면 위키를 옮긴 날 조용히 틀린 경로를 맹비서에게
+     주고, 맹비서는 "파일이 없다" 고만 답한다. */
+  const diskPath = (f: KbFile): string =>
+    doc?.abs_path
+    || (tree?.root ? `${tree.root}\\${f.path.split('/').join('\\')}` : f.path);
+
+  const askCtx: AskContext | null = !file ? null : {
+    kind: 'knowledge',
+    label: file.title,
+    brief: [
+      '[지식베이스 문서]',
+      `제목: ${file.title}`,
+      `위키 기준 경로: ${file.path}`,
+      `디스크 경로: ${diskPath(file)}`,
+      '',
+      '이 문서를 read_file 로 **직접 읽고** 답하십시오. 필요하면 지식베이스',
+      '조회로 관련 문서까지 따라가십시오. 문서에 없는 것은 없다고 말하고,',
+      '추측으로 메우지 마십시오.',
+    ].join('\n'),
+    presets: file.kind === 'pdf'
+      ? ['이 논문의 핵심 기여를 3가지로 정리해줘',
+         '이 논문의 방법을 단계별로 설명해줘',
+         '우리 위키에 이미 있는 관련 문서와 무엇이 다른지 알려줘']
+      : ['이 문서를 5줄로 요약해줘',
+         '이 문서에서 빠진 것 · 더 채울 것을 지적해줘',
+         '이것과 관련된 위키 문서를 찾아 연결해줘'],
+  };
 
   return (
     <div className="kb-root">
       <KbSidebar tree={tree} cur={file?.path ?? ''} onPick={pick} />
       <KbViewer file={file} doc={doc} busy={busy}
                 onNavPath={p => void openPath(p)}
-                resolveSlug={resolveSlug} />
+                resolveSlug={resolveSlug}
+                onAsk={() => setAsking(true)} />
       <KbRail doc={file?.kind === 'pdf' ? null : doc} />
+      {asking && askCtx && (
+        <Suspense fallback={null}>
+          <AskHermes ctx={askCtx} onClose={() => setAsking(false)} />
+        </Suspense>
+      )}
     </div>
   );
 }

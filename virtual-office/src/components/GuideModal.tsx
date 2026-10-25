@@ -120,6 +120,20 @@ export function Markdown({ src }: { src: string }) {
       type Item = { text: string; children: Item[]; ordered: boolean };
       const items: Item[] = [];
       const rootOrdered = /\d/.test(first[2]);
+      /* 원문에 적힌 번호에서 시작한다.
+       *
+       * 에이전트는 항목 사이에 설명 문단을 넣어 긴 목록을 쓴다:
+       *
+       *     1. 한국어 NLP 토큰화 분석 심화
+       *     (빈 줄)
+       *     현재 Concepts/... 를 바탕으로 ...
+       *     (빈 줄)
+       *     2. Sutton RL 도서관 프로젝트
+       *
+       * 그러면 항목마다 **새 <ol> 이 만들어져 번호가 1 부터 다시 센다** —
+       * 화면에 1. 1. 1. 로 나왔다(실측). 원문 번호를 start 로 넘겨 그대로
+       * 보이게 한다. */
+      const startAt = rootOrdered ? parseInt(first[2], 10) : 1;
 
       while (i < lines.length) {
         const m2 = lines[i].match(LIST);
@@ -145,10 +159,11 @@ export function Markdown({ src }: { src: string }) {
         break;
       }
 
-      const render = (list: Item[], ordered: boolean, key: string) => {
+      const render = (list: Item[], ordered: boolean, key: string, start = 1) => {
         const L = ordered ? 'ol' : 'ul';
         return (
-          <L key={key} className="gd-list">
+          <L key={key} className="gd-list"
+             {...(ordered && start > 1 ? { start } : {})}>
             {list.map((it, j) => (
               <li key={j}>
                 {inline(it.text, `${key}-${j}`)}
@@ -159,7 +174,7 @@ export function Markdown({ src }: { src: string }) {
           </L>
         );
       };
-      blocks.push(render(items, rootOrdered, `l${n++}`));
+      blocks.push(render(items, rootOrdered, `l${n++}`, startAt));
       continue;
     }
 

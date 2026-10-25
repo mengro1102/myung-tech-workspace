@@ -2619,38 +2619,196 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
   background: var(--bg2);
   word-break: keep-all;
 }
-.sess-item {
+/* ── 대화 기록 서랍 ─────────────────────────────────────────────────
+   한 줄에 **제목 + 미리보기 + 메타**가 들어가고, 오른쪽에 이름 변경·
+   삭제 버튼이 선다. 그래서 전처럼 한 줄 flex 가 아니라 `grid`(본문 |
+   버튼)이고, 본문은 다시 3단 세로다.
+
+   목록이 길어지므로 패널을 640px 까지 넓히고 높이를 화면에 맞춘다 —
+   560px 에 미리보기까지 넣으면 제목이 한 글자씩 끊긴다. */
+.sess-panel {
+  max-width: 640px;
   display: flex;
+  flex-direction: column;
+  max-height: min(84vh, 760px);
+}
+.sess-bar {
+  display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 10px;
-  width: 100%;
-  padding: 8px 10px;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 0 20px 10px;
+}
+.sess-chips { display: flex; gap: 4px; flex-wrap: wrap; }
+.sess-chip {
+  font-size: 11px;
+  padding: 4px 9px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--bg2);
+  color: var(--muted);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.sess-chip:hover { background: var(--bg3); color: var(--text); }
+.sess-chip.on {
+  border-color: var(--primary);
+  background: var(--primary-dim);
+  color: var(--text);
+}
+.sess-actions { display: flex; gap: 6px; align-items: center; }
+.sess-search {
+  width: 132px;
+  font-size: 11px;
+  padding: 5px 9px;
+  border-radius: 7px;
+  border: 1px solid var(--border);
+  background: var(--bg2);
+  color: var(--text);
+}
+.sess-new {
+  font-size: 11px;
+  padding: 5px 10px;
+  border-radius: 7px;
+  border: 1px solid var(--primary);
+  background: var(--primary-dim);
+  color: var(--text);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.sess-new:hover:not(:disabled) { background: var(--primary); color: #fff; }
+.sess-new:disabled { opacity: .5; cursor: default; }
+
+.sess-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: stretch;
+  gap: 6px;
   border-radius: 8px;
   border: 1px solid var(--border);
   background: var(--bg2);
+  padding-right: 6px;
+}
+.sess-row:hover { background: var(--bg3); }
+.sess-row.active { border-color: var(--primary); background: var(--primary-dim); }
+.sess-main {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;            /* 없으면 긴 제목이 그리드 칸을 밀어낸다 */
+  padding: 8px 4px 8px 10px;
+  background: none;
+  border: 0;
   color: var(--text);
   cursor: pointer;
   text-align: left;
 }
-.sess-item:hover { background: var(--bg3); }
-.sess-item.active { border-color: var(--primary); background: var(--primary-dim); }
+.sess-main:disabled { cursor: default; }
+.sess-line1 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
 .sess-src {
   font-size: 10px;
   white-space: nowrap;
   color: var(--muted);
-  min-width: 74px;
+  flex: 0 0 auto;
 }
 .sess-title {
-  flex: 1;
+  flex: 1 1 auto;
+  min-width: 0;
   font-size: 12px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.sess-live {
+  flex: 0 0 auto;
+  font-size: 9px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--primary);
+  color: #fff;
+  white-space: nowrap;
+}
+/* 미리보기 — 제목이 "대시보드 · 10/24 22:13" 처럼 다 비슷할 때 어느
+   대화였는지 알아볼 유일한 단서다. 두 줄까지 보여 준다. */
+.sess-preview {
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--muted);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  word-break: break-word;
+}
 .sess-meta {
   font-size: 10px;
   color: var(--muted);
   font-variant-numeric: tabular-nums;
+}
+.sess-btns {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: 0 0 auto;
+}
+.sess-ico {
+  font-size: 12px;
+  line-height: 1;
+  padding: 6px 7px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--muted);
+  cursor: pointer;
+}
+.sess-ico:hover { color: var(--text); border-color: var(--muted); }
+.sess-ico:disabled { opacity: .5; cursor: default; }
+.sess-ico.ok:hover { border-color: var(--primary); color: var(--primary); }
+.sess-ico.danger:hover { border-color: #F87171; color: #F87171; }
+/* 확인 버튼. 글자가 들어가므로 아이콘 폭으로는 안 된다. */
+.sess-ico.danger.wide {
+  font-size: 11px;
+  padding: 6px 10px;
+  white-space: nowrap;
+  border-color: #F87171;
+  color: #F87171;
+}
+.sess-ico.danger.wide:hover { background: #F87171; color: #fff; }
+.sess-edit {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 12px;
+  padding: 3px 7px;
+  border-radius: 6px;
+  border: 1px solid var(--primary);
+  background: var(--bg);
+  color: var(--text);
+}
+.sess-empty.err { color: #F87171; display: flex; flex-direction: column; gap: 6px;
+                  align-items: flex-start; }
+.sess-retry {
+  font-size: 11px;
+  padding: 4px 9px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+  cursor: pointer;
+}
+/* 목록이 패널의 남은 높이를 다 쓴다. 고정 60vh 로 두면 짧은 목록에서
+   패널 아래가 비고, 긴 목록에서는 패널이 화면을 넘는다. */
+.sess-panel .sess-list { max-height: none; flex: 1 1 auto; min-height: 80px; }
+
+@media (max-width: 560px) {
+  .sess-bar { flex-direction: column; align-items: stretch; }
+  .sess-actions { justify-content: space-between; }
+  .sess-search { flex: 1 1 auto; width: auto; }
 }
 .mem-retrieval {
   margin: 0 20px 12px;
@@ -5722,3 +5880,174 @@ button.pj-deliv-item[aria-expanded="true"] { background: var(--glass-hi); border
 .hs-plus:focus-visible,
 .kb-file:focus-visible,
 .ceo-appr-btn:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+
+/* ══ 맹비서에게 묻기 패널 ══════════════════════════════════════════
+   보던 것을 **가리지 않는다.** 모달(backdrop + 중앙)로 두면 문서를 덮어서
+   "문서를 보면서 묻는다" 가 안 된다 — 고치려던 문제가 그대로다. 그래서
+   오른쪽 아래에 붙는 고정 패널이고, backdrop 이 없다.
+
+   backdrop 이 없으니 바깥을 눌러 닫을 수 없다. 그래서 컴포넌트가 Escape
+   키를 듣는다(AskHermes.tsx) — 닫을 길이 ✕ 하나뿐이면 갇힌 느낌이 난다. */
+.ask-panel {
+  position: fixed;
+  right: 18px;
+  bottom: 18px;
+  z-index: 60;              /* 모달(50)보다 위 — 결재 모달 안에서도 열린다 */
+  width: 420px;
+  max-width: calc(100vw - 36px);
+  max-height: min(70vh, 620px);
+  display: flex;
+  flex-direction: column;
+  border-radius: 14px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  box-shadow: 0 18px 48px rgba(0, 0, 0, .34);
+  overflow: hidden;
+}
+.ask-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg2);
+}
+.ask-title { font-size: 12px; font-weight: 600; white-space: nowrap; }
+/* 어느 문서·어느 결재에 대한 질문인지. 길면 줄인다 — 제목이 길다고
+   패널이 넓어지면 보던 문서를 더 가린다. */
+.ask-ctx {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 11px;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ask-close {
+  flex: 0 0 auto;
+  background: none;
+  border: 0;
+  color: var(--muted);
+  font-size: 13px;
+  cursor: pointer;
+  padding: 2px 4px;
+}
+.ask-close:hover { color: var(--text); }
+
+.ask-body {
+  flex: 1 1 auto;
+  min-height: 60px;
+  overflow-y: auto;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.ask-hint {
+  font-size: 11px;
+  line-height: 1.7;
+  color: var(--muted);
+  word-break: keep-all;
+}
+.ask-turn { display: flex; flex-direction: column; gap: 3px; }
+.ask-who {
+  font-size: 9px;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.ask-text {
+  font-size: 12px;
+  line-height: 1.75;
+  word-break: break-word;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: var(--bg2);
+}
+.ask-turn.user .ask-text { background: var(--primary-dim); }
+/* 맹비서 답은 마크다운이다. 패널이 좁으므로 바깥으로 삐져나올 수 있는
+   것들(표·코드)에 자기 스크롤을 준다 — 없으면 패널 전체가 가로로 민다. */
+.ask-text.md :where(h1, h2, h3) { font-size: 12px; margin: 8px 0 4px; }
+.ask-text.md p { margin: 0 0 6px; }
+.ask-text.md :where(ul, ol) { margin: 0 0 6px; padding-left: 18px; }
+.ask-text.md li { margin: 2px 0; }
+.ask-text.md pre,
+.ask-text.md table { display: block; overflow-x: auto; max-width: 100%; }
+.ask-text.md code { font-size: 11px; }
+
+.ask-presets {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 0 12px 8px;
+}
+.ask-preset {
+  font-size: 11px;
+  text-align: left;
+  padding: 7px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg2);
+  color: var(--text);
+  cursor: pointer;
+  word-break: keep-all;
+}
+.ask-preset:hover:not(:disabled) { border-color: var(--primary); background: var(--primary-dim); }
+.ask-preset:disabled { opacity: .5; cursor: default; }
+
+.ask-form {
+  display: flex;
+  gap: 6px;
+  padding: 10px 12px;
+  border-top: 1px solid var(--border);
+  background: var(--bg2);
+}
+.ask-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 12px;
+  padding: 7px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+}
+.ask-send {
+  flex: 0 0 auto;
+  font-size: 11px;
+  padding: 7px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--primary);
+  background: var(--primary-dim);
+  color: var(--text);
+  cursor: pointer;
+}
+.ask-send:hover:not(:disabled) { background: var(--primary); color: #fff; }
+.ask-send:disabled { opacity: .45; cursor: default; }
+
+/* 지식베이스 문서 머리글의 버튼. 메타 줄 끝에 붙는다. */
+.kb-ask {
+  font-size: 11px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--bg2);
+  color: var(--muted);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.kb-ask:hover { border-color: var(--primary); background: var(--primary-dim); color: var(--text); }
+
+/* 좁은 화면에서는 아래에 꽉 붙인다. 420px 패널이 375px 화면에서 바깥으로
+   삐져나가면 ✕ 를 누를 수 없다. */
+@media (max-width: 520px) {
+  .ask-panel {
+    right: 8px;
+    left: 8px;
+    bottom: 8px;
+    width: auto;
+    max-width: none;
+    max-height: 78vh;
+  }
+}

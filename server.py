@@ -1292,6 +1292,14 @@ def _kb_doc(rel: str) -> dict:
 
     return {
         "path": rel, "title": _kb_title(f, rel),
+        # 디스크 절대 경로. 화면이 "이 문서에 대해 맹비서에게 묻기" 를 할 때
+        # 본문을 전부 프롬프트에 붙이지 않고 **경로만** 넘긴다 — 맹비서는
+        # read_file 과 지식 그래프를 스스로 쓸 수 있으므로, 붙여 넣는 쪽이
+        # 토큰만 쓰고 이웃 노드를 못 보게 만든다.
+        #
+        # 위키 루트 밖은 위에서 이미 막았다(is_relative_to). 그래서 여기서
+        # 나가는 경로는 항상 위키 안이다.
+        "abs_path": str(f),
         "front": _kb_front(f, head_bytes=8192),
         "text": text, "size": st.st_size, "mtime": int(st.st_mtime),
         "origin": knowledge_base.origin_of(rel),
@@ -1868,7 +1876,23 @@ class Handler(BaseHTTPRequestHandler):
                        {"ok": st == 200, **body})
 
         elif path == "/api/assistant/sessions":
-            st, body = _assistant_call("GET", "/api/sessions")
+            # 출처·개수를 그대로 넘긴다.
+            #
+            # 전에는 질의를 버려서 맹비서 기본값(limit 50, 모든 출처)만
+            # 받았다. 그러면 화면이 "대시보드 대화만 보기" 를 할 수 없고,
+            # 50건이 넘으면 오래된 것이 조용히 잘렸다 — 사장님 눈에는
+            # 대화가 사라진 것으로 보인다.
+            qs = urllib.parse.parse_qs(parsed.query)
+            fwd = []
+            src = (qs.get("source") or [""])[0].strip()
+            # 화이트리스트. 임의 문자열을 그대로 붙이면 맹비서 질의에
+            # 아무 값이나 실어 보낼 수 있다.
+            if src in ("api_server", "discord", "telegram", "cli", "slack"):
+                fwd.append(f"source={urllib.parse.quote(src)}")
+            fwd.append(f"limit={_qs_int(qs, 'limit', 100, lo=1, hi=200)}")
+            fwd.append(f"offset={_qs_int(qs, 'offset', 0, lo=0, hi=100000)}")
+            st, body = _assistant_call(
+                "GET", "/api/sessions?" + "&".join(fwd))
             _json_resp(self, st, body)
 
         elif (path.startswith("/api/assistant/sessions/")
@@ -2366,6 +2390,20 @@ class Handler(BaseHTTPRequestHandler):
             except Exception as e:  # noqa: BLE001
                 _json_resp(self, 500, {"error": str(e)})
 
+        # ── DELETE /api/assistant/sessions/<id>  (대화 삭제)
+        #
+        # 되돌릴 수 없다 — 맹비서가 state.db 에서 행을 지운다. 그래서
+        # 화면 쪽에서 두 번 누르게 만들어 두었다(휴지통 → "지웁니다").
+        # 여기서 또 막으면 사장님이 지울 방법이 없어진다.
+        elif path.startswith("/api/assistant/sessions/"):
+            sid = path[len("/api/assistant/sessions/"):]
+            if not sid or "/" in sid:
+                _json_resp(self, 400, {"error": "세션 ID 가 올바르지 않습니다"})
+                return
+            st, body = _assistant_call(
+                "DELETE", f"/api/sessions/{urllib.parse.quote(sid)}")
+            _json_resp(self, st, body)
+
         else:
             _json_resp(self, 404, {"error": "Not found"})
 
@@ -2390,6 +2428,31 @@ class Handler(BaseHTTPRequestHandler):
             ok = _save_agent(agent)
             out = {k: v for k, v in agent.items() if not k.startswith("_")}
             _json_resp(self, 200, {"ok": ok, "agent": out})
+
+        # ── PATCH /api/assistant/sessions/<id>  (제목 변경)
+        #
+        # 맹비서는 `title` 과 `end_reason` 만 받고 나머지 키는 400 으로
+        # 거절한다. 그래서 받은 몸체를 그대로 넘기지 않고 두 키만 고른다 —
+        # 화면이 실수로 다른 키를 붙이면 제목 변경 전체가 실패한다.
+        #
+        # **제목은 유일해야 한다.** 중복이면 맹비서가 400 과 함께 사유를
+        # 준다("Title '...' is already in use by session ..."). 그 사유가
+        # 화면까지 올라가야 하므로 여기서 삼키지 않는다.
+        elif path.startswith("/api/assistant/sessions/"):
+            sid = path[len("/api/assistant/sessions/"):]
+            if not sid or "/" in sid:
+                _json_resp(self, 400, {"error": "세션 ID 가 올바르지 않습니다"})
+                return
+            body = self._read_body() or {}
+            payload = {k: body[k] for k in ("title", "end_reason") if k in body}
+            if not payload:
+                _json_resp(self, 400,
+                           {"error": "바꿀 것이 없습니다 (title 이 필요합니다)"})
+                return
+            st, out = _assistant_call(
+                "PATCH", f"/api/sessions/{urllib.parse.quote(sid)}", payload)
+            _json_resp(self, st, out)
+
         else:
             _json_resp(self, 404, {"error": "Not found"})
 

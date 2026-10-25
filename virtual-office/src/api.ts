@@ -178,6 +178,9 @@ export interface KbNeighbor {
 
 export interface KbDoc {
   path: string;
+  /** 디스크 절대 경로. "이 문서에 대해 맹비서에게 묻기" 가 본문을 붙이지
+   *  않고 **경로만** 넘기려면 필요하다 — 맹비서가 read_file 로 읽는다. */
+  abs_path?: string;
   title: string;
   front: Record<string, string>;
   text: string;
@@ -280,6 +283,11 @@ export interface AssistantSession {
   model?: string;
   started_at?: number;
   ended_at?: number | null;
+  /** 맹비서가 `order_by_last_active=True` 로 주므로 목록 순서의 근거다. */
+  last_active?: number;
+  /** 첫 줄 미리보기. 제목이 "대시보드 · 10-24 22:13" 처럼 다 비슷할 때
+   *  어느 대화였는지 알아볼 수 있는 유일한 단서다. */
+  preview?: string | null;
   message_count?: number;
 }
 
@@ -605,10 +613,39 @@ export const api = {
     safeJson<{ ok: boolean; status?: string; error?: string; hint?: string }>(
       fetch(`${API_BASE}/assistant/health`)
     ),
-  /** 세션 목록 — 디스코드에서 한 대화도 여기 보인다. */
-  assistantSessions: () =>
-    safeJson<{ data?: AssistantSession[]; error?: string }>(
-      fetch(`${API_BASE}/assistant/sessions`)
+  /** 세션 목록 — 디스코드에서 한 대화도 여기 보인다.
+   *
+   *  `source` 를 주면 그 출처만 본다. 섞어 두면 **웹에서 실수로 텔레그램
+   *  대화를 지울 수 있다** — 그쪽은 명테크가 만든 것이 아니다. 그래서
+   *  기본 화면은 `api_server`(대시보드)만 보여 주고, 전체 보기는 따로 고른다.
+   *
+   *  `limit` 기본값을 100 으로 둔다. 맹비서 기본값 50 으로는 50건이 넘으면
+   *  오래된 대화가 조용히 잘렸다 — 사장님 눈에는 사라진 것으로 보인다. */
+  assistantSessions: (source?: string, limit = 100) =>
+    safeJson<{ data?: AssistantSession[]; has_more?: boolean; error?: string }>(
+      fetch(`${API_BASE}/assistant/sessions?limit=${limit}`
+            + (source ? `&source=${encodeURIComponent(source)}` : ''))
+    ),
+
+  /** 대화를 지운다. **되돌릴 수 없다** — 맹비서가 state.db 에서 행을
+   *  지운다. 그래서 화면이 두 번 누르게 만든다(휴지통 → "지웁니다"). */
+  assistantDeleteSession: (sid: string) =>
+    safeJson<{ deleted?: boolean; id?: string; error?: string }>(
+      fetch(`${API_BASE}/assistant/sessions/${encodeURIComponent(sid)}`,
+            { method: 'DELETE' })
+    ),
+
+  /** 제목을 바꾼다.
+   *
+   *  **제목은 유일해야 한다** — 중복이면 맹비서가 400 과 사유를 준다.
+   *  그 사유를 그대로 올려 받아 화면에 적는다("이미 쓰이는 제목입니다" 를
+   *  우리가 추측해 쓰면 다른 이유로 실패한 경우를 가린다). */
+  assistantRenameSession: (sid: string, title: string) =>
+    safeJson<{ session?: AssistantSession; error?: string }>(
+      fetch(`${API_BASE}/assistant/sessions/${encodeURIComponent(sid)}`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title }),
+      })
     ),
   /** 새 세션. 제목을 주면 목록에서 알아보기 쉽다.
    *

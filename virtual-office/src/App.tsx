@@ -17,13 +17,15 @@ const VirtualOffice = lazy(() => import('./pages/VirtualOffice'));
 const ProjectsTab = lazy(() => import('./components/ProjectsTab'));
 const NotesTab = lazy(() => import('./components/NotesTab'));
 const KnowledgeTab = lazy(() => import('./components/KnowledgeTab'));
+/* 대화 기록 서랍. 열 때까지 필요 없으므로 lazy 다. */
+const SessionsDrawer = lazy(() => import('./components/SessionsDrawer'));
 /* 채팅 말풍선의 마크다운. 프로젝트 탭 산출물 보기와 **같은 렌더러**를 쓴다 —
    두 벌을 두면 같은 글이 화면마다 다르게 보인다. */
 const Markdown = lazy(() => import('./components/GuideModal')
   .then(m => ({ default: m.Markdown })));
 const ApprovalBox = lazy(() => import('./components/ApprovalBox'));
 const LessonsBox = lazy(() => import('./components/LessonsBox'));
-import { api, AgentSummary, deptLabels, type ApprovalRow, type AssistantSession,
+import { api, AgentSummary, deptLabels, type ApprovalRow,
          type ProjectRow } from './api';
 import './styles/hermes.css';
 
@@ -71,7 +73,11 @@ type TabId = 'main' | 'office' | 'agents' | 'projects' | 'knowledge';
 const TABS: readonly TabId[] = ['main', 'office', 'agents', 'projects', 'knowledge'];
 
 function TAB_FROM_HASH(): TabId {
-  const h = window.location.hash.replace(/^#\/?/, '') as TabId;
+  // **첫 조각만 본다.** 지식베이스가 열어 둔 문서를
+  // `#knowledge/concepts/ppo.md` 로 적으므로, 해시 전체를 탭 이름과
+  // 비교하면 못 찾아서 메인으로 떨어진다 — 문서를 읽다 새로고침하면
+  // 그대로 튕기는 것이 그 때문이었다.
+  const h = window.location.hash.replace(/^#\/?/, '').split('/')[0] as TabId;
   return TABS.includes(h) ? h : 'main';
 }
 
@@ -215,9 +221,7 @@ function MainScreen() {
   // 맹비서 세션. 메인 채팅이 여기로 간다 — 전에는 /api/workflow/run 으로
   // 부서 태스크를 큐에 넣었고, 그 경로는 근거·검토·방법 절을 우회했다.
   const [assistantSid, setAssistantSid] = useState<string>('');
-  const [sessions, setSessions] = useState<AssistantSession[]>([]);
   const [sessionsOpen, setSessionsOpen] = useState(false);
-  const [sessionsBusy, setSessionsBusy] = useState(false);
   const [assistantUp, setAssistantUp] = useState<boolean | null>(null);
   // 기본 대화 상대는 맹비서다. 부서는 "일을 시키는" 쪽이라 성격이 다르다.
   const [dept,        setDept]        = useState('assistant');
@@ -758,13 +762,6 @@ function MainScreen() {
     return () => { alive = false; };
   }, []);
 
-  const loadSessions = useCallback(async () => {
-    setSessionsBusy(true);
-    const r = await api.assistantSessions();
-    setSessionsBusy(false);
-    setSessions(r?.data ?? []);
-  }, []);
-
   /** 세션 하나를 화면으로 불러온다. 이것이 '이어가기' 의 알맹이다. */
   const openSession = useCallback(async (sid: string) => {
     setAssistantSid(sid);
@@ -1088,7 +1085,11 @@ function MainScreen() {
                     // 실제로 만든다. 그 세션은 디스코드·텔레그램 대화와 같은 목록에 선다.
                     action: () => {
                       void (async () => {
-                        const r = await api.assistantNewSession(`대시보드 · ${nowStr()}`);
+                        // 제목에 **초까지** 넣는다. 맹비서가 중복 제목을 400
+                        // 으로 거절하므로, 분까지만 넣으면 연달아 두 번
+                        // 누를 때 두 번째가 조용히 실패한다.
+                        const r = await api.assistantNewSession(
+                          `대시보드 · ${new Date().toLocaleString('ko-KR', { hour12: false })}`);
                         const sid = r?.session?.id ?? '';
                         if (!sid) {
                           pushNotif('warning',
@@ -1104,11 +1105,13 @@ function MainScreen() {
                     },
                   },
                   {
-                    // 디스코드·텔레그램에서 한 대화도 같은 목록에 선다.
-                    // 그게 "맹비서와 명테크를 직접 연결" 의 실체다.
+                    // 서랍이 자기 목록을 스스로 불러온다(출처 필터가 있어서
+                    // 어느 목록을 받을지는 서랍이 안다). 그래서 여기서
+                    // loadSessions 를 부르지 않는다 — 부르면 같은 요청이
+                    // 두 번 나가고, 하나는 필터가 다른 결과를 덮어쓴다.
                     icon: '🗂', label: '대화 기록', active: sessionsOpen,
                     bg: 'rgba(96,165,250,0.15)', color: '#60A5FA',
-                    action: () => { setSessionsOpen(true); void loadSessions(); },
+                    action: () => setSessionsOpen(true),
                   },
                   {
                     icon: '⚙️', label: '관리 탭', active: false,
@@ -1713,41 +1716,29 @@ function MainScreen() {
       {/* 대화 기록 — 세션함. 전에는 '새 대화' 가 localStorage 를 비울 뿐이라
           돌아갈 곳이 없었다. 이제 맹비서 세션을 열고 이어간다. */}
       {sessionsOpen && (
-        <div className="hm-backdrop" onClick={() => setSessionsOpen(false)}>
-          <div className="hm-panel" style={{ maxWidth: 560 }} onClick={e => e.stopPropagation()}>
-            <div className="hm-header">
-              <span className="hm-title">🗂 대화 기록</span>
-              <span className="hm-subtitle">{sessions.length}건</span>
-              <button className="hm-close" onClick={() => setSessionsOpen(false)}>✕</button>
-            </div>
-            <div className="sess-note">
-              디스코드·텔레그램에서 하신 대화도 여기 있습니다. 누르면 그 자리에서
-              이어집니다.
-            </div>
-            <div className="sess-list">
-              {sessionsBusy && <div className="sess-empty">불러오는 중…</div>}
-              {!sessionsBusy && sessions.length === 0 && (
-                <div className="sess-empty">
-                  대화가 없습니다. 맹비서가 꺼져 있으면 목록도 비어 보입니다 —
-                  없다는 뜻이 아닙니다.
-                </div>
-              )}
-              {sessions.map(sv => (
-                <button key={sv.id}
-                        className={`sess-item ${assistantSid === sv.id ? 'active' : ''}`}
-                        onClick={() => void openSession(sv.id)}>
-                  <span className="sess-src">
-                    {sv.source === 'discord' ? '💬 디스코드'
-                      : sv.source === 'telegram' ? '📱 텔레그램'
-                      : sv.source === 'api_server' ? '🖥 대시보드' : (sv.source ?? '?')}
-                  </span>
-                  <span className="sess-title">{sv.title || '(제목 없음)'}</span>
-                  <span className="sess-meta">{sv.message_count ?? 0}개</span>
-                </button>
-              ))}
-            </div>
-          </div>
-        </div>
+        <Suspense fallback={null}>
+          <SessionsDrawer
+            currentSid={assistantSid}
+            onOpen={sid => void openSession(sid)}
+            onNew={sid => {
+              setAssistantSid(sid);
+              setMessages([{ id: 'init', role: 'assistant', sender: '맹비서',
+                             text: '새 대화를 시작했습니다. 무엇을 도와드릴까요?',
+                             ts: nowStr() }]);
+            }}
+            onCurrentDeleted={() => {
+              // 지금 보던 대화를 지웠다. 세션 id 를 비워야 다음 질문이
+              // **새 세션을 만든다** — 안 비우면 없는 세션에 말을 걸어
+              // 404 가 나고, 사장님은 맹비서가 죽은 줄 안다.
+              setAssistantSid('');
+              setMessages([{ id: 'gone', role: 'assistant', sender: '맹비서',
+                             text: '이 대화를 지웠습니다. 말을 거시면 새 대화가 시작됩니다.',
+                             ts: nowStr() }]);
+            }}
+            notify={pushNotif}
+            onClose={() => setSessionsOpen(false)}
+          />
+        </Suspense>
       )}
 
       {showManage && (

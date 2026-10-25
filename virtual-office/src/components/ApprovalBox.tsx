@@ -12,8 +12,13 @@
  * 결재는 정의상 사장님만 할 수 있는 일이고, CEO 룸은 사장님이 결정하는
  * 곳이다. 둘을 여기로 모은다.
  */
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
+import type { AskContext } from './AskHermes';
 import { api, type ApprovalRow, type ProjectRow } from '../api';
+
+/* 이 결재를 승인해도 되는지 그 자리에서 맹비서에게 묻는다. 열 때까지
+   필요 없으므로 lazy 다. */
+const AskHermes = lazy(() => import('./AskHermes'));
 
 const KIND: Record<string, { icon: string; label: string }> = {
   file: { icon: '📄', label: '파일 저장' },
@@ -73,6 +78,54 @@ export default function ApprovalBox({ open: boxOpen, onToggle, focusId,
   const [busy, setBusy] = useState('');
   const [msg, setMsg] = useState('');
   const [batching, setBatching] = useState(false);
+  /* 상담 중인 결재. 패널을 띄우고 맥락을 만든다. */
+  const [askRow, setAskRow] = useState<ApprovalRow | null>(null);
+
+  /** 결재 한 건을 맹비서가 판단할 수 있는 맥락으로 바꾼다.
+   *
+   *  **이미 화면에 있는 것만** 넘긴다. approvals.json 을 읽게 시키면
+   *  다른 건까지 읽고, 무엇을 보고 답했는지 사장님이 확인할 수 없다.
+   *
+   *  인자는 2,000자에서 끊는다. 파일 저장 결재의 file_content 는 수만 자가
+   *  될 수 있고, 그대로 보내면 무료 한도를 한 번에 태운다. */
+  const askCtx = (a: ApprovalRow): AskContext => {
+    const body = a.file_content
+      ?? (a.action_args ? JSON.stringify(a.action_args, null, 2) : '');
+    const lines = [
+      '[사장님 결재 대기 건]',
+      `제목: ${a.label}`,
+      `등급: ${a.tier ?? 1} (${a.tier_name ?? '내부'})${a.tier_why ? ` — ${a.tier_why}` : ''}`,
+      `종류: ${a.kind ?? '기타'}`,
+    ];
+    if (a.department) lines.push(`요청 부서: ${DEPT[a.department] ?? a.department}`);
+    if (a.file_path) lines.push(`쓰려는 파일: workspace/${a.file_path}`);
+    if (a.kind === 'action') {
+      lines.push(`바깥으로 나가는 호출: ${a.integration}.${a.action}`);
+      lines.push('※ 승인하는 순간 되돌릴 수 없습니다.');
+    }
+    if (a.detail) lines.push(`설명: ${a.detail}`);
+    if (body) {
+      lines.push('', '[내용]', body.slice(0, 2000)
+        + (body.length > 2000 ? `\n… (전체 ${body.length}자 중 앞부분)` : ''));
+    }
+    lines.push('',
+      '이 건을 승인해도 되는지 판단을 도와주십시오. 위험한 점, 확인해야 할',
+      '점, 되돌릴 수 있는지를 짚어 주십시오. 필요하면 지식베이스와 프로젝트',
+      '기록을 조회하십시오.',
+      '',
+      '**당신은 승인하거나 거절할 수 없습니다** — 조언만 하십시오. 결정',
+      '버튼은 사장님 손에 있습니다.');
+    return {
+      kind: 'approval',
+      label: a.label,
+      brief: lines.join('\n'),
+      presets: [
+        '이 건을 승인해도 괜찮을지 판단을 도와줘',
+        '승인하면 되돌릴 수 있는지, 무엇이 바뀌는지 알려줘',
+        '승인 전에 내가 확인해야 할 것을 짚어줘',
+      ],
+    };
+  };
 
   const load = useCallback(async () => {
     const [a, p] = await Promise.all([
@@ -299,6 +352,10 @@ export default function ApprovalBox({ open: boxOpen, onToggle, focusId,
                       {open === a.id ? '접기' : '내용 보기'}
                     </button>
                   )}
+                  {/* 판단 근거를 그 자리에서 얻는다. 전에는 메인 탭으로 가서
+                      결재 내용을 손으로 옮겨 적어야 했다. */}
+                  <button className="ceo-appr-btn ghost"
+                    onClick={() => setAskRow(a)}>🤖 맹비서에게 상담</button>
                   <button className="ceo-appr-btn reject"
                     disabled={busy === a.id}
                     onClick={() => decide(a, 'rejected')}>거절</button>
@@ -316,6 +373,12 @@ export default function ApprovalBox({ open: boxOpen, onToggle, focusId,
           })}
         </div>
       ))}
+
+      {askRow && (
+        <Suspense fallback={null}>
+          <AskHermes ctx={askCtx(askRow)} onClose={() => setAskRow(null)} />
+        </Suspense>
+      )}
 
       {boxOpen && recent.length > 0 && (
         <div className="ceo-appr-audit">
