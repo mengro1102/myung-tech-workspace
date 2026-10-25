@@ -5285,6 +5285,9 @@ button.pj-deliv-item[aria-expanded="true"] { background: var(--glass-hi); border
 
 .kb-root {
   flex: 1; min-height: 0;
+  /* 떠 있는 묻기 버튼(.kb-ask-fab)의 기준점. 없으면 버튼이 페이지 전체를
+     기준으로 잡혀 다른 탭 위에도 뜬다. */
+  position: relative;
   display: grid;
   grid-template-columns: 286px minmax(0, 1fr) 212px;
   /* min-height:0 이 세 칸 모두에 필요하다. 없으면 자식의 overflow 가
@@ -6026,18 +6029,56 @@ button.pj-deliv-item[aria-expanded="true"] { background: var(--glass-hi); border
 .ask-send:hover:not(:disabled) { background: var(--primary); color: #fff; }
 .ask-send:disabled { opacity: .45; cursor: default; }
 
-/* 지식베이스 문서 머리글의 버튼. 메타 줄 끝에 붙는다. */
-.kb-ask {
-  font-size: 11px;
-  padding: 3px 9px;
+/* ── 떠 있는 '맹비서에게 묻기' ───────────────────────────────────
+   문서 머리글 안에 두었더니 **스크롤하면 사라졌다.** 논문은 길고, 묻고
+   싶어지는 지점은 대개 중간이나 끝이라 거기서 위로 한참 올라가야 했다.
+
+   `.kb-root` 기준으로 띄운다(그래서 `.kb-root` 에 `position: relative`).
+   화면 전체가 아니라 **지식베이스 탭 안에서만** 떠야 하므로 fixed 가
+   아니라 absolute 다 — fixed 면 다른 탭으로 옮겨도 남는다.
+
+   right 는 오른쪽 목차(212px)를 피해 230px. 목차가 숨는 1280px 이하에서는
+   다시 18px 로 당긴다(아래 미디어쿼리). */
+.kb-ask-fab {
+  position: absolute;
+  right: 230px;
+  bottom: 18px;
+  z-index: 20;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 9px 15px;
   border-radius: 999px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--primary);
   background: var(--bg2);
-  color: var(--muted);
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 600;
   cursor: pointer;
   white-space: nowrap;
+  /* 본문 위에 뜨므로 그림자로 띄워 둔 느낌을 준다. 없으면 글에 박힌 것처럼
+     보여서 누를 수 있는 것인지 알기 어렵다. */
+  box-shadow: 0 6px 20px rgba(0, 0, 0, .34);
 }
-.kb-ask:hover { border-color: var(--primary); background: var(--primary-dim); color: var(--text); }
+.kb-ask-fab:hover { background: var(--primary); color: #fff; }
+.kb-ask-fab:active { transform: translateY(1px); }
+.kb-ask-fab-ico { font-size: 14px; line-height: 1; }
+
+@media (prefers-reduced-motion: reduce) {
+  .kb-ask-fab:active { transform: none; }
+}
+
+/* 목차가 숨으면 그 자리를 쓴다. */
+@media (max-width: 1280px) {
+  .kb-ask-fab { right: 18px; }
+}
+/* 좁은 화면에서는 글자를 빼고 동그란 버튼만. 가로를 적게 먹어야 본문을
+   덜 가린다. */
+@media (max-width: 560px) {
+  .kb-ask-fab { right: 14px; bottom: 14px; padding: 11px; border-radius: 50%; }
+  .kb-ask-fab-txt { display: none; }
+  .kb-ask-fab-ico { font-size: 17px; }
+}
 
 /* 좁은 화면에서는 아래에 꽉 붙인다. 420px 패널이 375px 화면에서 바깥으로
    삐져나가면 ✕ 를 누를 수 없다. */

@@ -538,11 +538,9 @@ interface ViewProps {
   /** `[[slug]]` 를 실제 문서로 옮긴다. 문서가 없는 slug 면 undefined 를
    *  돌려주고, 렌더러는 그걸 눌리지 않는 회색 꼬리표로 그린다. */
   resolveSlug: (slug: string) => string | undefined;
-  /** 머리글의 "맹비서에게 묻기". 보던 문서를 그대로 두고 패널이 뜬다. */
-  onAsk: () => void;
 }
 
-function KbViewer({ file, doc, busy, onNavPath, resolveSlug, onAsk }: ViewProps) {
+function KbViewer({ file, doc, busy, onNavPath, resolveSlug }: ViewProps) {
   const bodyRef = useRef<HTMLDivElement>(null);
 
   // 문서를 바꾸면 맨 위로. 안 올리면 긴 논문을 읽던 자리에 새 문서의
@@ -595,9 +593,6 @@ function KbViewer({ file, doc, busy, onNavPath, resolveSlug, onAsk }: ViewProps)
           <div className="kb-doc-badges">
             <span className="kb-badge ref">PDF 원문</span>
             <span className="kb-doc-meta">{size(file.size)} · 로컬 수정 {when(file.mtime)}</span>
-            {/* PDF 는 맹비서가 read_file 로 직접 읽는다(PyMuPDF). 그래서
-                이 버튼이 md 와 똑같이 동작한다 — 본문을 옮겨 적지 않는다. */}
-            <button className="kb-ask" onClick={onAsk}>🤖 맹비서에게 묻기</button>
           </div>
           <h1 className="kb-doc-title">{file.title}</h1>
           <div className="kb-doc-path">{file.path}</div>
@@ -634,7 +629,6 @@ function KbViewer({ file, doc, busy, onNavPath, resolveSlug, onAsk }: ViewProps)
               로컬 수정 {when(doc.mtime)}
               {doc.front.created && <> · 작성 {doc.front.created}</>}
             </span>
-            <button className="kb-ask" onClick={onAsk}>🤖 맹비서에게 묻기</button>
           </div>
           <h1 className="kb-doc-title">{doc.title}</h1>
           {doc.front.description && (
@@ -853,9 +847,25 @@ export default function KnowledgeTab() {
       <KbSidebar tree={tree} cur={file?.path ?? ''} onPick={pick} />
       <KbViewer file={file} doc={doc} busy={busy}
                 onNavPath={p => void openPath(p)}
-                resolveSlug={resolveSlug}
-                onAsk={() => setAsking(true)} />
+                resolveSlug={resolveSlug} />
       <KbRail doc={file?.kind === 'pdf' ? null : doc} />
+
+      {/* 떠 있는 묻기 버튼.
+       *
+       *  전에는 문서 머리글 안에 있었다. 논문은 길어서 **스크롤하면
+       *  사라졌고**, 묻고 싶어지는 지점(중간·끝)에서는 위로 한참 올라가야
+       *  했다 — "읽다가 언제든" 이 안 됐다.
+       *
+       *  패널이 열리면 숨긴다. 같은 자리(오른쪽 아래)에 패널이 뜨므로
+       *  그대로 두면 버튼이 패널 밑에 깔린다. */}
+      {file && !asking && (
+        <button className="kb-ask-fab" onClick={() => setAsking(true)}
+                title="보고 계신 문서에 대해 맹비서에게 묻습니다">
+          <span className="kb-ask-fab-ico">🤖</span>
+          <span className="kb-ask-fab-txt">맹비서에게 묻기</span>
+        </button>
+      )}
+
       {asking && askCtx && (
         <Suspense fallback={null}>
           <AskHermes ctx={askCtx} onClose={() => setAsking(false)} />
