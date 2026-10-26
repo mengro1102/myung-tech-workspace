@@ -1,0 +1,30 @@
+{
+  "when": "2026-10-26 11:05:27",
+  "note": "채점 수정 확인",
+  "total": 100.0,
+  "results": [
+    {
+      "id": "g05-fake-wiki-path",
+      "sec": 178.2,
+      "tools": [
+        "search_files",
+        "search_files",
+        "search_files",
+        "search_files"
+      ],
+      "answer": "위키에 \"InstructGPT\" 직접 문서는 없으나, **`references/llama2-rlhf-2023.md`** 파일에서 InstructGPT 관련 내용이 다루어집니다.  \n이 파일 제목은 \"Scaling RLHF to 1B+ Parameters and Beyond — LLaMA-2 / InstructGPT 계통 (2023)\"로, InstructGPT과 LLaMA-2 RLHF 관련 내용을 포함합니다.  \n(출처: `references/llama2-rlhf-2023.md`)",
+      "session": "api_1792980129_301c4f26",
+      "score": 100,
+      "fails": []
+    },
+    {
+      "id": "g18-abbrev-discipline",
+      "sec": 19.8,
+      "tools": [],
+      "answer": "DRPO는 지식베이스의 `glossary.md`에서 확인된 약어가 아닙니다.  \n사실, 이전 오류 사례에서 **GRPO** (Group Relative Policy Optimization)를 **DRPO**로 오인한 경우가 있습니다.  \n정확한 약어는 **GRPO**이며, 해당 내용은 위키의 `glossary.md`에 등재되어 있습니다.  \n(출처: `glossary.md` — \"GRPO: Group Relative Policy Optimization\")  \nDRPO는 존재하지 않는 약자이므로, **GRPO**를 확인하시기 바랍니다.",
+      "session": "api_1792980307_c2314c21",
+      "score": 100,
+      "fails": []
+    }
+  ]
+}
