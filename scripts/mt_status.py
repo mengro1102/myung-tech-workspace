@@ -47,6 +47,14 @@ for _s in (sys.stdout, sys.stderr):
 
 API = "http://127.0.0.1:9000"
 
+# 부서 코드 → 사람이 읽는 이름. 화면(deptLabels)과 같은 말을 써야
+# 사장님이 두 곳을 같은 것으로 읽는다.
+DEPT_KO = {
+    "orchestration_dept": "오케스트레이션부", "research_dept": "학술연구부",
+    "finance_dept": "금융투자부", "dev_dept": "개발부",
+    "content_dept": "콘텐츠생산부",
+}
+
 STATUS = {
     "intake": "접수", "planning": "계획 수립 중",
     "awaiting_approval": "착수 승인 대기", "running": "진행 중",
@@ -374,6 +382,45 @@ def _tailscale_serve() -> tuple[str, str]:
     return host, public
 
 
+def cmd_agents() -> int:
+    """부서별 에이전트와 지금 무엇을 하고 있나.
+
+    사장님이 디스코드에서 "서브 에이전트들 상태" 를 물으실 수 있는데,
+    그걸 답할 하위 명령이 없었다 — 화면에는 "에이전트 12" 라고 떠 있는데
+    맹비서는 그 숫자조차 꺼낼 길이 없었다.
+    """
+    rows = call("/api/agents")
+    if isinstance(rows, dict):
+        rows = rows.get("agents") or rows.get("items") or []
+    if not rows:
+        print("에이전트가 없습니다.")
+        return 0
+
+    by_dept: dict[str, list] = {}
+    for r in rows:
+        by_dept.setdefault(r.get("department") or "(소속 없음)", []).append(r)
+
+    busy = [r for r in rows if (r.get("status") or "").lower() not in ("idle", "")]
+    print(f"에이전트 {len(rows)}명 · 일하는 중 {len(busy)}명")
+    print()
+    for dept in sorted(by_dept):
+        ags = by_dept[dept]
+        print(f"  [{DEPT_KO.get(dept, dept)}] {len(ags)}명")
+        for a in ags:
+            st = a.get("status") or "?"
+            # 쉬는 중은 한 줄로 짧게. 일하는 중만 무엇을 하는지 적는다 —
+            # 12명을 전부 길게 적으면 정작 움직이는 것이 안 보인다.
+            mark = "·" if st.lower() == "idle" else "▶"
+            name = a.get("character_name") or a.get("agent_id")
+            line = f"    {mark} {name} ({a.get('role') or '?'}) — {st}"
+            doing = (a.get("doing") or "").strip()
+            if doing and st.lower() != "idle":
+                line += f"\n        {doing[:110]}"
+            print(line)
+        print()
+    return 0
+
+
 def cmd_dashboard() -> int:
     """명테크 화면을 어디서 열고, 지금 열리나."""
     print("명테크 대시보드")
@@ -431,7 +478,8 @@ def main() -> int:
     ap = argparse.ArgumentParser(add_help=True)
     ap.add_argument("cmd", nargs="?", default="overview",
                     choices=["overview", "projects", "project", "tasks",
-                             "lessons", "health", "growth", "dashboard"])
+                             "lessons", "health", "growth", "dashboard",
+                             "agents"])
     ap.add_argument("arg", nargs="?", default="")
     a = ap.parse_args()
     try:
@@ -452,6 +500,8 @@ def main() -> int:
             return cmd_growth()
         if a.cmd == "dashboard":
             return cmd_dashboard()
+        if a.cmd == "agents":
+            return cmd_agents()
         return cmd_health()
     except urllib.error.URLError as exc:
         print(f"명테크 서버에 연결하지 못했습니다: {exc.reason}")
