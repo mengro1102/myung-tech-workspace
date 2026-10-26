@@ -14,6 +14,7 @@
  */
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import type { AskContext } from './AskHermes';
+import AssistantFace from './AssistantFace';
 import { api, type ApprovalRow, type ProjectRow } from '../api';
 
 /* 이 결재를 승인해도 되는지 그 자리에서 맹비서에게 묻는다. 열 때까지
@@ -355,7 +356,9 @@ export default function ApprovalBox({ open: boxOpen, onToggle, focusId,
                   {/* 판단 근거를 그 자리에서 얻는다. 전에는 메인 탭으로 가서
                       결재 내용을 손으로 옮겨 적어야 했다. */}
                   <button className="ceo-appr-btn ghost"
-                    onClick={() => setAskRow(a)}>🤖 맹비서에게 상담</button>
+                    onClick={() => setAskRow(a)}>
+                    <AssistantFace size={14} /> 맹비서에게 상담
+                  </button>
                   <button className="ceo-appr-btn reject"
                     disabled={busy === a.id}
                     onClick={() => decide(a, 'rejected')}>거절</button>

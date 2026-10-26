@@ -32,6 +32,7 @@
  */
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { AskContext } from './AskHermes';
+import AssistantFace from './AssistantFace';
 import {
   api,
   type KbDoc,
@@ -861,7 +862,7 @@ export default function KnowledgeTab() {
       {file && !asking && (
         <button className="kb-ask-fab" onClick={() => setAsking(true)}
                 title="보고 계신 문서에 대해 맹비서에게 묻습니다">
-          <span className="kb-ask-fab-ico">🤖</span>
+          <span className="kb-ask-fab-ico"><AssistantFace size={17} /></span>
           <span className="kb-ask-fab-txt">맹비서에게 묻기</span>
         </button>
       )}

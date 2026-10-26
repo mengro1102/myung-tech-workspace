@@ -32,6 +32,7 @@
  */
 import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import { api } from '../api';
+import AssistantFace from './AssistantFace';
 
 const Markdown = lazy(() => import('./GuideModal').then(m => ({ default: m.Markdown })));
 
@@ -117,7 +118,7 @@ export default function AskHermes({ ctx, onClose }:
   return (
     <aside className="ask-panel" aria-label="맹비서에게 묻기">
       <div className="ask-head">
-        <span className="ask-title">🤖 맹비서에게 묻기</span>
+        <span className="ask-title"><AssistantFace size={16} /> 맹비서에게 묻기</span>
         <span className="ask-ctx" title={ctx.label}>{ctx.label}</span>
         <button className="ask-close" onClick={onClose} aria-label="닫기">✕</button>
       </div>

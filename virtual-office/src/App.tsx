@@ -17,6 +17,9 @@ const VirtualOffice = lazy(() => import('./pages/VirtualOffice'));
 const ProjectsTab = lazy(() => import('./components/ProjectsTab'));
 const NotesTab = lazy(() => import('./components/NotesTab'));
 const KnowledgeTab = lazy(() => import('./components/KnowledgeTab'));
+/* 맹비서의 얼굴. 얼굴이 필요한 곳은 전부 이것을 쓴다 — 이모지를
+   각자 박아 두면 한 인격이 창마다 다른 얼굴로 보인다. */
+import AssistantFace from './components/AssistantFace';
 /* 대화 기록 서랍. 열 때까지 필요 없으므로 lazy 다. */
 const SessionsDrawer = lazy(() => import('./components/SessionsDrawer'));
 /* 채팅 말풍선의 마크다운. 프로젝트 탭 산출물 보기와 **같은 렌더러**를 쓴다 —
@@ -81,6 +84,17 @@ function TAB_FROM_HASH(): TabId {
   return TABS.includes(h) ? h : 'main';
 }
 
+/** 브리핑의 발신자 이름.
+ *
+ *  브리핑은 **맹비서가 쓴 글이 아니다.** 명테크 서버가 `/api/briefing`
+ *  으로 만든 상태 요약이다. 전에는 "명테크 AI" 라는 이름을 붙여 둬서,
+ *  한 대화창에 AI 가 둘 있는 것처럼 보였다(사장님 지적).
+ *
+ *  이름만 "맹비서" 로 바꾸면 **맹비서가 쓰지 않은 글을 맹비서가 말한
+ *  것처럼** 보이게 된다. 그래서 사람 인격에서 빼고 시스템 공지로 둔다.
+ *  대화 상대는 맹비서 하나다. */
+const BRIEFING_SENDER = '브리핑';
+
 function loadChatHistory(): ChatMsg[] {
   try {
     const raw = localStorage.getItem(CHAT_HISTORY_KEY);
@@ -92,7 +106,16 @@ function loadChatHistory(): ChatMsg[] {
       // 복원하면 새로고침할 때마다 "Encountered two children with the same
       // key" 가 난다 — 실제로 `1792646077002` 가 계속 찍혔다. 코드를 고쳐도
       // **이미 저장된 기록**은 그대로이므로 불러오는 자리에서 손봐야 한다.
-      return rows.map((m, i) => ({ ...m, id: `h-${i}` }));
+      // 옛 이름을 바꿔 준다.
+      //
+      // 브리핑의 발신자가 "명테크 AI" 였다. 코드를 고쳐도 **이미 저장된
+      // 기록**은 그대로라, 새로고침하면 옛 이름이 계속 보인다 — id 때와
+      // 같은 이유다. 불러오는 자리에서 손본다.
+      return rows.map((m, i) => ({
+        ...m,
+        id: `h-${i}`,
+        sender: m.sender === '명테크 AI' ? BRIEFING_SENDER : m.sender,
+      }));
     }
   } catch { /* ignore */ }
   return [];
@@ -204,7 +227,7 @@ function MainScreen() {
   const [messages,    setMessages]    = useState<ChatMsg[]>(() => {
     const saved = loadChatHistory();
     return saved.length > 0 ? saved : [{
-      id: 'init', role: 'assistant', sender: '명테크 AI',
+      id: 'init', role: 'assistant', sender: BRIEFING_SENDER,
       text: '■ 브리핑\n\n지금 상태를 읽고 있습니다…', ts: nowStr(),
     }];
   });
@@ -416,7 +439,7 @@ function MainScreen() {
         const i = prev.findIndex(m => m.role === 'assistant'
                                    && m.text.startsWith('■ 브리핑'));
         if (i < 0) return [{ id: uid('b'), role: 'assistant' as const,
-                             sender: '명테크 AI', text, ts: nowStr() }, ...prev];
+                             sender: BRIEFING_SENDER, text, ts: nowStr() }, ...prev];
         const next = [...prev];
         next[i] = { ...next[i], text, ts: nowStr() };
         return next;
@@ -721,7 +744,7 @@ function MainScreen() {
       if (cmd === 'new-chat' || cmd === 'briefing') {
         void fetchBriefing().then(text => setMessages(prev => {
           const briefing = { id: uid('b'), role: 'assistant' as const,
-                             sender: '명테크 AI', text, ts: nowStr() };
+                             sender: BRIEFING_SENDER, text, ts: nowStr() };
           return cmd === 'new-chat' ? [briefing] : [...prev, briefing];
         }));
       }
@@ -1551,18 +1574,9 @@ function MainScreen() {
                         public/assets/assistant/SOURCE.md.
                         onError 로 이모지로 되돌린다 — 파일이 없을 때 깨진
                         이미지 아이콘이 남는 것보다 낫다. */}
-                    {m.role === 'assistant' ? (
-                      m.sender === '맹비서' ? (
-                        <img className="hs-msg-face"
-                             src="/assets/assistant/mengbiseo.png"
-                             alt="맹비서"
-                             onError={e => {
-                               const el = e.currentTarget;
-                               el.style.display = 'none';
-                               el.parentElement?.insertAdjacentText('beforeend', '🤖');
-                             }} />
-                      ) : '🤖'
-                    ) : '👤'}
+                    {m.role === 'assistant'
+                      ? (m.sender === BRIEFING_SENDER ? '📋' : <AssistantFace />)
+                      : '👤'}
                   </div>
                   <div className="hs-msg-body">
                     <div className="hs-msg-sender">{m.sender} · {m.ts}</div>
@@ -1621,7 +1635,7 @@ function MainScreen() {
                     <div className="hs-plus-backdrop" onClick={() => setPlusOpen(false)} />
                     <div className="hs-plus-menu" role="menu">
                       <div className="hs-plus-head">대화 상대</div>
-                      {([['assistant', '🤖', '맹비서', '세션이 이어집니다'],
+                      {([['assistant', '', '맹비서', '세션이 이어집니다'],
                          ['orchestration_dept', '🧠', '오케스트레이션', '부서에 일을 시킵니다'],
                          ['research_dept', '🔬', '학술연구', ''],
                          ['finance_dept', '📈', '금융투자', ''],
@@ -1630,7 +1644,11 @@ function MainScreen() {
                         ([id, icon, name, hint]) => (
                           <button key={id} className={`hs-plus-item ${dept === id ? 'on' : ''}`}
                                   onClick={() => { setDept(id); setPlusOpen(false); }}>
-                            <span className="hs-plus-ico">{icon}</span>
+                            {/* 맹비서만 얼굴을 쓴다. 부서는 역할 아이콘이 맞다 —
+                                사람이 아니라 기능이기 때문이다. */}
+                            <span className="hs-plus-ico">
+                              {id === 'assistant' ? <AssistantFace size={17} /> : icon}
+                            </span>
                             <span className="hs-plus-name">{name}</span>
                             {hint && <span className="hs-plus-hint">{hint}</span>}
                             {dept === id && <span className="hs-plus-check">✓</span>}
@@ -1667,7 +1685,9 @@ function MainScreen() {
               {/* 지금 누구와 말하는지는 늘 보여야 한다 — `+` 안에 숨기면
                   부서에 지시하던 중인 것을 잊는다. */}
               <span className="hs-composer-who">
-                {dept === 'assistant' ? '🤖 맹비서' : `${deptLabels[dept] ?? dept}`}
+                {dept === 'assistant'
+                  ? <><AssistantFace size={15} /> 맹비서</>
+                  : `${deptLabels[dept] ?? dept}`}
               </span>
 
               {/* 이름이 없어서 보조 기술에는 "버튼" 으로만 읽혔다 —
@@ -1781,6 +1801,7 @@ function MainScreen() {
 }
 
 /* ═══════════════════════════════════════════════════════════ */
+
 export default function App() {
   return (
     <Routes>
