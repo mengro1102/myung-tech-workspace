@@ -258,6 +258,8 @@ function MainScreen() {
     tasks_busy?: number; approvals_pending?: number;
   }>({});
   const [showSidebar, setShowSidebar] = useState(true);
+  /* 폰 전용 이동 드로어. 앱 수준에 있으므로 **어느 탭에서나** 열린다. */
+  const [navOpen, setNavOpen] = useState(false);
   const [taskSummary, setTaskSummary] = useState({ pending: 0, in_progress: 0, done: 0, failed: 0 });
   /* 태스크는 목록 하나만 받아 와서 화면 두 곳이 같은 답을 하게 한다.
    * 예전에는 사이드바가 /tasks/summary(전체), CEO 룸이 /tasks/list(상위 20건)
@@ -960,7 +962,9 @@ function MainScreen() {
         <button
           className="hs-burger-btn"
           title="메뉴"
-          onClick={() => setShowSidebar(v => !v)}
+          // 폰에서는 **이동 드로어**를 연다. 기존 사이드바는 메인 탭
+          // 안에만 렌더돼서, 다른 네 탭에서는 눌러도 아무 일이 없었다.
+          onClick={() => (isMobile ? setNavOpen(v => !v) : setShowSidebar(v => !v))}
         >☰</button>
 
         {/* 로고는 어느 화면에서든 메인으로 돌아오는 길이다. 다른 앱이 다
@@ -1199,6 +1203,44 @@ function MainScreen() {
           </button>
         ))}
       </div>
+
+      {/* ── 폰 이동 드로어 ──────────────────────────────────────
+          ☰ 가 여는 것. ⠿ 메뉴에 「시스템 현황판」이 따로 있으므로 여기는
+          **화면 이동만** 맡는다(사장님 요청). 아래 탭 바와 하는 일이
+          같지만, 한 손으로 쥐었을 때 왼쪽 위가 닿는 사람도 있다. */}
+      {navOpen && isMobile && (
+        <>
+          <div className="hs-nav-backdrop" onClick={() => setNavOpen(false)} />
+          <nav className="hs-nav-drawer" aria-label="화면 이동">
+            <div className="hs-nav-head">
+              <span>명테크</span>
+              <button className="hs-nav-close" onClick={() => setNavOpen(false)}
+                      aria-label="닫기">✕</button>
+            </div>
+            {([['main', '💬', '메인', '맹비서와 대화'],
+               ['office', '🏢', '사무실', '에이전트가 일하는 곳'],
+               ['agents', '🤖', '에이전트', '팀 구성과 페르소나'],
+               ['projects', '🚀', '프로젝트', '결재·진행·배운 것'],
+               ['knowledge', '🧬', '지식베이스', '위키 496건']] as const)
+              .map(([id, ico, name, hint]) => (
+                <button key={id}
+                        className={`hs-nav-item ${activeTab === id ? 'on' : ''}`}
+                        onClick={() => { setActiveTab(id); setNavOpen(false); }}>
+                  <span className="hs-nav-ico" aria-hidden="true">{ico}</span>
+                  <span className="hs-nav-text">
+                    <b>{name}</b>
+                    <small>{hint}</small>
+                  </span>
+                  {activeTab === id && <span className="hs-nav-now">지금</span>}
+                </button>
+              ))}
+            <button className="hs-nav-more"
+                    onClick={() => { setNavOpen(false); setShowGridMenu(true); }}>
+              ⠿ 시스템 현황판 · 대화 기록 · 관리 탭 →
+            </button>
+          </nav>
+        </>
+      )}
 
       {/* ── Knowledge Tab — 위키를 IDE 처럼 뒤지고 논문처럼 읽는다 ── */}
       {activeTab === 'knowledge' && (

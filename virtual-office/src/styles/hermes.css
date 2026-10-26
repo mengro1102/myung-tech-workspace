@@ -45,7 +45,12 @@ body {
 .hs-root {
   display: flex;
   flex-direction: column;
+  /* `100vh` 는 모바일 크롬에서 **주소창이 숨겨진 상태의 높이**다. 주소창이
+     보이는 동안에는 화면보다 110px 쯤 길어서, 맨 아래에 둔 것이 보이지
+     않는다(실측: 아래 탭 바가 사장님 폰에서 통째로 사라졌다).
+     `dvh` 는 지금 실제로 보이는 높이다. 옛 브라우저용으로 vh 를 먼저 둔다. */
   height: 100vh;
+  height: 100dvh;
   background: var(--bg);
   color: var(--text);
   overflow: hidden;
@@ -6205,11 +6210,15 @@ button.pj-deliv-item[aria-expanded="true"] { background: var(--glass-hi); border
      아래 고정 바는 폰의 표준이고 엄지가 닿는다. 아이콘 위·글자 아래로
      쌓으면 같은 폭에 10px 글자가 넉넉히 들어간다. */
   .hs-tabs {
-    position: fixed;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    z-index: 70;              /* 묻기 패널(60)보다 위 — 이동은 늘 가능해야 */
+    /* **고정 위치를 쓰지 않는다.** `position: fixed; bottom: 0` 은 모바일
+       브라우저의 주소창 표시/숨김에 따라 화면 밖으로 밀려난다 — 실제로
+       사장님 폰에서 탭 바가 통째로 사라졌다.
+       `.hs-root` 가 세로 flex 이므로 `order` 로 맨 끝에 보내면 **보이는
+       영역의 바닥**에 확실히 붙는다. */
+    order: 99;
+    position: relative;
+    z-index: 70;
+    flex: 0 0 auto;
     display: flex;
     align-items: stretch;
     overflow: visible;        /* 잘릴 일이 없다 */
@@ -6253,11 +6262,8 @@ button.pj-deliv-item[aria-expanded="true"] { background: var(--glass-hi); border
     background: var(--primary-dim);
   }
 
-  /* 아래 바가 본문을 가리지 않게 자리를 비운다. 안 비우면 마지막 줄과
-     입력칸이 바 밑에 깔린다. */
-  .hs-root {
-    padding-bottom: calc(56px + env(safe-area-inset-bottom, 0px));
-  }
+  /* 탭 바가 흐름 안에 있으므로 자리를 비울 필요가 없다. padding 을 주면
+     오히려 바 **아래**에 빈 띠가 생긴다. */
 
   /* ── 머리말 ──────────────────────────────────────────────────
      로고·시작 버튼이 26px 였다. 머리말은 늘 보이는 곳이라 제일 자주
@@ -6417,20 +6423,23 @@ button.pj-deliv-item[aria-expanded="true"] { background: var(--glass-hi); border
   .ask-close { flex: 0 0 auto; }
 
   /* 아래 탭 바(56px) 위로 띄운다. 안 띄우면 보내기 칸이 탭에 가린다. */
-  .ask-panel {
-    bottom: calc(56px + env(safe-area-inset-bottom, 0px) + 8px);
-    max-height: 62vh;
-  }
-  .kb-ask-fab {
-    bottom: calc(56px + env(safe-area-inset-bottom, 0px) + 10px);
-  }
+  /* 탭 바가 흐름 안으로 들어가 화면 바닥을 차지하므로, 떠 있는 것들은
+     그 위에 얹힌다. 56px 를 더 뺄 필요가 없다. */
+  .ask-panel { bottom: 10px; max-height: 58vh; }
+  .kb-ask-fab { bottom: 12px; }
 
   /* ── 지식베이스: 한 번에 한 가지만 ────────────────────────────
      폰에서 좌(트리)·중(본문)·우(목차) 세 칸을 동시에 보여 주면 본문이
      3분의 1로 줄어 논문을 읽을 수 없다. 문서를 고르면 **본문이 화면을
      전부** 쓰게 하고, 트리는 접는다. */
-  .kb-root { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
-  .kb-side { max-height: 38vh; }
+  /* 목록 화면에서는 트리가 **화면을 전부** 쓴다. 문서를 고르면 어차피
+     본문이 전체로 바뀌므로(`.reading`), 목록일 때 아래에 환영 문구를
+     위한 빈 자리를 남길 이유가 없다 — 폴더가 10개라 38vh 로는 서너 개만
+     보였다(사장님 지적). */
+  .kb-root { grid-template-columns: 1fr; grid-template-rows: 1fr; }
+  .kb-side { max-height: none; }
+  /* 목록일 때는 환영 화면을 숨긴다. 트리가 곧 안내다. */
+  .kb-root:not(.reading) .kb-main { display: none; }
   /* 문서를 연 상태에서는 트리를 접어 본문에 화면을 넘긴다.
      `.kb-root.reading` 은 KnowledgeTab 이 문서를 열 때 붙인다. */
   .kb-root.reading .kb-side { display: none; }
@@ -6449,7 +6458,7 @@ button.pj-deliv-item[aria-expanded="true"] { background: var(--glass-hi); border
     align-items: center;
     position: absolute;
     left: 10px;
-    bottom: calc(56px + env(safe-area-inset-bottom, 0px) + 10px);
+    bottom: 12px;
     z-index: 20;
     min-height: 44px;
     padding: 0 14px;
@@ -6489,3 +6498,102 @@ button.pj-deliv-item[aria-expanded="true"] { background: var(--glass-hi); border
 .kb-root.wide .kb-doc-head { padding: 6px 14px; }
 .kb-root.wide .kb-doc-title { font-size: 14px; margin: 0; }
 .kb-root.wide .kb-doc-path { display: none; }
+
+/* ☰ 드로어의 탭 목록. PC 에서는 탭 띠가 늘 보이므로 숨긴다. */
+.hs-side-tabs { display: none; }
+@media (max-width: 768px) {
+  .hs-side-tabs {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 4px 8px 10px;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 8px;
+  }
+  .hs-side-tab {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    min-height: 48px;
+    padding: 0 10px;
+    border: 0;
+    border-radius: 9px;
+    background: none;
+    color: var(--text);
+    font-size: 14px;
+    font-weight: 600;
+    text-align: left;
+    cursor: pointer;
+  }
+  .hs-side-tab:active { background: var(--bg3); }
+  .hs-side-tab.on { background: var(--primary-dim); color: var(--primary); }
+  /* 지금 어디인지. 색만으로 알리면 색을 구분 못 하는 경우 단서가 없다. */
+  .hs-side-tab-now {
+    margin-left: auto;
+    font-size: 10px;
+    font-weight: 700;
+    padding: 2px 7px;
+    border-radius: 999px;
+    background: var(--primary);
+    color: #fff;
+  }
+}
+
+/* ── 폰 이동 드로어 (☰) ───────────────────────────────────────────
+   ⠿ 메뉴에 「시스템 현황판」이 따로 있으므로 여기는 **화면 이동만**
+   맡는다. 아래 탭 바와 하는 일이 같지만, 한 손으로 쥐면 왼쪽 위가
+   더 닿는 사람도 있다 — 둘 다 두는 쪽이 맞다. */
+.hs-nav-backdrop {
+  position: fixed; inset: 0; z-index: 80;
+  background: rgba(0, 0, 0, .5);
+}
+.hs-nav-drawer {
+  position: fixed; top: 0; left: 0; bottom: 0; z-index: 81;
+  width: min(80vw, 300px);
+  display: flex; flex-direction: column; gap: 2px;
+  padding: 8px;
+  background: var(--bg2);
+  border-right: 1px solid var(--border);
+  box-shadow: 8px 0 28px rgba(0, 0, 0, .4);
+  overflow-y: auto;
+}
+.hs-nav-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 6px 8px 10px;
+  font-size: 15px; font-weight: 800;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 6px;
+}
+.hs-nav-close {
+  min-width: 44px; min-height: 44px;
+  border: 0; background: none; color: var(--muted);
+  font-size: 16px; cursor: pointer;
+}
+.hs-nav-item {
+  display: flex; align-items: center; gap: 11px;
+  width: 100%; min-height: 56px; padding: 0 10px;
+  border: 0; border-radius: 10px; background: none;
+  color: var(--text); text-align: left; cursor: pointer;
+}
+.hs-nav-item:active { background: var(--bg3); }
+.hs-nav-item.on { background: var(--primary-dim); }
+.hs-nav-ico { font-size: 19px; flex: 0 0 auto; }
+.hs-nav-text { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.hs-nav-text b { font-size: 14px; font-weight: 700; }
+/* 한 줄 설명. 탭 이름만으로는 '사무실' 과 '에이전트' 가 어떻게 다른지
+   알기 어렵다 — 폰은 화면이 좁아 둘러보며 익히기가 더 힘들다. */
+.hs-nav-text small { font-size: 11px; color: var(--muted); }
+.hs-nav-now {
+  margin-left: auto; font-size: 10px; font-weight: 700;
+  padding: 2px 7px; border-radius: 999px;
+  background: var(--primary); color: #fff;
+}
+.hs-nav-more {
+  margin-top: 8px; padding: 12px 10px;
+  border: 1px solid var(--border); border-radius: 10px;
+  background: var(--bg); color: var(--muted);
+  font-size: 11.5px; text-align: left; cursor: pointer;
+  min-height: 48px;
+}
+.hs-nav-more:active { background: var(--bg3); color: var(--text); }
