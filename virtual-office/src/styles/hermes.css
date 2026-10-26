@@ -6200,19 +6200,43 @@ button.pj-deliv-item[aria-expanded="true"] { background: var(--glass-hi); border
   /* ── 탭 띠 ───────────────────────────────────────────────────
      5개 탭이 443px 라 376px 화면에서 늘 잘린다. 잘리는 것 자체는
      괜찮지만 **잘렸다는 사실이 보여야** 손가락으로 밀어 본다. */
+  /* ── 탭 띠 ────────────────────────────────────────────────────
+     **다섯 개가 다 보이게 한다.** 가로로 밀어야 보이는 탭은 없는 것과
+     비슷하다 — 폰에서 그게 유일한 화면 이동 수단인데, 밀 수 있다는 걸
+     모르면 다른 탭으로 갈 방법이 사라진다(사장님이 실제로 겪으셨다).
+
+     전에는 443px 라 376px 화면에서 잘렸다. 글자를 줄이고 여백을 좁혀
+     한 줄에 넣는다. 이모지는 남긴다 — 글자가 작아질수록 이모지가 탭을
+     구분하는 주된 단서가 된다. */
   .hs-tabs {
-    scroll-snap-type: x proximity;
+    display: flex;
+    /* 높이를 탭보다 크게. 전에 띠가 38px 인데 탭을 44px 로 키워서
+       **세로로 넘쳐 잘렸다.** 그래서 빈 띠처럼 보였다. */
+    min-height: 50px;
+    align-items: stretch;
+    /* 세로 넘침을 막는다. overflow-x 만 auto 로 두면 브라우저가
+       overflow-y 도 auto 로 바꿔, 내용이 세로로 스크롤돼 사라진다. */
+    overflow-x: auto;
+    overflow-y: hidden;
     -webkit-overflow-scrolling: touch;
     scrollbar-width: none;
-    /* 오른쪽 끝을 흐리게 해 "더 있다" 를 알린다. */
-    -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 26px), transparent);
-    mask-image: linear-gradient(to right, #000 calc(100% - 26px), transparent);
   }
   .hs-tabs::-webkit-scrollbar { display: none; }
   .hs-tab {
-    scroll-snap-align: start;
-    min-height: 44px;
-    flex: 0 0 auto;
+    flex: 1 1 0;
+    min-width: 0;
+    min-height: 46px;
+    padding: 0 4px;
+    font-size: 11px;
+    line-height: 1.25;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 1px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
   /* ── 머리말 ──────────────────────────────────────────────────
