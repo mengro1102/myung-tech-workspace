@@ -6197,46 +6197,66 @@ button.pj-deliv-item[aria-expanded="true"] { background: var(--glass-hi); border
     text-align: left;
   }
 
-  /* ── 탭 띠 ───────────────────────────────────────────────────
-     5개 탭이 443px 라 376px 화면에서 늘 잘린다. 잘리는 것 자체는
-     괜찮지만 **잘렸다는 사실이 보여야** 손가락으로 밀어 본다. */
-  /* ── 탭 띠 ────────────────────────────────────────────────────
-     **다섯 개가 다 보이게 한다.** 가로로 밀어야 보이는 탭은 없는 것과
-     비슷하다 — 폰에서 그게 유일한 화면 이동 수단인데, 밀 수 있다는 걸
-     모르면 다른 탭으로 갈 방법이 사라진다(사장님이 실제로 겪으셨다).
+  /* ── 탭을 아래 고정 바로 ──────────────────────────────────────
+     위쪽 가로 띠에 다섯을 욱여넣었더니 **글자가 안 보였다**(사장님
+     화면). 375px 를 다섯으로 나누면 69px 인데, 폰의 글꼴 배율이 조금만
+     커져도 잘려 사라진다.
 
-     전에는 443px 라 376px 화면에서 잘렸다. 글자를 줄이고 여백을 좁혀
-     한 줄에 넣는다. 이모지는 남긴다 — 글자가 작아질수록 이모지가 탭을
-     구분하는 주된 단서가 된다. */
+     아래 고정 바는 폰의 표준이고 엄지가 닿는다. 아이콘 위·글자 아래로
+     쌓으면 같은 폭에 10px 글자가 넉넉히 들어간다. */
   .hs-tabs {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 70;              /* 묻기 패널(60)보다 위 — 이동은 늘 가능해야 */
     display: flex;
-    /* 높이를 탭보다 크게. 전에 띠가 38px 인데 탭을 44px 로 키워서
-       **세로로 넘쳐 잘렸다.** 그래서 빈 띠처럼 보였다. */
-    min-height: 50px;
     align-items: stretch;
-    /* 세로 넘침을 막는다. overflow-x 만 auto 로 두면 브라우저가
-       overflow-y 도 auto 로 바꿔, 내용이 세로로 스크롤돼 사라진다. */
-    overflow-x: auto;
-    overflow-y: hidden;
-    -webkit-overflow-scrolling: touch;
-    scrollbar-width: none;
+    overflow: visible;        /* 잘릴 일이 없다 */
+    /* 기본 규칙이 `height: 38px` 로 못 박아 둔다. 그대로 두면 56px 짜리
+       탭이 38px 상자 밖으로 넘치는데, 상자가 화면 맨 아래에 고정돼
+       있으므로 **글자가 화면 밖으로 밀려 사라진다**(실측). */
+    height: auto;
+    min-height: 56px;
+    padding: 0;
+    gap: 0;
+    border-bottom: 0;
+    background: var(--bg2);
+    border-top: 1px solid var(--border);
+    /* 홈 인디케이터(아이폰)·제스처 바(안드로이드) 영역을 피한다. */
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+    box-shadow: 0 -6px 18px rgba(0, 0, 0, .3);
   }
-  .hs-tabs::-webkit-scrollbar { display: none; }
   .hs-tab {
     flex: 1 1 0;
     min-width: 0;
-    min-height: 46px;
-    padding: 0 4px;
-    font-size: 11px;
-    line-height: 1.25;
+    /* 기본의 `height: 38px` 를 푼다 — min-height 만 주면 상자는 38px 로
+       잡히고 내용만 넘친다. */
+    height: auto;
+    min-height: 56px;
+    padding: 6px 2px;
     display: flex;
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    gap: 1px;
+    gap: 3px;
+    /* 글자가 잘리지 않게 **넘치면 줄바꿈**이 아니라 줄이기. 10px 는
+       '지식베이스' 5글자가 69px 에 들어가는 크기다. */
+    font-size: 10px;
+    line-height: 1.1;
     white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    border-bottom: 0;
+    border-top: 2px solid transparent;
+  }
+  .hs-tab.active {
+    border-top-color: var(--primary);
+    background: var(--primary-dim);
+  }
+
+  /* 아래 바가 본문을 가리지 않게 자리를 비운다. 안 비우면 마지막 줄과
+     입력칸이 바 밑에 깔린다. */
+  .hs-root {
+    padding-bottom: calc(56px + env(safe-area-inset-bottom, 0px));
   }
 
   /* ── 머리말 ──────────────────────────────────────────────────
@@ -6334,3 +6354,138 @@ button.pj-deliv-item[aria-expanded="true"] { background: var(--glass-hi); border
   font-size: 10.5px;
   color: var(--muted);
 }
+
+/* 결재 카드 → 그 프로젝트의 산출물로 가는 버튼. 경고 블록 안에 있으므로
+   같은 주황 계열을 쓰되, 누를 수 있다는 것이 보이게 테두리를 준다. */
+.ceo-appr-raise-go {
+  display: block;
+  width: 100%;
+  margin-top: 8px;
+  padding: 9px 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(245, 158, 11, .45);
+  background: rgba(245, 158, 11, .12);
+  color: #f0b357;
+  font-size: 11.5px;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+  word-break: keep-all;
+}
+.ceo-appr-raise-go:hover { background: rgba(245, 158, 11, .22); }
+
+@media (max-width: 768px) {
+  /* ── 머리말을 한 줄로 ─────────────────────────────────────────
+     "결재 3 + 멈춘 프로젝트 1" 을 버튼에 넣었더니 머리말이 두 줄로
+     깨졌다(사장님 화면: "명테 크", "사장님 차 례 4"). 폰에서 머리말은
+     늘 보이는 곳이라 깨지면 제일 먼저 눈에 띈다.
+
+     내역은 숨기고 숫자만 남긴다. 어차피 한 번 누르면 프로젝트 탭에서
+     결재함과 멈춘 프로젝트를 둘 다 본다. */
+  .hs-start-sub { display: none; }
+  .hs-header, .hs-top { flex-wrap: nowrap; }
+  .hs-logo-sub { display: none; }        /* "AGENT STUDIO" 부제 */
+  .hs-logo { font-size: 13px; white-space: nowrap; }
+  .hs-start-btn {
+    font-size: 11.5px;
+    padding: 0 10px;
+    white-space: nowrap;
+    flex: 0 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  /* 머리말의 점 세 개(서버·AI 모델·지식 베이스)는 폰에서 자리를 많이
+     먹는데, 같은 정보가 ☰ 사이드바 맨 위에 있다. */
+  .hs-health { display: none; }
+
+  /* ── 묻기 패널 ────────────────────────────────────────────────
+     제목과 맥락이 겹쳤다(사장님 화면: "맹비서에게 묻기" 위에 "파일 저장:
+     workspace/..." 가 포개짐). 좁은 폭에서 둘 다 한 줄을 요구해 생긴
+     일이다. 세로로 쌓는다. */
+  .ask-head {
+    flex-wrap: wrap;
+    row-gap: 2px;
+    padding: 9px 10px;
+  }
+  .ask-title { flex: 1 1 auto; min-width: 0; }
+  .ask-ctx {
+    flex: 1 1 100%;
+    order: 3;                 /* 닫기 버튼 다음 줄로 */
+    font-size: 10.5px;
+  }
+  .ask-close { flex: 0 0 auto; }
+
+  /* 아래 탭 바(56px) 위로 띄운다. 안 띄우면 보내기 칸이 탭에 가린다. */
+  .ask-panel {
+    bottom: calc(56px + env(safe-area-inset-bottom, 0px) + 8px);
+    max-height: 62vh;
+  }
+  .kb-ask-fab {
+    bottom: calc(56px + env(safe-area-inset-bottom, 0px) + 10px);
+  }
+
+  /* ── 지식베이스: 한 번에 한 가지만 ────────────────────────────
+     폰에서 좌(트리)·중(본문)·우(목차) 세 칸을 동시에 보여 주면 본문이
+     3분의 1로 줄어 논문을 읽을 수 없다. 문서를 고르면 **본문이 화면을
+     전부** 쓰게 하고, 트리는 접는다. */
+  .kb-root { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
+  .kb-side { max-height: 38vh; }
+  /* 문서를 연 상태에서는 트리를 접어 본문에 화면을 넘긴다.
+     `.kb-root.reading` 은 KnowledgeTab 이 문서를 열 때 붙인다. */
+  .kb-root.reading .kb-side { display: none; }
+  .kb-root.reading { grid-template-rows: 1fr; }
+  .kb-doc { padding: 16px 14px 24px; }
+  .kb-doc-title { font-size: 19px; }
+  /* PDF 는 세로 화면에서 가로로 꽉 차야 읽힌다. */
+  .kb-pdf { min-height: 60vh; }
+}
+
+/* 지식베이스 "← 목록". PC 에서는 트리가 늘 보이므로 필요 없다. */
+.kb-back { display: none; }
+@media (max-width: 768px) {
+  .kb-back {
+    display: inline-flex;
+    align-items: center;
+    position: absolute;
+    left: 10px;
+    bottom: calc(56px + env(safe-area-inset-bottom, 0px) + 10px);
+    z-index: 20;
+    min-height: 44px;
+    padding: 0 14px;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    background: var(--bg2);
+    color: var(--text);
+    font-size: 12px;
+    font-weight: 600;
+    box-shadow: 0 6px 20px rgba(0, 0, 0, .34);
+    cursor: pointer;
+  }
+}
+
+/* ── PDF 넓게 보기 ────────────────────────────────────────────────
+   PDF 는 머리글(95px)·트리(286px)·목차(212px) 에 자리를 빼앗긴다.
+   바깥 페이지를 스크롤되게 만드는 것은 답이 아니다 — iframe 은 높이가
+   정해져야 안쪽 뷰어가 제 스크롤을 갖는다. 대신 다른 칸을 치운다. */
+.kb-wide {
+  font-size: 11px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--bg2);
+  color: var(--muted);
+  cursor: pointer;
+  white-space: nowrap;
+  margin-left: auto;        /* 메타 줄 오른쪽 끝으로 */
+}
+.kb-wide:hover { border-color: var(--primary); color: var(--text); }
+
+.kb-root.wide { grid-template-columns: 1fr; }
+.kb-root.wide .kb-side,
+.kb-root.wide .kb-rail { display: none; }
+/* 머리글을 한 줄로 줄여 iframe 에 60px 쯤 더 넘긴다. 제목은 남긴다 —
+   어느 문서를 보고 있는지는 알아야 한다. */
+.kb-root.wide .kb-doc-head { padding: 6px 14px; }
+.kb-root.wide .kb-doc-title { font-size: 14px; margin: 0; }
+.kb-root.wide .kb-doc-path { display: none; }

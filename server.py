@@ -1670,6 +1670,12 @@ class Handler(BaseHTTPRequestHandler):
         if path.startswith("/api/auth/"):
             return False
 
+        # 정적 자산은 로그인 없이. 그림·글꼴에는 사장님 데이터가 없고,
+        # 막으면 **로그인 HTML 이 PNG 자리에 돌아가** 화면이 깨진다
+        # (실측: floor_4.png 요청에 4,916B 짜리 로그인 화면이 왔다).
+        if path.startswith("/assets/") or path in ("/favicon.ico", "/manifest.webmanifest"):
+            return False
+
         # `/login` 은 **로그인 화면을 준다.** 전에는 "막지 않음" 으로만 두어
         # 그대로 흘러갔고, SPA 껍데기가 나왔다. 그 껍데기는 /api 를 부르다
         # 401 을 받고, 그 401 이 다시 `login: "/login"` 을 가리켜 **제자리를
@@ -1689,10 +1695,23 @@ class Handler(BaseHTTPRequestHandler):
 
         if self._local_direct() or self._has_session():
             return False
+        # **요청한 형식에 맞춰 답한다.**
+        #
+        # 전에는 /api 가 아니면 무엇이든 로그인 HTML 을 돌려줬다. 그래서
+        # `<img>` 나 `<script>` 가 HTML 을 받아 "깨진 파일" 로 보였고,
+        # 콘솔에는 디코드 실패만 남아 원인을 알 수 없었다.
+        #
+        # 화면을 보러 온 요청(주소창 이동)은 Accept 에 text/html 을 담는다.
+        # 그 경우에만 로그인 화면을 준다.
+        accept = (self.headers.get("Accept") or "")
+        wants_page = "text/html" in accept
         if path.startswith("/api"):
             _json_resp(self, 401, {"error": "로그인이 필요합니다", "login": "/login"})
-        else:
+        elif wants_page:
             self._serve_login()
+        else:
+            _json_resp(self, 401, {"error": "로그인이 필요합니다",
+                                   "login": "/login", "path": path[:120]})
         return True
 
     def _login(self) -> None:

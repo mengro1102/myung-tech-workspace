@@ -62,6 +62,27 @@ export default function ProjectsTab({ focusId, onFocused }:
     setOpenId(focusId);
     onFocused?.();
   }, [focusId, onFocused]);
+
+  /* 결재 카드의 "이 프로젝트의 산출물 열기" 가 보내는 신호.
+   *
+   *  App → ProjectsTab 으로 prop 을 내리려면 ApprovalBox 까지 세 겹을
+   *  지나야 한다. 이 한 번을 위해 세 컴포넌트의 서명을 바꾸는 것은
+   *  과하므로 이벤트로 받는다. */
+  useEffect(() => {
+    const onOpen = (e: Event) => {
+      const id = (e as CustomEvent<string>).detail;
+      if (!id) return;
+      setOpenId(id);
+      // 결재함은 화면 위에 있고 프로젝트 카드는 아래에 있다. 열기만 하고
+      // 두면 사장님 눈에는 아무 일도 안 일어난 것으로 보인다.
+      requestAnimationFrame(() => {
+        document.getElementById(`pj-${id}`)
+          ?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      });
+    };
+    window.addEventListener('mt:open-project', onOpen);
+    return () => window.removeEventListener('mt:open-project', onOpen);
+  }, []);
   const [detail, setDetail]   = useState<ProjectRow | null>(null);
   const [idea, setIdea]       = useState('');
   const [busy, setBusy]       = useState(false);
@@ -187,8 +208,10 @@ export default function ProjectsTab({ focusId, onFocused }:
         {rows.map(p => {
           const open = openId === p.id;
           const needsMe = p.status === 'awaiting_approval' || p.status === 'paused';
+          // id 는 결재 카드에서 "산출물 열기" 로 건너올 때 스크롤 목표가 된다.
           return (
-            <article key={p.id} className={`pj-card ${p.status} ${needsMe ? 'needs-me' : ''}`}>
+            <article key={p.id} id={`pj-${p.id}`}
+                     className={`pj-card ${p.status} ${needsMe ? 'needs-me' : ''}`}>
               <button className="pj-card-head" onClick={() => toggle(p.id)}
                       aria-expanded={open}>
                 <span className={`pj-dot ${p.status}`} aria-hidden="true" />

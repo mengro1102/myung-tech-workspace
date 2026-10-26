@@ -69,6 +69,15 @@ const PSTATUS: Record<string, { label: string; cls: string }> = {
  *  **원문을 대신하지 않는다.** 뽑아서 위로 올릴 뿐이고, 본문은 그대로
  *  「내용 보기」로 읽을 수 있다.
  */
+/** 결재의 파일 경로에서 프로젝트 id 를 꺼낸다.
+ *
+ *  결재 행에는 `project_id` 가 없다. 대신 `file_path` 가
+ *  `projects/prj-8e0a1ba2/....md` 라서 거기 들어 있다. */
+function projIdOf(a: ApprovalRow): string {
+  const m = (a.file_path || '').match(/projects\/(prj-[a-z0-9]+)/i);
+  return m?.[1] ?? '';
+}
+
 function raiseGaps(body: string): { notDone: string[]; todo: string[] } {
   if (!body) return { notDone: [], todo: [] };
 
@@ -389,6 +398,18 @@ export default function ApprovalBox({ open: boxOpen, onToggle, focusId,
                       <span className="hint">
                         문서의 「방법」 절에서 가져왔습니다. 전체는 「내용 보기」로.
                       </span>
+                      {/* 가는 길을 준다. 전에는 "산출물에서 표본 검증으로
+                          하실 수 있습니다" 라고만 적어 두고 **그 산출물이
+                          어디 있는지는 말하지 않았다** — 결재함 아래로
+                          스크롤해 프로젝트를 찾아 열어야 나온다. */}
+                      {projIdOf(a) && (
+                        <button className="ceo-appr-raise-go"
+                                onClick={() => window.dispatchEvent(
+                                  new CustomEvent('mt:open-project',
+                                                  { detail: projIdOf(a) }))}>
+                          이 프로젝트의 산출물 열기 → 📄 프롬프트 · 🔎 방법 · 🔁 일관성 · ✋ 표본 검증
+                        </button>
+                      )}
                     </div>
                   );
                 })()}

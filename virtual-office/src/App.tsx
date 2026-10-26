@@ -1179,25 +1179,25 @@ function MainScreen() {
       </header>
 
       {/* ── Tab Bar ── */}
-      <div className="hs-tabs">
-        <button className={`hs-tab ${activeTab === 'main' ? 'active' : ''}`} onClick={() => setActiveTab('main')}>
-          💬 메인
-        </button>
-        <button className={`hs-tab ${activeTab === 'office' ? 'active' : ''}`} onClick={() => setActiveTab('office')}>
-          🏢 사무실
-        </button>
-        <button className={`hs-tab ${activeTab === 'agents' ? 'active' : ''}`} onClick={() => setActiveTab('agents')}>
-          🤖 에이전트
-        </button>
-        <button className={`hs-tab ${activeTab === 'projects' ? 'active' : ''}`} onClick={() => setActiveTab('projects')}>
-          🚀 프로젝트
-        </button>
-        {/* 전에는 '📝 노트' 였다 — 사장님 할 일 체크리스트. 그건 프로젝트
-            탭의 결재함 옆으로 옮겼다(둘 다 사람만 할 수 있는 일이다).
-            이 자리는 위키를 뒤지는 곳이 된다. */}
-        <button className={`hs-tab ${activeTab === 'knowledge' ? 'active' : ''}`} onClick={() => setActiveTab('knowledge')}>
-          🧬 지식베이스
-        </button>
+      {/* 탭. 아이콘과 글자를 **따로** 둔다 — 모바일에서는 아래 고정 바로
+          바뀌면서 위아래로 쌓아야 하는데, 한 덩어리 글자면 쌓을 수 없다.
+          PC 에서는 CSS 가 가로로 붙여 전과 똑같이 보인다. */}
+      <div className="hs-tabs" role="tablist" aria-label="화면">
+        {([['main', '💬', '메인'],
+           ['office', '🏢', '사무실'],
+           ['agents', '🤖', '에이전트'],
+           ['projects', '🚀', '프로젝트'],
+           /* 전에는 '📝 노트' 였다 — 사장님 할 일 체크리스트. 그건 프로젝트
+              탭의 결재함 옆으로 옮겼다(둘 다 사람만 할 수 있는 일이다).
+              이 자리는 위키를 뒤지는 곳이 된다. */
+           ['knowledge', '🧬', '지식베이스']] as const).map(([id, ico, name]) => (
+          <button key={id} role="tab" aria-selected={activeTab === id}
+                  className={`hs-tab ${activeTab === id ? 'active' : ''}`}
+                  onClick={() => setActiveTab(id)}>
+            <span className="hs-tab-ico" aria-hidden="true">{ico}</span>
+            <span className="hs-tab-label">{name}</span>
+          </button>
+        ))}
       </div>
 
       {/* ── Knowledge Tab — 위키를 IDE 처럼 뒤지고 논문처럼 읽는다 ── */}

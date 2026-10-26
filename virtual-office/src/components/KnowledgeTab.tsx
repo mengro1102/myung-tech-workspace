@@ -539,9 +539,12 @@ interface ViewProps {
   /** `[[slug]]` 를 실제 문서로 옮긴다. 문서가 없는 slug 면 undefined 를
    *  돌려주고, 렌더러는 그걸 눌리지 않는 회색 꼬리표로 그린다. */
   resolveSlug: (slug: string) => string | undefined;
+  /** PDF 를 창 전체로 넓히기. PDF 일 때만 보인다. */
+  wide: boolean;
+  onWide: () => void;
 }
 
-function KbViewer({ file, doc, busy, onNavPath, resolveSlug }: ViewProps) {
+function KbViewer({ file, doc, busy, onNavPath, resolveSlug, wide, onWide }: ViewProps) {
   const bodyRef = useRef<HTMLDivElement>(null);
 
   // 문서를 바꾸면 맨 위로. 안 올리면 긴 논문을 읽던 자리에 새 문서의
@@ -594,6 +597,12 @@ function KbViewer({ file, doc, busy, onNavPath, resolveSlug }: ViewProps) {
           <div className="kb-doc-badges">
             <span className="kb-badge ref">PDF 원문</span>
             <span className="kb-doc-meta">{size(file.size)} · 로컬 수정 {when(file.mtime)}</span>
+            {/* 머리글·트리·목차가 PDF 의 높이를 가져간다. 바깥을 스크롤되게
+                만들면 iframe 이 잘리므로, 대신 다른 칸을 잠시 치운다. */}
+            <button className="kb-wide" onClick={onWide}
+                    title={wide ? '원래대로' : '창 전체로 넓혀 봅니다'}>
+              {wide ? '↙ 원래대로' : '⛶ 넓게 보기'}
+            </button>
           </div>
           <h1 className="kb-doc-title">{file.title}</h1>
           <div className="kb-doc-path">{file.path}</div>
@@ -813,6 +822,10 @@ export default function KnowledgeTab() {
      이웃 노드를 못 본다 — read_file 과 지식 그래프를 스스로 쓰게 두는
      쪽이 낫다. */
   const [asking, setAsking] = useState(false);
+  /* PDF 를 창 전체로. 트리·목차·머리글을 잠시 치워 iframe 에 높이를
+     넘긴다. 바깥 페이지를 스크롤되게 만드는 쪽은 답이 아니다 — iframe 은
+     높이가 정해져야 안쪽 뷰어가 제 스크롤을 갖는다. */
+  const [wide, setWide] = useState(false);
   /* md 는 서버가 준 abs_path 를 쓴다. PDF 는 doc 을 받지 않으므로 트리가
      준 위키 루트에 상대 경로를 붙인다 — **루트를 화면에 박아 두지
      않는다.** 박아 두면 위키를 옮긴 날 조용히 틀린 경로를 맹비서에게
@@ -844,11 +857,16 @@ export default function KnowledgeTab() {
   };
 
   return (
-    <div className="kb-root">
+    /* `reading` — 문서를 연 상태. 폰에서는 이 클래스가 붙으면 트리를
+       접고 본문이 화면을 전부 쓴다. 세 칸을 동시에 보여 주면 본문이
+       3분의 1로 줄어 논문을 읽을 수 없다. PC 에서는 아무 영향이 없다. */
+    <div className={`kb-root ${file ? 'reading' : ''}`
+                    + `${wide && file?.kind === 'pdf' ? ' wide' : ''}`}>
       <KbSidebar tree={tree} cur={file?.path ?? ''} onPick={pick} />
       <KbViewer file={file} doc={doc} busy={busy}
                 onNavPath={p => void openPath(p)}
-                resolveSlug={resolveSlug} />
+                resolveSlug={resolveSlug}
+                wide={wide} onWide={() => setWide(v => !v)} />
       <KbRail doc={file?.kind === 'pdf' ? null : doc} />
 
       {/* 떠 있는 묻기 버튼.
@@ -859,6 +877,15 @@ export default function KnowledgeTab() {
        *
        *  패널이 열리면 숨긴다. 같은 자리(오른쪽 아래)에 패널이 뜨므로
        *  그대로 두면 버튼이 패널 밑에 깔린다. */}
+      {/* 폰에서 트리를 접으므로 **돌아갈 길**이 필요하다. 없으면 문서
+          하나를 연 뒤 목록으로 갈 방법이 사라진다. PC 에서는 트리가 늘
+          보이므로 숨긴다(CSS). */}
+      {file && (
+        <button className="kb-back" onClick={() => { setFile(null); setDoc(null); writeHash(''); }}>
+          ← 목록
+        </button>
+      )}
+
       {file && !asking && (
         <button className="kb-ask-fab" onClick={() => setAsking(true)}
                 title="보고 계신 문서에 대해 맹비서에게 묻습니다">
