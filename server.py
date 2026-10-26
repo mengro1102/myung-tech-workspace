@@ -1537,23 +1537,89 @@ color:#e8ecf8;font:15px/1.6 system-ui,-apple-system,"Malgun Gothic",sans-serif}
 form{width:min(92vw,340px);padding:28px;background:#141a2e;border:1px solid #263152;
 border-radius:14px}
 h1{margin:0 0 4px;font-size:19px}p{margin:0 0 20px;color:#8f9bc0;font-size:13px}
-input{width:100%;box-sizing:border-box;padding:12px;font-size:16px;border-radius:9px;
-border:1px solid #2f3a5e;background:#0d1224;color:#e8ecf8}
+/* 눈 버튼이 글자 위에 겹치므로 입력칸의 오른쪽을 비워 둔다. 안 비우면
+   긴 열쇠의 끝 글자가 아이콘 밑으로 들어가 안 보인다. */
+input{width:100%;box-sizing:border-box;padding:12px 46px 12px 12px;font-size:16px;
+border-radius:9px;border:1px solid #2f3a5e;background:#0d1224;color:#e8ecf8}
+.field{position:relative}
+/* 보기/가리기. 버튼이라 Tab 으로 닿고 Enter 로 눌린다 — 아이콘을 div 로
+   두면 키보드만 쓰는 사람에게는 없는 것과 같다. */
+.eye{position:absolute;top:50%;right:6px;transform:translateY(-50%);
+width:34px;height:34px;display:grid;place-items:center;padding:0;margin:0;
+border:0;border-radius:8px;background:transparent;color:#8f9bc0;cursor:pointer}
+.eye:hover{color:#e8ecf8;background:#1b2340}
+.eye:focus-visible{outline:2px solid #5b6cff;outline-offset:1px}
+.eye svg{width:19px;height:19px;display:block}
 button{width:100%;margin-top:12px;padding:12px;font-size:15px;font-weight:600;
 border:0;border-radius:9px;background:#5b6cff;color:#fff;cursor:pointer}
 .err{margin-top:12px;color:#ff8f8f;font-size:13px;min-height:1.2em}
 </style></head><body>
 <form onsubmit="go(event)">
 <h1>명테크</h1><p>외부 접속입니다. 접근 열쇠를 넣어 주세요.</p>
+<div class="field">
 <input id="k" type="password" autocomplete="current-password" autofocus>
+<button type="button" class="eye" id="eye" onclick="peek()"
+ aria-label="열쇠 보기" aria-pressed="false" title="열쇠 보기">
+<svg id="eyeOn" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+ stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>
+</svg>
+<svg id="eyeOff" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+ stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:none">
+<path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/>
+<path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/>
+<path d="M14.12 14.12a3 3 0 1 1-4.24-4.24"/><path d="M1 1l22 22"/>
+</svg>
+</button></div>
 <button>들어가기</button><div class="err" id="e"></div></form>
 <script>
-async function go(ev){ev.preventDefault();var e=document.getElementById('e');
-e.textContent='';var r=await fetch('/api/auth/login',{method:'POST',
-headers:{'Content-Type':'application/json'},
-body:JSON.stringify({key:document.getElementById('k').value})});
-var d=await r.json().catch(function(){return {}});
-if(r.ok&&d.ok){location.href='/';}else{e.textContent=d.error||'열쇠가 맞지 않습니다';}}
+/* 열쇠 보기/가리기.
+ *
+ * type 만 바꾸면 **커서가 끝으로 튄다** — 가운데를 고치던 중이면 자리를
+ * 잃는다. 그래서 선택 범위를 기억했다가 되돌린다.
+ *
+ * 누른 뒤 입력칸으로 포커스를 돌려준다. 안 그러면 보이게 해 놓고 다시
+ * 칸을 눌러야 해서, 한 번 할 일이 두 번이 된다. */
+function peek(){
+  var k=document.getElementById('k'), b=document.getElementById('eye');
+  var on=k.type==='password';
+  var s=k.selectionStart, e=k.selectionEnd;
+  k.type=on?'text':'password';
+  b.setAttribute('aria-pressed',String(on));
+  b.setAttribute('aria-label',on?'열쇠 가리기':'열쇠 보기');
+  b.title=on?'열쇠 가리기':'열쇠 보기';
+  document.getElementById('eyeOn').style.display=on?'none':'block';
+  document.getElementById('eyeOff').style.display=on?'block':'none';
+  k.focus();
+  try{k.setSelectionRange(s,e);}catch(_){}
+}
+async function go(ev){
+  ev.preventDefault();
+  var e=document.getElementById('e'), k=document.getElementById('k');
+  var btn=document.querySelector('button[type=submit],form button:not(.eye)');
+  e.textContent='';
+  if(btn){btn.disabled=true;}
+  var msg='';
+  try{
+    var r=await fetch('/api/auth/login',{method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({key:k.value})});
+    var d=await r.json().catch(function(){return {};});
+    if(r.ok&&d.ok){location.href='/';return;}
+    msg=d.error||'열쇠가 맞지 않습니다';
+  }catch(err){
+    /* **fetch 자체가 실패한 경우.** 전에는 여기서 예외가 그대로 터져
+       화면이 아무 반응 없이 멈췄다 — 사장님은 버튼이 안 눌린 줄 안다.
+       폰이 터널 밖으로 나갔거나 PC 가 잠들면 실제로 일어난다. */
+    msg='서버에 닿지 못했습니다. 연결을 확인해 주세요.';
+  }finally{
+    if(btn){btn.disabled=false;}
+    /* 실패 화면은 그대로 남는다. 보기를 켜 둔 채였다면 열쇠가 노출된 채
+       방치되므로 **어느 실패 경로든** 되돌린다. */
+    if(k.type==='text'){peek();}
+  }
+  e.textContent=msg;
+}
 </script></body></html>"""
 
 
@@ -1588,24 +1654,45 @@ class Handler(BaseHTTPRequestHandler):
                 return True
         return False
 
+    def _serve_login(self) -> None:
+        body = LOGIN_PAGE.encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(body)
+
     def _blocked(self, path: str) -> bool:
         """막았으면 True — 호출한 쪽은 즉시 리턴해야 한다."""
         if not ACCESS_KEY:
             return False
-        if path == "/login" or path.startswith("/api/auth/"):
+        if path.startswith("/api/auth/"):
             return False
+
+        # `/login` 은 **로그인 화면을 준다.** 전에는 "막지 않음" 으로만 두어
+        # 그대로 흘러갔고, SPA 껍데기가 나왔다. 그 껍데기는 /api 를 부르다
+        # 401 을 받고, 그 401 이 다시 `login: "/login"` 을 가리켜 **제자리를
+        # 맴돌았다.** 401 의 안내가 실제로 닿는 곳이 되게 한다.
+        #
+        # 이미 들어와 있는 사람이 /login 을 치면 앱으로 보낸다 — 들어와
+        # 있는데 또 열쇠를 묻는 것은 말이 안 된다.
+        if path == "/login":
+            if self._local_direct() or self._has_session():
+                self.send_response(302)
+                self.send_header("Location", "/")
+                self.send_header("Cache-Control", "no-store")
+                self.end_headers()
+            else:
+                self._serve_login()
+            return True
+
         if self._local_direct() or self._has_session():
             return False
         if path.startswith("/api"):
             _json_resp(self, 401, {"error": "로그인이 필요합니다", "login": "/login"})
         else:
-            body = LOGIN_PAGE.encode("utf-8")
-            self.send_response(200)
-            self.send_header("Content-Type", "text/html; charset=utf-8")
-            self.send_header("Content-Length", str(len(body)))
-            self.send_header("Cache-Control", "no-store")
-            self.end_headers()
-            self.wfile.write(body)
+            self._serve_login()
         return True
 
     def _login(self) -> None:
