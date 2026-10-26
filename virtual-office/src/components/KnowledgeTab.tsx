@@ -31,7 +31,8 @@
  * 같이 흔든다. 위키 문서에만 필요한 것이라 여기 둔다.
  */
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { AskContext } from './AskHermes';
+import { threadKey, type AskContext } from './AskHermes';
+import { useThread } from './askStore';
 import AssistantFace from './AssistantFace';
 import {
   api,
@@ -826,6 +827,9 @@ export default function KnowledgeTab() {
      넘긴다. 바깥 페이지를 스크롤되게 만드는 쪽은 답이 아니다 — iframe 은
      높이가 정해져야 안쪽 뷰어가 제 스크롤을 갖는다. */
   const [wide, setWide] = useState(false);
+  /* 이 문서의 대화 줄기. 패널이 닫혀 있어도 떠 있는 버튼이 "답하는 중" ·
+     "새 답 도착" 을 보여 주려면 여기서도 읽어야 한다. */
+  const thread = useThread(file ? threadKey({ kind: 'knowledge', key: file.path, label: file.title }) : '');
   /* md 는 서버가 준 abs_path 를 쓴다. PDF 는 doc 을 받지 않으므로 트리가
      준 위키 루트에 상대 경로를 붙인다 — **루트를 화면에 박아 두지
      않는다.** 박아 두면 위키를 옮긴 날 조용히 틀린 경로를 맹비서에게
@@ -836,6 +840,9 @@ export default function KnowledgeTab() {
 
   const askCtx: AskContext | null = !file ? null : {
     kind: 'knowledge',
+    // 문서마다 대화 줄기가 따로다. A 를 묻다가 B 로 옮겨도 A 의 대화는
+    // 남아 있다가, A 로 돌아오면 다시 보인다.
+    key: file.path,
     label: file.title,
     brief: [
       '[지식베이스 문서]',
@@ -887,10 +894,17 @@ export default function KnowledgeTab() {
       )}
 
       {file && !asking && (
-        <button className="kb-ask-fab" onClick={() => setAsking(true)}
-                title="보고 계신 문서에 대해 맹비서에게 묻습니다">
+        <button className={`kb-ask-fab ${thread.busy ? 'busy' : ''} ${thread.unread ? 'unread' : ''}`}
+                onClick={() => setAsking(true)}
+                title={thread.busy ? '답을 기다리는 중 — 눌러서 보기'
+                     : thread.unread ? '새 답이 왔습니다' : '보고 계신 문서에 대해 맹비서에게 묻습니다'}>
           <span className="kb-ask-fab-ico"><AssistantFace size={17} /></span>
-          <span className="kb-ask-fab-txt">맹비서에게 묻기</span>
+          {/* 닫혀 있어도 무슨 일이 일어나고 있는지 보여야 한다. 안 그러면
+              닫은 뒤 답이 오는지 알 길이 없다. */}
+          <span className="kb-ask-fab-txt">
+            {thread.busy ? '답하는 중…' : thread.unread ? '새 답 도착' : '맹비서에게 묻기'}
+          </span>
+          {thread.unread && <span className="kb-ask-fab-dot" aria-hidden="true" />}
         </button>
       )}
 

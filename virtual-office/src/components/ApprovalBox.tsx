@@ -157,6 +157,8 @@ export default function ApprovalBox({ open: boxOpen, onToggle, focusId,
       '버튼은 사장님 손에 있습니다.');
     return {
       kind: 'approval',
+      // 결재마다 대화 줄기가 따로다.
+      key: a.id,
       label: a.label,
       brief: lines.join('\n'),
       presets: [

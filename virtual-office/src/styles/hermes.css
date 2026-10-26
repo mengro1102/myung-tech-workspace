@@ -6202,68 +6202,12 @@ button.pj-deliv-item[aria-expanded="true"] { background: var(--glass-hi); border
     text-align: left;
   }
 
-  /* ── 탭을 아래 고정 바로 ──────────────────────────────────────
-     위쪽 가로 띠에 다섯을 욱여넣었더니 **글자가 안 보였다**(사장님
-     화면). 375px 를 다섯으로 나누면 69px 인데, 폰의 글꼴 배율이 조금만
-     커져도 잘려 사라진다.
-
-     아래 고정 바는 폰의 표준이고 엄지가 닿는다. 아이콘 위·글자 아래로
-     쌓으면 같은 폭에 10px 글자가 넉넉히 들어간다. */
-  .hs-tabs {
-    /* **고정 위치를 쓰지 않는다.** `position: fixed; bottom: 0` 은 모바일
-       브라우저의 주소창 표시/숨김에 따라 화면 밖으로 밀려난다 — 실제로
-       사장님 폰에서 탭 바가 통째로 사라졌다.
-       `.hs-root` 가 세로 flex 이므로 `order` 로 맨 끝에 보내면 **보이는
-       영역의 바닥**에 확실히 붙는다. */
-    order: 99;
-    position: relative;
-    z-index: 70;
-    flex: 0 0 auto;
-    display: flex;
-    align-items: stretch;
-    overflow: visible;        /* 잘릴 일이 없다 */
-    /* 기본 규칙이 `height: 38px` 로 못 박아 둔다. 그대로 두면 56px 짜리
-       탭이 38px 상자 밖으로 넘치는데, 상자가 화면 맨 아래에 고정돼
-       있으므로 **글자가 화면 밖으로 밀려 사라진다**(실측). */
-    height: auto;
-    min-height: 56px;
-    padding: 0;
-    gap: 0;
-    border-bottom: 0;
-    background: var(--bg2);
-    border-top: 1px solid var(--border);
-    /* 홈 인디케이터(아이폰)·제스처 바(안드로이드) 영역을 피한다. */
-    padding-bottom: env(safe-area-inset-bottom, 0px);
-    box-shadow: 0 -6px 18px rgba(0, 0, 0, .3);
-  }
-  .hs-tab {
-    flex: 1 1 0;
-    min-width: 0;
-    /* 기본의 `height: 38px` 를 푼다 — min-height 만 주면 상자는 38px 로
-       잡히고 내용만 넘친다. */
-    height: auto;
-    min-height: 56px;
-    padding: 6px 2px;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    gap: 3px;
-    /* 글자가 잘리지 않게 **넘치면 줄바꿈**이 아니라 줄이기. 10px 는
-       '지식베이스' 5글자가 69px 에 들어가는 크기다. */
-    font-size: 10px;
-    line-height: 1.1;
-    white-space: nowrap;
-    border-bottom: 0;
-    border-top: 2px solid transparent;
-  }
-  .hs-tab.active {
-    border-top-color: var(--primary);
-    background: var(--primary-dim);
-  }
-
-  /* 탭 바가 흐름 안에 있으므로 자리를 비울 필요가 없다. padding 을 주면
-     오히려 바 **아래**에 빈 띠가 생긴다. */
+  /* ── 탭 띠: 폰에서는 없앤다 ───────────────────────────────────
+     아래 고정 바로 옮겼다가(1차) 입력칸 바로 밑이라 **채팅을 치다 탭을
+     눌러 화면이 바뀌는** 사고가 났다(사장님). ☰ 드로어가 같은 일을 하므로
+     폰에서는 탭 띠를 아예 그리지 않는다. 위쪽 띠로 되돌리지도 않는다 —
+     거기서는 글자가 안 보였다. */
+  .hs-tabs { display: none; }
 
   /* ── 머리말 ──────────────────────────────────────────────────
      로고·시작 버튼이 26px 였다. 머리말은 늘 보이는 곳이라 제일 자주
@@ -6597,3 +6541,50 @@ button.pj-deliv-item[aria-expanded="true"] { background: var(--glass-hi); border
   min-height: 48px;
 }
 .hs-nav-more:active { background: var(--bg3); color: var(--text); }
+
+/* ── 묻기: 그만 기다리기 / 중단 안내 ─────────────────────────────── */
+.ask-stop {
+  display: inline-block;
+  margin-top: 8px;
+  padding: 6px 12px;
+  min-height: 34px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--muted);
+  font-size: 11.5px;
+  cursor: pointer;
+}
+.ask-stop:hover { color: #f87171; border-color: #f87171; }
+/* 중단했다는 기록. 대화가 아니라 상태이므로 말풍선이 아니라 한 줄로. */
+.ask-note {
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--muted);
+  padding: 2px 4px;
+  word-break: keep-all;
+}
+
+/* ── 떠 있는 버튼이 대화 상태를 보여 준다 ─────────────────────────
+   닫혀 있어도 무슨 일이 일어나고 있는지 보여야 한다. 안 그러면 닫은 뒤
+   답이 오고 있는지 알 길이 없다. */
+.kb-ask-fab.busy { border-color: #f59e0b; }
+.kb-ask-fab.busy .kb-ask-fab-ico { animation: kb-ask-pulse 1.4s ease-in-out infinite; }
+.kb-ask-fab.unread { border-color: #34d399; background: rgba(52, 211, 153, .14); }
+.kb-ask-fab { position: absolute; }   /* 점의 기준점 — 이미 absolute 지만 명시 */
+.kb-ask-fab-dot {
+  position: absolute;
+  top: -3px; right: -3px;
+  width: 11px; height: 11px;
+  border-radius: 50%;
+  background: #34d399;
+  box-shadow: 0 0 0 2px var(--bg);
+}
+@keyframes kb-ask-pulse {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: .45; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .kb-ask-fab.busy .kb-ask-fab-ico { animation: none; }
+}
+/* 폰(글자를 숨긴 동그란 버튼)에서도 상태 점은 보인다. */

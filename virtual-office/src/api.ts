@@ -665,7 +665,13 @@ export const api = {
       fetch(`${API_BASE}/assistant/sessions/${encodeURIComponent(sid)}/messages`)
     ),
   /** 이어서 대화. 길다 — 디스코드 실측 27초, 서버 타임아웃 180초. */
-  assistantChat: (sid: string, message: string) =>
+  /** `signal` 로 **기다리기를 그만둘** 수 있다.
+   *
+   *  주의: 이건 브라우저가 응답을 기다리지 않게 할 뿐이다. 맹비서의 세션
+   *  채팅 경로에는 서버 쪽 중단 API 가 없어서(`/v1/runs/{id}/stop` 은 다른
+   *  경로용이다), 맹비서는 하던 생각을 끝까지 하고 그 답은 세션 기록에
+   *  남는다. 화면이 그것을 "답" 으로 보여 주지 않을 뿐이다. */
+  assistantChat: (sid: string, message: string, signal?: AbortSignal) =>
     // message 는 **객체**다 — {role, content}. 문자열로 적어 뒀다가
     // React 가 "Objects are not valid as a React child" 로 죽었다.
     safeJson<{ message?: AssistantMessage | string; session_id?: string;
@@ -673,6 +679,7 @@ export const api = {
       fetch(`${API_BASE}/assistant/sessions/${encodeURIComponent(sid)}/chat`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ message }),
+        signal,
       })
     ),
   listLessons: () =>
