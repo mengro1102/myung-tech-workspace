@@ -6588,3 +6588,64 @@ button.pj-deliv-item[aria-expanded="true"] { background: var(--glass-hi); border
   .kb-ask-fab.busy .kb-ask-fab-ico { animation: none; }
 }
 /* 폰(글자를 숨긴 동그란 버튼)에서도 상태 점은 보인다. */
+
+/* ── 첨부한 파일 ──────────────────────────────────────────────────
+   보내기 전까지 입력창 아래 줄에 보이고 ✕ 로 뺄 수 있다. 어디 붙었는지
+   안 보이면 "첨부됐나?" 를 확인할 길이 없다. */
+.hs-attached {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+.hs-attached-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 180px;
+  padding: 2px 4px 2px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--bg2);
+  font-size: 11px;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.hs-attached-item button {
+  flex: 0 0 auto;
+  min-width: 22px; min-height: 22px;
+  border: 0; background: none;
+  color: var(--muted); cursor: pointer; font-size: 11px;
+}
+.hs-attached-item button:hover { color: #f87171; }
+.hs-attached-busy { font-size: 11px; color: var(--muted); }
+@media (max-width: 768px) {
+  .hs-attached-item { max-width: 130px; }
+  .hs-attached-item button { min-width: 32px; min-height: 32px; }
+}
+
+/* 맡기기 모드 표시. 숨은 모드는 "왜 맹비서가 답을 안 하지?" 를 만든다. */
+.hs-mode-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 4px 2px 9px;
+  border-radius: 999px;
+  border: 1px solid #f59e0b;
+  background: rgba(245, 158, 11, .14);
+  color: #f0b357;
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.hs-mode-chip button {
+  min-width: 22px; min-height: 22px;
+  border: 0; background: none; color: inherit; cursor: pointer; font-size: 11px;
+}
+.hs-plus-item.on { background: rgba(245, 158, 11, .14); }
+@media (max-width: 768px) {
+  .hs-mode-chip button { min-width: 32px; min-height: 32px; }
+}

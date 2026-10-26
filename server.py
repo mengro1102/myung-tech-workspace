@@ -795,6 +795,15 @@ def _kb_sync(message: str = "brain inject"):
 # ── Phase 4: 에이전트 워크스페이스 (FS/터미널) ────────────────
 # 에이전트 산출물(SFT 데이터셋·Colab 노트북)이 떨어지는 곳.
 WORKSPACE_ROOT = (ROOT / "workspace").resolve()
+
+# 대화창 첨부. 맹비서가 read_file 로 읽을 수 있는 자리.
+UPLOAD_DIR = WORKSPACE_ROOT / "uploads"
+# 읽기 **전에** 거절할 크기. base64 로 오므로 실제 파일은 이것의 3/4 쯤이다.
+UPLOAD_MAX_BODY = 34 * 1024 * 1024            # ≈ 25MB 파일
+# 맹비서가 읽을 수 있는 것만. 실행 가능한 것은 받지 않는다 — 맹비서에게는
+# 터미널이 있어서, 실행 파일을 그 손 닿는 곳에 두면 안 된다.
+UPLOAD_EXT = {".pdf", ".md", ".txt", ".csv", ".json", ".png", ".jpg",
+              ".jpeg", ".webp", ".gif", ".docx", ".xlsx", ".html"}
 WORKSPACE_ROOT.mkdir(parents=True, exist_ok=True)
 # ── 에이전트 데이터 로드 ──────────────────────────────────────
 
@@ -1753,6 +1762,47 @@ class Handler(BaseHTTPRequestHandler):
         self._cors()
         self.end_headers()
 
+    def _upload(self) -> None:
+        import base64
+        import re as _re
+        size = int(self.headers.get("Content-Length", 0) or 0)
+        # 읽기 **전에** 거절한다. 다 읽고 거절하면 메모리가 이미 찬 뒤다.
+        if size <= 0:
+            _json_resp(self, 400, {"error": "보낸 파일이 없습니다"})
+            return
+        if size > UPLOAD_MAX_BODY:
+            _json_resp(self, 413, {"error": "파일이 너무 큽니다 (25MB 까지)"})
+            return
+        body = self._read_body()
+        name = str(body.get("name") or "").strip()
+        data = str(body.get("data") or "")
+        ext = Path(name).suffix.lower()
+        if ext not in UPLOAD_EXT:
+            _json_resp(self, 415, {
+                "error": f"받지 않는 형식입니다: {ext or '(확장자 없음)'}",
+                "allowed": sorted(UPLOAD_EXT)})
+            return
+        try:
+            raw = base64.b64decode(data.split(",", 1)[-1], validate=True)
+        except Exception:  # noqa: BLE001
+            _json_resp(self, 400, {"error": "파일을 읽지 못했습니다 (base64)"})
+            return
+
+        # 이름을 새로 짓는다. 경로 구분자·`..`·제어문자를 지워 경로 이탈을
+        # 막고, 시각을 앞에 붙여 같은 이름이 덮어쓰지 않게 한다.
+        stem = _re.sub(r'[\\/:*?"<>|\x00-\x1f]', "_", Path(name).stem)
+        stem = stem.replace("..", "_").strip(" ._")[:80] or "file"
+        UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+        dest = (UPLOAD_DIR / f"{time.strftime('%Y%m%d-%H%M%S')}-{stem}{ext}").resolve()
+        if not dest.is_relative_to(UPLOAD_DIR.resolve()):
+            _json_resp(self, 400, {"error": "파일 이름이 올바르지 않습니다"})
+            return
+        dest.write_bytes(raw)
+        _json_resp(self, 200, {"ok": True, "path": str(dest),
+                               "name": dest.name, "size": len(raw),
+                               "kind": "image" if ext in (".png", ".jpg", ".jpeg",
+                                                          ".webp", ".gif") else "file"})
+
     def _read_body(self) -> dict:
         length = int(self.headers.get("Content-Length", 0))
         if length == 0:
@@ -2593,6 +2643,11 @@ class Handler(BaseHTTPRequestHandler):
         # 근거 조회·검토·방법 절을 전부 우회하는 경로였다 — 자세한 사유는
         # RAISE_COMPLIANCE.md 의 "운영 사이클을 들어낸 이유" 절.
         # 아래가 POST 사슬의 첫 분기다. elif 로 두면 영원히 안 걸린다.
+
+        # ── POST /api/upload  (대화창 파일 첨부)
+        if path == "/api/upload":
+            self._upload()
+            return
 
         # ── POST /api/assistant/*  (맹비서 중계 — 쓰기)
         #

@@ -149,10 +149,19 @@ async function fetchBriefing(): Promise<string> {
   }
 }
 
+/* 입력창 위 칩. **누르면 바로 보내는 완결된 질문**만 둔다 — 빈칸을
+   채워야 하는 것(위키에서 찾기 등)은 `+` 메뉴가 입력칸에 틀을 깔아 준다.
+
+   전에는 셋 다 부서로 직행했다("시장 트렌드 리포트 요청" 한 줄을 주제
+   없이 학술연구부에). 맹비서를 거치지 않아 근거 조회도 없었고, 눌러 본
+   뒤 입력창이 그 부서에 묶여 맹비서로 돌아갈 길이 없었다. */
 const QUICK_CHIPS = [
-  { icon: '📊', label: '시장 트렌드 리포트 요청',              dept: 'research_dept' },
-  { icon: '✍️', label: '콘텐츠 기획안 작성',                  dept: 'content_dept' },
-  { icon: '💰', label: '매출·채널 현황 보고',                  dept: 'finance_dept' },
+  { icon: '📰', label: '오늘 들어온 논문',
+    prompt: '오늘 위키에 새로 들어온 논문을 분야별로 묶어서 정리해줘. 각 분야에서 눈여겨볼 1편씩.' },
+  { icon: '💡', label: '위키로 할 만한 것',
+    prompt: '위키로 할 만한 것 제안해줘 — 빈 곳, 교차 연결, 글감.' },
+  { icon: '🧭', label: '지금 할 일 정리',
+    prompt: '지금 내가 처리해야 할 것(결재·멈춘 프로젝트 포함)과 우선순위를 정리해줘.' },
 ];
 
 function nowStr() {
@@ -943,13 +952,89 @@ function MainScreen() {
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
-      send(input, dept);
+      submit();
     }
   };
 
+  /* ── 첨부 ─────────────────────────────────────────────────────
+     파일은 보낼 때 메시지에 **경로**로 붙는다. 맹비서는 그 경로를 직접
+     읽는다. 올린 파일은 수집물과 같이 취급된다(HERMES_UNTRUSTED_PATHS) —
+     인터넷에서 받은 PDF 안의 지시문은 사장님 말이 아니다. */
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [attached, setAttached] = useState<{ path: string; name: string; kind: string }[]>([]);
+  const [attachBusy, setAttachBusy] = useState(false);
+  /* 맡기기 모드 — 보내면 맹비서가 아니라 명테크에 **프로젝트로** 넣는다.
+     웹 채팅 경로에는 슬래시 처리가 없어서, 모델에게 맡기면 스킬을 안
+     불러오고 빗나갔다(실측). 그래서 화면이 직접 만든다. */
+  const [delegateMode, setDelegateMode] = useState(false);
+
+  const attachFile = async (f: File) => {
+    if (f.size > 25 * 1024 * 1024) {
+      pushNotif('warning', `파일이 너무 큽니다 — 25MB 까지 (${(f.size / 1048576).toFixed(1)}MB)`);
+      return;
+    }
+    setAttachBusy(true);
+    const r = await api.upload(f);
+    setAttachBusy(false);
+    if (!r?.ok || !r.path) {
+      pushNotif('error', `첨부하지 못했습니다 — ${r?.error ?? '서버 응답 없음'}`);
+      return;
+    }
+    setAttached(prev => [...prev, { path: r.path!, name: r.name ?? f.name, kind: r.kind ?? 'file' }]);
+    setTimeout(() => textareaRef.current?.focus(), 0);
+  };
+
+  /** 첨부를 메시지 앞에 경로로 붙인다. 맹비서가 무엇으로 읽을지도 적는다 —
+   *  그림을 read_file 로 열면 깨진 바이트만 본다. */
+  const withAttachments = (text: string) => {
+    if (!attached.length) return text;
+    const lines = attached.map(a => a.kind === 'image'
+      ? `- 그림(vision_analyze 로 볼 것): ${a.path}`
+      : `- 파일(read_file 로 읽을 것): ${a.path}`);
+    return `[첨부 ${attached.length}개]\n${lines.join('\n')}\n\n${text.trim() || '첨부한 것을 읽고 요약해줘.'}`;
+  };
+
+  /** 보내기. 입력창은 늘 맹비서에게 간다. */
+  const submit = () => {
+    if (running || (!input.trim() && !attached.length)) return;
+    if (delegateMode) { void delegate(); return; }
+    const msg = withAttachments(input);
+    setAttached([]);
+    send(msg, 'assistant');
+  };
+
+  /** 명테크에 프로젝트로 맡긴다. 오케스트레이터가 계획을 세우고 부서에
+   *  나눈다. **바로 돌지 않는다** — 계획이 서면 결재함에 착수 승인이
+   *  올라온다. 그걸 대화창에 분명히 적는다: "부서가 일을 시작했다" 고
+   *  오해하면 승인을 안 하고 기다리게 된다. */
+  const delegate = async () => {
+    const idea = withAttachments(input).trim();
+    if (!idea) return;
+    setInput('');
+    setAttached([]);
+    setDelegateMode(false);
+    pushMsg({ role: 'user', sender: '사장님', text: `🚀 명테크에 맡기기\n\n${idea}` });
+    const r = await api.createProject(idea);
+    if (!r?.ok) {
+      pushMsg({ role: 'assistant', sender: BRIEFING_SENDER,
+                text: `⚠️ 맡기지 못했습니다 — ${r?.error ?? '서버 응답 없음'}` });
+      return;
+    }
+    pushMsg({ role: 'assistant', sender: BRIEFING_SENDER, text: [
+      '■ 명테크에 맡겼습니다',
+      '',
+      `프로젝트 \`${r.project?.id ?? '?'}\``,
+      '',
+      '1. 오케스트레이터가 계획을 세웁니다 (수십 초)',
+      '2. 산출물마다 맡을 부서가 정해집니다',
+      '3. **결재함에 「착수 승인」이 올라옵니다** — 승인하셔야 부서가 움직입니다',
+      '',
+      '→ 프로젝트 탭에서 진행을 보실 수 있습니다.',
+    ].join('\n') });
+  };
+
   const handleChip = (chip: typeof QUICK_CHIPS[0]) => {
-    setDept(chip.dept);
-    send(chip.label, chip.dept);
+    send(chip.prompt, 'assistant');
   };
 
   const activeAgents = agents.filter(a => a.status !== 'Idle').length;
@@ -1407,9 +1492,10 @@ function MainScreen() {
           agents={agents}
           cycleStatus={cycleStatus}
           taskSummary={taskSummary}
+          // **한 번짜리.** 입력창을 그 부서에 묶지 않는다 — 묶으면 맹비서로
+          // 돌아올 길이 없다(대화 상대 피커를 없앴다).
           onDeptChat={(d, msg) => {
             setActiveTab('main');
-            setDept(d);
             setTimeout(() => send(msg, d), 100);
           }}
         />
@@ -1422,7 +1508,7 @@ function MainScreen() {
         <AgentManageTab
           agents={agents}
           onDeploy={() => setShowTeam(true)}
-          onDeptChat={(d, msg) => { setActiveTab('main'); setDept(d); setTimeout(() => send(msg, d), 100); }}
+          onDeptChat={(d, msg) => { setActiveTab('main'); setTimeout(() => send(msg, d), 100); }}
         />
       )}
 
@@ -1668,71 +1754,82 @@ function MainScreen() {
               ref={textareaRef}
               className="hs-composer-text"
               rows={1}
-              placeholder={dept === 'assistant'
-                ? (assistantUp === false
-                    ? '맹비서가 꺼져 있습니다 — 1. 전체 시작.bat 을 실행해 주세요'
-                    : '맹비서에게 무엇이든… (Enter 전송 · Shift+Enter 줄바꿈)')
-                : `${deptLabels[dept] ?? dept}에 지시… (Enter 전송 · Shift+Enter 줄바꿈)`}
+              placeholder={delegateMode
+                ? '명테크에 맡길 일을 적어 주세요 — 무엇을, 왜, 어디까지'
+                : assistantUp === false
+                  ? '맹비서가 꺼져 있습니다 — 1. 전체 시작.bat 을 실행해 주세요'
+                  : '맹비서에게 무엇이든… (Enter 전송 · Shift+Enter 줄바꿈)'}
               value={input}
               onChange={e => setInput(e.target.value)}
               onKeyDown={handleKeyDown}
             />
 
             <div className="hs-composer-bar">
-              {/* `+` — 대화 상대와 빠른 명령. 되는 것만 넣는다. */}
+              {/* `+` — 첨부와 빠른 명령.
+                  **대화 상대는 고르지 않는다.** 입력창은 늘 맹비서다. 부서에
+                  일을 시키려면 맹비서에게 「명테크에 맡기기」 — 오케스트레이터가
+                  계획을 세우고 부서에 나눈다(사장님이 그리신 구조). 전에는
+                  맹비서에게 그 연결이 없어서 부서를 직접 골라야 했다. */}
               <div className="hs-plus-wrap">
                 <button className={`hs-plus ${plusOpen ? 'open' : ''}`}
-                        aria-label="도구와 대화 상대"
+                        aria-label="첨부와 빠른 명령"
                         aria-expanded={plusOpen}
                         onClick={() => setPlusOpen(v => !v)}>
                   {plusOpen ? '✕' : '＋'}
                 </button>
 
+                {/* 파일 고르기 창. 메뉴 밖에 둔다 — 메뉴가 닫히며 사라지면
+                    고르는 도중 입력 요소가 없어진다. */}
+                <input ref={fileRef} type="file" hidden
+                       accept=".pdf,.md,.txt,.csv,.json,.png,.jpg,.jpeg,.webp,.gif,.docx,.xlsx,.html"
+                       onChange={e => { const f = e.target.files?.[0]; e.target.value = '';
+                                        if (f) void attachFile(f); }} />
+
                 {plusOpen && (
                   <>
                     <div className="hs-plus-backdrop" onClick={() => setPlusOpen(false)} />
                     <div className="hs-plus-menu" role="menu">
-                      <div className="hs-plus-head">대화 상대</div>
-                      {([['assistant', '', '맹비서', '세션이 이어집니다'],
-                         ['orchestration_dept', '🧠', '오케스트레이션', '부서에 일을 시킵니다'],
-                         ['research_dept', '🔬', '학술연구', ''],
-                         ['finance_dept', '📈', '금융투자', ''],
-                         ['dev_dept', '⚙️', '개발', ''],
-                         ['content_dept', '✍️', '콘텐츠', '']] as const).map(
-                        ([id, icon, name, hint]) => (
-                          <button key={id} className={`hs-plus-item ${dept === id ? 'on' : ''}`}
-                                  onClick={() => { setDept(id); setPlusOpen(false); }}>
-                            {/* 맹비서만 얼굴을 쓴다. 부서는 역할 아이콘이 맞다 —
-                                사람이 아니라 기능이기 때문이다. */}
-                            <span className="hs-plus-ico">
-                              {id === 'assistant' ? <AssistantFace size={17} /> : icon}
-                            </span>
-                            <span className="hs-plus-name">{name}</span>
-                            {hint && <span className="hs-plus-hint">{hint}</span>}
-                            {dept === id && <span className="hs-plus-check">✓</span>}
-                          </button>
-                        ))}
+                      <button className="hs-plus-item"
+                              onClick={() => { setPlusOpen(false); fileRef.current?.click(); }}>
+                        <span className="hs-plus-ico">📎</span>
+                        <span className="hs-plus-name">파일 첨부</span>
+                        <span className="hs-plus-hint">PDF·그림·문서 · 25MB</span>
+                      </button>
 
                       <div className="hs-plus-sep" />
                       <div className="hs-plus-head">
-                        빠른 명령 <span>맹비서 스킬</span>
+                        빠른 명령 <span>입력칸에 틀을 깔아 드립니다</span>
                       </div>
-                      {/* 맹비서가 실제로 가진 스킬에 붙은 것만 넣는다.
-                          없는 명령을 넣으면 눌렀을 때 아무 일도 안 일어난다. */}
-                      {([['/현황', '📊', '명테크 현황', 'myungtech-status'],
-                         ['/결재', '📋', '결재 대기 보기', 'myungtech-approvals'],
-                         ['위키에서 찾아줘: ', '🧬', '위키에서 찾기', 'wiki-prompts']] as const).map(
-                        ([text, icon, name, skill]) => (
-                          <button key={text} className="hs-plus-item"
+                      {/* 명테크 안에서 쓸모 있는 것만. 「명테크 현황」「결재 대기
+                          보기」는 뺐다 — 이미 명테크 화면을 보고 계시고, 사장님
+                          차례 버튼과 프로젝트 탭이 같은 것을 한 번에 보여 준다. */}
+                      {/* 맡기기는 틀이 아니라 **모드**다 — 보내면 화면이 직접
+                          프로젝트를 만든다(모델 라우팅을 거치지 않는다). */}
+                      <button className={`hs-plus-item ${delegateMode ? 'on' : ''}`}
+                              onClick={() => {
+                                setDelegateMode(true);
+                                setPlusOpen(false);
+                                setTimeout(() => textareaRef.current?.focus(), 0);
+                              }}>
+                        <span className="hs-plus-ico">🚀</span>
+                        <span className="hs-plus-name">명테크에 맡기기</span>
+                        <span className="hs-plus-hint">부서에 나눔 · 착수는 결재</span>
+                      </button>
+                      {([['위키에서 찾아줘: ',           '🧬', '위키에서 찾기',   '개념·논문·인물'],
+                         ['arXiv 에서 논문 찾아줘: ',     '📄', 'arXiv 논문 찾기', '위키에 넣을지 판단'],
+                         ['이 링크 읽고 요약해줘: ',       '🔗', '링크 읽고 요약',  '웹페이지·PDF 주소'],
+                         ['이 글 사람답게 고쳐줘:\n',     '✍️', '글 다듬기',       'AI 티 걷어내기'],
+                         ['이거 기억해줘: ',              '🧠', '기억해 두기',     '약어·선호·설정']] as const).map(
+                        ([text, icon, name, hint]) => (
+                          <button key={name} className="hs-plus-item"
                                   onClick={() => {
-                                    setDept('assistant');       // 스킬은 맹비서의 것이다
                                     setInput(prev => prev ? `${text}${prev}` : text);
                                     setPlusOpen(false);
                                     setTimeout(() => textareaRef.current?.focus(), 0);
                                   }}>
                             <span className="hs-plus-ico">{icon}</span>
                             <span className="hs-plus-name">{name}</span>
-                            <span className="hs-plus-hint">{skill}</span>
+                            <span className="hs-plus-hint">{hint}</span>
                           </button>
                         ))}
                     </div>
@@ -1740,13 +1837,28 @@ function MainScreen() {
                 )}
               </div>
 
-              {/* 지금 누구와 말하는지는 늘 보여야 한다 — `+` 안에 숨기면
-                  부서에 지시하던 중인 것을 잊는다. */}
-              <span className="hs-composer-who">
-                {dept === 'assistant'
-                  ? <><AssistantFace size={15} /> 맹비서</>
-                  : `${deptLabels[dept] ?? dept}`}
-              </span>
+              {/* 맡기기 모드는 눈에 보여야 한다. 숨은 모드는 "왜 맹비서가 답을
+                  안 하지?" 를 만든다. ✕ 로 풀면 다시 맹비서와 대화한다. */}
+              {delegateMode && (
+                <span className="hs-mode-chip" title="보내면 명테크에 프로젝트로 맡깁니다">
+                  🚀 맡기기
+                  <button aria-label="맡기기 모드 끄기" onClick={() => setDelegateMode(false)}>✕</button>
+                </span>
+              )}
+
+              {/* 첨부한 파일. 보내기 전까지 여기 보이고 ✕ 로 뺄 수 있다. */}
+              {attached.length > 0 && (
+                <span className="hs-attached">
+                  {attached.map(a => (
+                    <span key={a.path} className="hs-attached-item" title={a.path}>
+                      {a.kind === 'image' ? '🖼' : '📄'} {a.name.replace(/^\d{8}-\d{6}-/, '')}
+                      <button aria-label="첨부 빼기"
+                              onClick={() => setAttached(prev => prev.filter(x => x.path !== a.path))}>✕</button>
+                    </span>
+                  ))}
+                </span>
+              )}
+              {attachBusy && <span className="hs-attached-busy">올리는 중…</span>}
 
               {/* 이름이 없어서 보조 기술에는 "버튼" 으로만 읽혔다 —
                   화면의 아이콘 버튼 중 유일하게 이름이 없었다. */}
@@ -1754,8 +1866,8 @@ function MainScreen() {
                 className="hs-send-btn"
                 aria-label="보내기"
                 title={running ? '답을 기다리는 중입니다' : '보내기 (Enter)'}
-                onClick={() => send(input, dept)}
-                disabled={running || !input.trim()}
+                onClick={submit}
+                disabled={running || (!input.trim() && !attached.length)}
               >↑</button>
             </div>
           </div>

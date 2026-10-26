@@ -682,6 +682,24 @@ export const api = {
         signal,
       })
     ),
+  /** 대화창 첨부. 파일을 이 PC 의 `workspace/uploads/` 에 두고 경로를 받는다.
+   *  맹비서는 그 경로를 read_file(글·PDF) 이나 vision(그림) 으로 읽는다 —
+   *  세션 채팅은 글만 받으므로 경로를 건네는 것이 유일한 길이다. */
+  upload: async (file: File) => {
+    const data = await new Promise<string>((ok, bad) => {
+      const r = new FileReader();
+      r.onload = () => ok(String(r.result));
+      r.onerror = () => bad(r.error);
+      r.readAsDataURL(file);
+    });
+    return safeJson<{ ok?: boolean; path?: string; name?: string; size?: number;
+                      kind?: 'image' | 'file'; error?: string }>(
+      fetch(`${API_BASE}/upload`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: file.name, data }),
+      })
+    );
+  },
   listLessons: () =>
     safeJson<{ items: LessonRow[]; stats: { count: number; rejections: number } }>(
       fetch(`${API_BASE}/lessons`)
