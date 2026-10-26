@@ -60,6 +60,36 @@ const PSTATUS: Record<string, { label: string; cls: string }> = {
   cancelled: { label: '취소', cls: 'off' },
 };
 
+/** 문서 본문에서 RAISE 의 「하지 않은 것」·「할일」을 뽑는다.
+ *
+ *  산출물에는 `## 방법 — 이 문서는 이렇게 만들어졌습니다` 절이 붙는다.
+ *  그 안의 `### 4. 하지 않은 것` 이 승인 전에 가장 중요한 줄이다 —
+ *  요구했으나 못 채운 것이 거기 적힌다.
+ *
+ *  **원문을 대신하지 않는다.** 뽑아서 위로 올릴 뿐이고, 본문은 그대로
+ *  「내용 보기」로 읽을 수 있다.
+ */
+function raiseGaps(body: string): { notDone: string[]; todo: string[] } {
+  if (!body) return { notDone: [], todo: [] };
+
+  // 「4. 하지 않은 것」 절 — 다음 `###` 또는 문서 끝까지.
+  const m = body.match(/^###\s*\d*\.?\s*하지 않은 것\s*$([\s\S]*?)(?=^###\s|\z)/m);
+  const notDone = (m?.[1] ?? '')
+    .split('\n')
+    // 굵게 표시(`**`)는 떼어 낸다. 그대로 두면 "...않았습니다.**" 처럼
+    // 기호가 문장 끝에 붙어 읽기 불편하다.
+    .map(l => l.replace(/^[\s>*\-·]+/, '').replace(/\*\*/g, '').trim())
+    .filter(l => l.length > 1 && !l.startsWith('#'))
+    .slice(0, 6);
+
+  // `[할일]` 은 절 위치와 무관하게 본문 어디에나 있다.
+  const todo = (body.match(/^.*\[할일\].*$/gm) ?? [])
+    .map(l => l.replace(/^[\s>*\-·`]+/, '').replace(/`/g, '').trim())
+    .slice(0, 5);
+
+  return { notDone, todo };
+}
+
 interface Props {
   /** 접힘/펼침. 기본은 펼쳐진 상태 — 결재는 막힌 일이라 먼저 보여야 한다. */
   open: boolean;
@@ -339,6 +369,29 @@ export default function ApprovalBox({ open: boxOpen, onToggle, focusId,
                 {a.file_path && (
                   <div className="ceo-appr-path">workspace/{a.file_path}</div>
                 )}
+
+                {/* ── RAISE: 승인 전에 봐야 할 것 ──────────────────
+                    문서의 「방법」 절에 적힌 **하지 않은 것**과 남은 할일을
+                    카드 위로 끌어올린다. 전에는 본문 2,985자 맨 아래에
+                    묻혀 있었고, 승인 버튼은 그 스크롤 박스 밖이라 **읽지
+                    않고 누를 수 있었다.**
+
+                    요약이 원문을 대신하지는 않는다 — 본문은 「내용 보기」
+                    에 그대로 있다. */}
+                {(() => {
+                  const g = raiseGaps(body);
+                  if (!g.notDone.length && !g.todo.length) return null;
+                  return (
+                    <div className="ceo-appr-raise">
+                      <b>승인 전에 — 이 문서가 하지 않은 것</b>
+                      {g.notDone.map((l, i) => <p key={`n${i}`}>· {l}</p>)}
+                      {g.todo.map((l, i) => <p key={`t${i}`} className="todo">◻ {l}</p>)}
+                      <span className="hint">
+                        문서의 「방법」 절에서 가져왔습니다. 전체는 「내용 보기」로.
+                      </span>
+                    </div>
+                  );
+                })()}
 
                 {open === a.id && body && (
                   <pre className="ceo-appr-body">{body.slice(0, 4000)}

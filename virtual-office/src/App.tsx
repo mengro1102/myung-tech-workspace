@@ -362,12 +362,27 @@ function MainScreen() {
     return () => window.removeEventListener('hashchange', onHash);
   }, []);
 
+  /* 사장님 손이 필요한 것의 내역.
+   *
+   *  **결재만이 아니다.** 멈춘 프로젝트도 사장님이 보셔야 다시 간다.
+   *  그래서 `사장님 차례` 는 둘의 합이다 — 옆의 "결재 대기 3" 과 숫자가
+   *  다른 이유가 그것이고, 전에는 화면이 그 이유를 어디에도 적지 않았다.
+   *
+   *  한 군데서 세어 버튼·툴팁·브라우저 탭이 **같은 값**을 쓰게 한다.
+   *  전에는 브라우저 탭이 결재만 세어 "(3)" 인데 버튼은 "4" 였다. */
+  const waitAppr = activity.approvals_pending ?? 0;
+  const waitProj = activity.projects_waiting ?? 0;
+  const waitTotal = waitAppr + waitProj;
+  const waitParts = [
+    waitAppr ? `결재 ${waitAppr}` : '',
+    waitProj ? `멈춘 프로젝트 ${waitProj}` : '',
+  ].filter(Boolean);
+
   useEffect(() => {
-    const n = ceoApprovals.length;
     const where = ({ main: '메인', office: '사무실', agents: '에이전트',
                      projects: '프로젝트', knowledge: '지식베이스' } as const)[activeTab];
-    document.title = `${n > 0 ? `(${n}) ` : ''}명테크 · ${where}`;
-  }, [ceoApprovals.length, activeTab]);
+    document.title = `${waitTotal > 0 ? `(${waitTotal}) ` : ''}명테크 · ${where}`;
+  }, [waitTotal, activeTab]);
   const [ceoProjectList, setCeoProjectList] = useState<ProjectRow[]>([]);
   /* 카드를 눌렀을 때 '그것' 이 열리게 하는 표식. 예전에는 결재 카드는 아무
    * 반응이 없었고, 프로젝트 카드는 셋 다 똑같이 프로젝트 탭만 열어서 어느
@@ -1001,23 +1016,24 @@ function MainScreen() {
           style={cycleStatus === 'waiting' ? { background: '#f59e0b' }
                : cycleStatus === 'executing' ? { background: '#14b8a6' } : {}}
           title={cycleStatus === 'executing' ? '진행 중인 일을 봅니다'
-               : cycleStatus === 'waiting' ? '사장님 손이 필요한 것을 봅니다'
+               : cycleStatus === 'waiting'
+                 ? `사장님 손이 필요한 것 ${waitTotal}건 — ${waitParts.join(' + ') || '없음'}`
                : '새 프로젝트를 시작합니다'}
-          onClick={() => {
-            // 사람을 기다리는 것이 있으면 그쪽이 먼저다 — 기계는 기다리면
-            // 되지만 사장님이 멈춰 있으면 아무것도 진행되지 않는다.
-            if (cycleStatus === 'waiting' && (activity.approvals_pending ?? 0) > 0
-                && (activity.projects_waiting ?? 0) === 0) {
-              setActiveTab('projects');
-            } else {
-              setActiveTab('projects');
-            }
-          }}
+          // 결재든 멈춘 프로젝트든 **둘 다 프로젝트 탭**에 있다. 전에는
+          // if/else 양쪽이 같은 일을 하는 분기가 남아 있었다.
+          onClick={() => setActiveTab('projects')}
         >
           {cycleStatus === 'executing'
             ? `⚡ 일하는 중 ${(activity.projects_running ?? 0) + (activity.tasks_busy ?? 0)}`
             : cycleStatus === 'waiting'
-            ? `✋ 사장님 차례 ${(activity.projects_waiting ?? 0) + (activity.approvals_pending ?? 0)}`
+            ? <>✋ 사장님 차례 {waitTotal}
+                {/* 내역을 작게 덧붙인다. 전에는 숫자만 있어서, 옆의
+                    "결재 대기 3" 과 달라 보이는 이유를 알 수 없었다
+                    (사장님 지적). 둘 다 맞는 숫자인데 세는 것이 다르다. */}
+                {waitParts.length > 1 && (
+                  <span className="hs-start-sub">{waitParts.join(' + ')}</span>
+                )}
+              </>
             : '＋ 새 프로젝트'}
         </button>
 
