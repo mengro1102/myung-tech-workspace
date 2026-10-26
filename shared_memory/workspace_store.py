@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 import os
 import tempfile
+import threading
 import time
 import uuid
 from pathlib import Path
@@ -31,6 +32,10 @@ STORE_DIR.mkdir(parents=True, exist_ok=True)
 # 컬렉션마다 파일 하나. 이름을 화이트리스트로 두어 경로 이탈을 원천 차단한다.
 COLLECTIONS = ("tasks", "services", "approvals", "notes", "notif_state",
                "lessons")
+
+# 읽고-고치고-저장 사이에 다른 스레드가 끼면 늦게 쓴 쪽이 덮는다. 휴지통이
+# 노트를 빼는 사이 화면이 체크를 하면 빼낸 노트가 되살아난다.
+_LOCK = threading.RLock()
 
 
 def _path(collection: str) -> Path:
@@ -70,30 +75,33 @@ def add(collection: str, item: dict) -> dict:
     row = dict(item)
     row.setdefault("id", uuid.uuid4().hex[:12])
     row.setdefault("created_at", time.time())
-    rows = load(collection)
-    rows.append(row)
-    _save(collection, rows)
+    with _LOCK:
+        rows = load(collection)
+        rows.append(row)
+        _save(collection, rows)
     return row
 
 
 def update(collection: str, item_id: str, patch: dict) -> dict | None:
-    rows = load(collection)
-    for row in rows:
-        if row.get("id") == item_id:
-            row.update(patch)
-            row["updated_at"] = time.time()
-            _save(collection, rows)
-            return row
-    return None
+    with _LOCK:
+        rows = load(collection)
+        for row in rows:
+            if row.get("id") == item_id:
+                row.update(patch)
+                row["updated_at"] = time.time()
+                _save(collection, rows)
+                return row
+        return None
 
 
 def remove(collection: str, item_id: str) -> bool:
-    rows = load(collection)
-    kept = [r for r in rows if r.get("id") != item_id]
-    if len(kept) == len(rows):
-        return False
-    _save(collection, kept)
-    return True
+    with _LOCK:
+        rows = load(collection)
+        kept = [r for r in rows if r.get("id") != item_id]
+        if len(kept) == len(rows):
+            return False
+        _save(collection, kept)
+        return True
 
 
 # ── 에이전트가 쓰는 입구 ────────────────────────────────────────────────

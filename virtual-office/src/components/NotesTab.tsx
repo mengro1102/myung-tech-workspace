@@ -1,5 +1,13 @@
 /**
- * 할 일 — 사장님이 해야 할 일을 스레드 카드로 쌓고, 체크하고, 지운다.
+ * 노트 — 사장님이 적은 노트와 에이전트가 올린 노트를 한 칸에 둔다.
+ *
+ * 이름이 '노트 → 할 일 → 노트' 로 돌아왔다(사장님 지시). 여기 쌓이는 것은
+ * 할 일만이 아니라 메모·기록도 있어서 '할 일' 이 좁았다. 프로젝트 탭에서
+ * 결재함 · 배운 것 · 프로젝트 **다음**, 맨 아래 칸이다.
+ *
+ * 지우기는 전부 휴지통으로 간다(되살릴 수 있고, 맹비서가 디스코드로
+ * 알린다). 「선택」 으로 여럿을, 「전체 선택」 으로 보이는 것을 다 고른다 —
+ * 사장님 노트와 에이전트 노트를 같이 고를 수 있다.
  *
  * 전에는 '노트' 탭이었다. 지금은 **프로젝트 탭 안의 한 칸**이다 — 결재함
  * 바로 아래. 둘 다 사람만 할 수 있는 일이고, 탭을 나눠 두면 "내가 뭘 해야
@@ -14,8 +22,9 @@
  * 쓰므로 백엔드에 새로 만든 것은 컬렉션 이름 하나뿐이다.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { api, type StoreItem } from '../api';
+import { api, type StoreItem, type TrashKind } from '../api';
 import { Markdown } from './GuideModal';
+import { useTrashUndo, TrashUndoBar } from './TrashBox';
 
 interface Note extends StoreItem {
   title?: string;
@@ -72,6 +81,10 @@ export default function NotesTab() {
   const [open, setOpen] = useState<Record<string, boolean>>({});
   const [err, setErr] = useState('');
   const titleRef = useRef<HTMLInputElement>(null);
+  // 고르기. 열쇠는 "note:<id>" / "task:<id>" — 두 그릇의 id 가 겹칠 수 있다.
+  const [selecting, setSelecting] = useState(false);
+  const [sel, setSel] = useState<Set<string>>(new Set());
+  const undo = useTrashUndo();
 
   const load = useCallback(async () => {
     // 둘을 같이 받는다. 한 번의 화면 갱신으로 둘 다 맞게 하려는 것이다 —
@@ -99,18 +112,27 @@ export default function NotesTab() {
     }
   }, []);
 
-  const removeTask = useCallback(async (t: AgentTask) => {
-    // 한 줄짜리라 가볍게 지우게 뒀는데, 이건 **에이전트가 사장님께 올린
-    // 요청**이다. 지우면 그 요청은 아무 데도 남지 않는다. 바로 아래 노트
-    // 삭제는 묻는데 이것만 안 묻는 것도 앞뒤가 안 맞는다.
-    if (!window.confirm(`에이전트가 올린 이 일을 지울까요?
-
-${t.text ?? ''}`)) return;
-    const keep = agentTasks;
-    setAgentTasks(prev => prev.filter(x => x.id !== t.id));
-    const r = await api.storeRemove('tasks', t.id);
-    if (!r) { setAgentTasks(keep); setErr('태스크를 지우지 못했습니다'); }
-  }, [agentTasks]);
+  /** 휴지통으로. 한 건이든 여럿이든 이 길 하나다.
+   *
+   *  한 건은 묻지 않는다 — 되돌리기 띠가 뜨고 휴지통에서도 되살릴 수 있다.
+   *  여럿은 묻는다. 전체 선택 한 번에 수십 건이 갈 수 있다. */
+  const toTrash = useCallback(async (keys: string[], ask: boolean) => {
+    if (!keys.length) return;
+    if (ask && !window.confirm(
+      `노트 ${keys.length}건을 휴지통으로 옮길까요?\n\n`
+      + '휴지통에서 되살릴 수 있고, 맹비서가 디스코드로 알려 드립니다.')) return;
+    const items = keys.map(k => {
+      const [kind, ...rest] = k.split(':');
+      return { kind: kind as TrashKind, id: rest.join(':') };
+    });
+    const r = await api.trashMove(items);
+    if (!r?.ok) { setErr(r?.error || '휴지통으로 옮기지 못했습니다'); return; }
+    const gone = new Set(keys);
+    setNotes(p => p.filter(n => !gone.has(`note:${n.id}`)));
+    setAgentTasks(p => p.filter(t => !gone.has(`task:${t.id}`)));
+    setSel(new Set()); setSelecting(false);
+    undo.show(r.moved);
+  }, [undo]);
 
   useEffect(() => { void load(); }, [load]);
 
@@ -164,23 +186,18 @@ ${t.text ?? ''}`)) return;
     if (!r?.ok) setNotes(p => p.map(x => (x.id === n.id ? { ...x, pinned: !next } : x)));
   };
 
-  // 삭제는 되돌릴 수 없으니 제목을 보여 주고 묻는다. 카드 하나 지우자고
-  // 모달을 띄우면 번거롭고, 안 물으면 손이 미끄러진다.
-  const remove = async (n: Note) => {
-    if (!window.confirm(`삭제할까요?\n\n${n.title || '(제목 없음)'}`)) return;
-    const keep = notes;
-    setNotes(p => p.filter(x => x.id !== n.id));
-    const r = await api.storeRemove('notes', n.id);
-    if (!r?.ok) { setNotes(keep); setErr('삭제하지 못했습니다'); }
-  };
-
   const clearDone = async () => {
     const done = notes.filter(n => n.done);
     if (!done.length) return;
-    if (!window.confirm(`끝난 노트 ${done.length}건을 지울까요?`)) return;
-    setNotes(p => p.filter(n => !n.done));
-    for (const n of done) await api.storeRemove('notes', n.id);
+    // 한 번에 보낸다. 전에는 한 건씩 지워서, 중간에 실패하면 반만 지워졌다.
+    await toTrash(done.map(n => `note:${n.id}`), true);
   };
+
+  const pick = (key: string) => setSel(prev => {
+    const n = new Set(prev);
+    if (n.has(key)) n.delete(key); else n.add(key);
+    return n;
+  });
 
   const shown = useMemo(() => {
     const rows = notes.filter(n =>
@@ -202,6 +219,15 @@ ${t.text ?? ''}`)) return;
       .sort((a, b) => (b.created_at ?? 0) - (a.created_at ?? 0)),
     [agentTasks, filter]);
 
+  // 「전체 선택」 은 **지금 보이는 것**만 고른다. 걸러서 안 보이는 것까지
+  // 지우면 무엇을 지웠는지 모르게 된다.
+  const visibleKeys = [
+    ...openTasks.map(t => `task:${t.id}`),
+    ...shown.map(n => `note:${n.id}`),
+  ];
+  const picked = visibleKeys.filter(k => sel.has(k));
+  const allOn = visibleKeys.length > 0 && picked.length === visibleKeys.length;
+
   return (
     <div className="hs-body nt-wrap">
       <div className="nt-head">
@@ -209,23 +235,44 @@ ${t.text ?? ''}`)) return;
             없다(지식베이스가 그 자리에 있다). 여기 쌓이는 것은 사람만 할
             수 있는 일이라, 바로 위 결재함과 같은 성질로 읽히게 바꾼다. */}
         <div className="nt-title">
-          📋 할 일
-          <span className="nt-count">{left ? `남은 일 ${left}` : '다 끝냈습니다'}</span>
+          📝 노트
+          <span className="nt-count">{left ? `남은 것 ${left}` : '다 끝냈습니다'}</span>
         </div>
-        <div className="nt-actions">
-          {(['todo', 'done', 'all'] as Filter[]).map(f => (
-            <button key={f}
-              className={`nt-filter ${filter === f ? 'on' : ''}`}
-              onClick={() => setFilter(f)}>
-              {f === 'todo' ? '할 일' : f === 'done' ? '끝남' : '전체'}
+        {selecting ? (
+          <div className="nt-actions">
+            <button className="nt-filter" onClick={() => setSel(allOn
+              ? new Set() : new Set(visibleKeys))}>
+              {allOn ? '선택 해제' : `전체 선택 (${visibleKeys.length})`}
             </button>
-          ))}
-          {notes.some(n => n.done) && (
-            <button className="nt-clear" onClick={clearDone}>끝난 것 비우기</button>
-          )}
-          <button className="nt-new" onClick={startNew}>+ 새 노트</button>
-        </div>
+            <button className="nt-danger" disabled={!picked.length}
+                    onClick={() => void toTrash(picked, picked.length > 1)}>
+              🗑 휴지통으로{picked.length ? ` (${picked.length})` : ''}
+            </button>
+            <button className="nt-filter" onClick={() => { setSelecting(false); setSel(new Set()); }}>
+              취소
+            </button>
+          </div>
+        ) : (
+          <div className="nt-actions">
+            {(['todo', 'done', 'all'] as Filter[]).map(f => (
+              <button key={f}
+                className={`nt-filter ${filter === f ? 'on' : ''}`}
+                onClick={() => setFilter(f)}>
+                {f === 'todo' ? '남은 것' : f === 'done' ? '끝남' : '전체'}
+              </button>
+            ))}
+            {notes.some(n => n.done) && (
+              <button className="nt-clear" onClick={clearDone}>끝난 것 비우기</button>
+            )}
+            {visibleKeys.length > 0 && (
+              <button className="nt-filter" onClick={() => setSelecting(true)}>선택</button>
+            )}
+            <button className="nt-new" onClick={startNew}>+ 새 노트</button>
+          </div>
+        )}
       </div>
+
+      <TrashUndoBar undo={undo} onRestored={() => void load()} />
 
       {err && <div className="nt-err" onClick={() => setErr('')}>{err} — 눌러서 닫기</div>}
 
@@ -239,11 +286,19 @@ ${t.text ?? ''}`)) return;
       {openTasks.length > 0 && (
         <section className="nt-agent">
           <div className="nt-agent-head">
-            🤖 에이전트가 올린 것
+            🤖 에이전트가 올린 노트
             <span>{openTasks.length}건 · 사장님이 눌러야 끝납니다</span>
           </div>
           {openTasks.map(t => (
-            <div key={t.id} className="nt-agent-row">
+            <div key={t.id} className={`nt-agent-row ${sel.has(`task:${t.id}`) ? 'picked' : ''}`}>
+              {selecting && (
+                <label className="pj-pick">
+                  <input type="checkbox" checked={sel.has(`task:${t.id}`)}
+                         onChange={() => pick(`task:${t.id}`)}
+                         aria-label={`${t.text ?? ''} 고르기`} />
+                  <span aria-hidden="true" />
+                </label>
+              )}
               <label className="nt-check">
                 <input type="checkbox" checked={!!t.done}
                        onChange={() => void toggleTask(t)}
@@ -255,8 +310,8 @@ ${t.text ?? ''}`)) return;
                 <span className="nt-agent-from">{DEPT[t.source] ?? t.source}</span>
               )}
               <span className="nt-agent-when">{when(t.created_at)}</span>
-              <button className="nt-agent-x" onClick={() => void removeTask(t)}
-                      title="지우기">✕</button>
+              <button className="nt-agent-x" onClick={() => void toTrash([`task:${t.id}`], false)}
+                      title="휴지통으로" aria-label="휴지통으로">✕</button>
             </div>
           ))}
         </section>
@@ -275,7 +330,7 @@ ${t.text ?? ''}`)) return;
       ) : !shown.length ? (
         <div className="nt-empty">
           {filter === 'done' ? '끝낸 노트가 없습니다.'
-            : filter === 'todo' ? '할 일이 없습니다. 새 노트로 쌓아 두세요.'
+            : filter === 'todo' ? '남은 노트가 없습니다. 새 노트로 쌓아 두세요.'
             : '아직 노트가 없습니다.'}
         </div>
       ) : (
@@ -287,8 +342,17 @@ ${t.text ?? ''}`)) return;
               onTitle={setDraftTitle} onBody={setDraftBody} onTag={setDraftTag}
               onSave={save} onCancel={cancel} />
           ) : (
-            <article key={n.id} className={`nt-card ${n.done ? 'done' : ''}`}>
+            <article key={n.id}
+                     className={`nt-card ${n.done ? 'done' : ''} ${sel.has(`note:${n.id}`) ? 'picked' : ''}`}>
               <div className="nt-card-head">
+                {selecting && (
+                  <label className="pj-pick">
+                    <input type="checkbox" checked={sel.has(`note:${n.id}`)}
+                           onChange={() => pick(`note:${n.id}`)}
+                           aria-label={`${n.title || '제목 없음'} 고르기`} />
+                    <span aria-hidden="true" />
+                  </label>
+                )}
                 {/* 실제 input 은 투명하게 덮어 두고 span 을 칠한다. 이름이
                     없으면 보조 기술에 "체크박스" 로만 읽히므로 제목을 준다. */}
                 <label className="nt-check">
@@ -312,7 +376,8 @@ ${t.text ?? ''}`)) return;
                     {n.pinned ? '📌' : '📍'}
                   </button>
                   <button onClick={() => startEdit(n)} title="고치기">✏️</button>
-                  <button onClick={() => remove(n)} title="삭제">🗑️</button>
+                  <button onClick={() => void toTrash([`note:${n.id}`], false)}
+                          title="휴지통으로" aria-label="휴지통으로">🗑️</button>
                 </div>
               </div>
               {open[n.id] && n.body && (

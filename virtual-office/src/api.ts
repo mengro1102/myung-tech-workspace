@@ -66,6 +66,14 @@ export interface KnowledgeHit { node: string; line: string; }
  *
  * 그래서 error 를 담아 보낸 응답은 그대로 넘긴다. 호출부는 이미 r.error 를
  * 확인하도록 되어 있다. */
+/** 휴지통 항목. project = 프로젝트, note = 사장님 노트, task = 에이전트가 올린 노트. */
+export type TrashKind = 'project' | 'note' | 'task';
+export interface TrashItem {
+  id: string; kind: TrashKind; kind_ko: string; ref: string; title: string;
+  deleted_at: number; origin: string;
+  linked: { approvals: number; lessons: number; events: number };
+}
+
 async function safeJson<T>(p: Promise<Response>): Promise<T | null> {
   try {
     const r = await p;
@@ -808,6 +816,23 @@ export const api = {
     ),
   deleteProject: (id: string) =>
     safeJson<{ ok: boolean }>(fetch(`${API_BASE}/projects/${id}`, { method: 'DELETE' })),
+
+  /* 휴지통. 대시보드의 삭제는 전부 여기로 간다 — 영구 삭제는 없다(맹비서만).
+   * 옮기면 맹비서가 디스코드로 알린다. */
+  trashList: () =>
+    safeJson<{ items: TrashItem[]; error?: string }>(fetch(`${API_BASE}/trash`)),
+  trashMove: (items: { kind: TrashKind; id: string }[]) =>
+    safeJson<{ ok: boolean; moved: TrashItem[]; missing: string[]; error?: string }>(
+      fetch(`${API_BASE}/trash`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ items }),
+      })),
+  trashRestore: (ids: string[]) =>
+    safeJson<{ ok: boolean; restored: TrashItem[]; failed: string[]; error?: string }>(
+      fetch(`${API_BASE}/trash/restore`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids }),
+      })),
 
   /* ── Phase 5: 장기기억 FT (SFT 데이터셋 + Colab 노트북) ── */
   longtermBuildDataset: (mode = 'sft') =>

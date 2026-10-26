@@ -628,6 +628,12 @@ import disk_guard
 import notify
 import file_proposals
 import projects
+import trash
+# 영구 삭제 열쇠를 미리 만들어 둔다. 맹비서 스크립트가 이 파일을 읽어 쓴다.
+try:
+    trash.purge_token()
+except OSError as _tok_exc:
+    print(f"[server] 휴지통 열쇠를 만들지 못했습니다: {_tok_exc}", file=sys.stderr)
 try:
     import integrations
 except Exception as _integ_exc:  # noqa: BLE001
@@ -1637,6 +1643,16 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):
         pass  # 조용하게
 
+    def _origin(self) -> str:
+        """휴지통 알림에 적는 "어디서 지웠나". 본인 행위인지 가리는 단서다."""
+        if self._local_direct():
+            return "이 PC(직접)"
+        h = self.headers
+        who = (h.get("X-Forwarded-For") or h.get("Cf-Connecting-Ip")
+               or self.client_address[0]).split(",")[0].strip()
+        user = h.get("Tailscale-User-Login") or ""
+        return f"원격 {who}" + (f" ({user})" if user else "")
+
     # ── 인증 ──────────────────────────────────────────────
     def _local_direct(self) -> bool:
         """이 PC 에서 직접 온 요청인가.
@@ -2221,6 +2237,13 @@ class Handler(BaseHTTPRequestHandler):
             except Exception as e:  # noqa: BLE001
                 _json_resp(self, 500, {"error": f"대화 기록을 읽지 못했습니다: {e}"})
 
+        # ── GET /api/trash  (휴지통 목록 — 본문은 싣지 않는다)
+        elif path == "/api/trash":
+            try:
+                _json_resp(self, 200, {"items": trash.listing()})
+            except Exception as e:  # noqa: BLE001
+                _json_resp(self, 500, {"error": f"휴지통을 읽지 못했습니다: {type(e).__name__}"})
+
         elif path == "/api/projects":
             rows = []
             for p in projects.load():
@@ -2535,15 +2558,21 @@ class Handler(BaseHTTPRequestHandler):
             if len(rest) != 2 or rest[0] not in workspace_store.COLLECTIONS:
                 _json_resp(self, 404, {"error": "Not found"})
                 return
+            # 노트(사장님 것 · 에이전트 것)는 바로 지우지 않고 휴지통으로.
+            # 이 길을 열어 두면 휴지통·알림을 건너뛰고 지울 수 있게 된다.
+            kind = {"notes": "note", "tasks": "task"}.get(rest[0])
+            if kind:
+                moved, _ = trash.move([{"kind": kind, "id": rest[1]}], self._origin())
+                _json_resp(self, 200, {"ok": bool(moved), "trashed": True})
+                return
             _json_resp(self, 200, {"ok": workspace_store.remove(rest[0], rest[1])})
 
         elif path.startswith("/api/projects/"):
+            # 프로젝트도 휴지통으로. 전에는 여기서 바로 지웠다(기록·이벤트).
+            # 이벤트는 휴지통이 같이 옮겨 두었다가 되살릴 때 돌려놓는다.
             pid = path.split("/api/projects/")[1]
-            ok = projects.remove(pid)
-            # 지운 프로젝트의 이벤트도 함께 지운다. 안 지우면 실시간 활동에
-            # "없는 프로젝트가 멈췄습니다" 가 계속 뜬다.
-            purged = message_broker.purge_events(pid) if ok else 0
-            _json_resp(self, 200, {"ok": ok, "purged_events": purged})
+            moved, _ = trash.move([{"kind": "project", "id": pid}], self._origin())
+            _json_resp(self, 200, {"ok": bool(moved), "trashed": True})
 
         elif path.startswith("/api/tasks/"):
             task_id = path.split("/api/tasks/")[1]
@@ -2719,6 +2748,64 @@ class Handler(BaseHTTPRequestHandler):
                 _json_resp(self, 404, {"error": f"알 수 없는 연동: {name}"})
                 return
             _json_resp(self, 200, {"ok": True, "status": integ.status()})
+
+        # ── POST /api/trash  {items:[{kind,id}]}  (휴지통으로 — 되돌릴 수 있다)
+        #
+        # 대시보드의 삭제는 전부 여기로 온다. 옮긴 뒤 맹비서가 디스코드로
+        # 알린다 — 사장님이 아닌 누가 지웠으면 그걸로 알아챈다.
+        elif path == "/api/trash":
+            body = self._read_body()
+            items = [i for i in (body.get("items") or []) if isinstance(i, dict)][:500]
+            if not items:
+                _json_resp(self, 400, {"error": "옮길 것을 골라 주세요"})
+                return
+            moved, missing = trash.move(items, self._origin())
+            _json_resp(self, 200, {"ok": bool(moved), "moved": moved, "missing": missing})
+
+        # ── POST /api/trash/restore  {ids:[…]} 또는 {all:true}
+        elif path == "/api/trash/restore":
+            body = self._read_body()
+            ids = None if body.get("all") is True else [str(x) for x in (body.get("ids") or [])]
+            if ids is not None and not ids:
+                _json_resp(self, 400, {"error": "되살릴 것을 골라 주세요"})
+                return
+            done, fails = trash.restore(ids)
+            _json_resp(self, 200, {"ok": bool(done), "restored": done, "failed": fails})
+
+        # ── POST /api/trash/purge  (영구 삭제 — 맹비서만)
+        #
+        # 대시보드는 여기 닿을 수 없다. 두 겹으로 막는다:
+        #   1. 이 PC 에서 직접 온 요청만 (터널을 지난 요청은 거절)
+        #   2. 이 PC 의 파일에만 있는 열쇠(X-MT-Purge-Token)
+        # 접속 키가 새도 브라우저로는 영구 삭제를 못 한다. 영구 삭제는
+        # scripts/mt_trash.py 가 하고, 그걸 부르는 것은 맹비서다.
+        elif path == "/api/trash/purge":
+            if not self._local_direct() or not trash.token_ok(
+                    self.headers.get("X-MT-Purge-Token") or ""):
+                _json_resp(self, 403, {"error": "영구 삭제는 맹비서를 통해서만 할 수 있습니다 "
+                                                "(`/휴지통`)."})
+                return
+            body = self._read_body()
+            ids = None if body.get("all") is True else [str(x) for x in (body.get("ids") or [])]
+            if ids is not None and not ids:
+                _json_resp(self, 400, {"error": "지울 것을 골라 주세요"})
+                return
+            code = str(body.get("code") or "").strip()
+            if not code:
+                # 1단계: 대상을 못 박고 확인 코드를 **디스코드 DM 으로만** 보낸다.
+                # 응답에는 코드를 싣지 않는다 — 맹비서도 모르게 하는 것이 요점이다.
+                targets, sent = trash.challenge(ids)
+                if not targets:
+                    _json_resp(self, 404, {"error": "휴지통에 그런 항목이 없습니다"})
+                    return
+                _json_resp(self, 200, {"ok": False, "challenge": True,
+                                       "sent": sent, "targets": targets})
+                return
+            reps, why = trash.confirm(code, ids)
+            if why:
+                _json_resp(self, 400, {"error": why})
+                return
+            _json_resp(self, 200, {"ok": bool(reps), "purged": reps})
 
         elif path == "/api/projects":
             body = self._read_body()

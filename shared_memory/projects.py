@@ -39,6 +39,7 @@ import json
 import os
 import re
 import tempfile
+import threading
 import time
 import uuid
 from datetime import date
@@ -53,6 +54,12 @@ except ImportError:      # 패키지로 부를 때 — `from shared_memory impor
 STORE_DIR = Path(__file__).resolve().parent / "store"
 STORE_DIR.mkdir(parents=True, exist_ok=True)
 FILE = STORE_DIR / "projects.json"
+
+# 쓰기는 전부 "읽고 → 고치고 → 통째로 저장" 이다. 실행기 스레드가 update 를
+# 하는 사이 화면이 remove 를 하면, 늦게 저장한 쪽이 먼저 저장한 쪽을 덮는다 —
+# 휴지통으로 보낸 프로젝트가 다시 살아나는 식이다. 한 프로세스 안의 경쟁이라
+# 잠금 하나로 충분하다(실행기는 server.py 의 스레드다).
+_LOCK = threading.RLock()
 
 # ── 상태 ────────────────────────────────────────────────────────────────
 #
@@ -187,14 +194,15 @@ def get(pid: str) -> dict | None:
 
 
 def update(pid: str, patch: dict) -> dict | None:
-    rows = load()
-    for p in rows:
-        if p.get("id") == pid:
-            p.update(patch)
-            p["updated_at"] = time.time()
-            _save(rows)
-            return p
-    return None
+    with _LOCK:
+        rows = load()
+        for p in rows:
+            if p.get("id") == pid:
+                p.update(patch)
+                p["updated_at"] = time.time()
+                _save(rows)
+                return p
+        return None
 
 
 # 인코딩이 깨진 입력(모지바케)을 가려내는 선. 실측으로 정했다:
@@ -271,19 +279,32 @@ def create(idea: str, title: str = "") -> dict:
         "created_at": time.time(),
         "updated_at": time.time(),
     }
-    rows = load()
-    rows.append(row)
-    _save(rows)
+    with _LOCK:
+        rows = load()
+        rows.append(row)
+        _save(rows)
     return row
 
 
 def remove(pid: str) -> bool:
-    rows = load()
-    kept = [p for p in rows if p.get("id") != pid]
-    if len(kept) == len(rows):
-        return False
-    _save(kept)
-    return True
+    with _LOCK:
+        rows = load()
+        kept = [p for p in rows if p.get("id") != pid]
+        if len(kept) == len(rows):
+            return False
+        _save(kept)
+        return True
+
+
+def insert(row: dict) -> bool:
+    """휴지통에서 되살린 기록을 그대로 다시 넣는다. 같은 id 가 있으면 False."""
+    with _LOCK:
+        rows = load()
+        if any(p.get("id") == row.get("id") for p in rows):
+            return False
+        rows.append(row)
+        _save(rows)
+        return True
 
 
 # ── 진전 판정 ───────────────────────────────────────────────────────────

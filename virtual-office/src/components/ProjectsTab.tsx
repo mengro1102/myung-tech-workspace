@@ -8,10 +8,29 @@
  * 그래서 목록은 상태와 진행만 보여 주고, 나머지는 하나를 골랐을 때 편다.
  * 내가 해야 할 일이 있는 프로젝트는 목록 맨 위로 올린다 — 내려가서 찾게
  * 하면 승인을 기다리는 프로젝트가 며칠씩 방치된다.
+ *
+ * ## 새 프로젝트 입력칸을 뺐다
+ *
+ * 같은 일을 하는 입구가 셋이었다 — 여기, 메인 대화창 ＋ 메뉴의 「명테크에
+ * 맡기기」, 디스코드의 `/맡기기`. 셋 다 같은 `POST /api/projects` 를 부른다.
+ * 입구는 대화 쪽(⚡ 새 지시사항 → 맡기기 모드)으로 모으고, 이 화면은
+ * **보고 고르는 곳**으로 둔다.
+ *
+ * ## 칸반을 뺐고, 그 일을 필터가 한다
+ *
+ * 칸반은 같은 프로젝트를 상태별 칸에 한 번 더 그렸다. 위 KPI 숫자를 누르면
+ * 이 목록이 그 상태로 걸러진다 — 숫자와 목록이 같은 것을 센다.
+ *
+ * ## 지우기는 휴지통으로
+ *
+ * 「선택」 으로 여럿을 고르거나 「전체 선택」 으로 보이는 것을 다 골라
+ * 휴지통에 넣는다. 영구 삭제는 여기서 못 한다 — 맹비서(`/휴지통`)만 한다.
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, deptLabels, type ApprovalRow, type DialogueEntry, type ProjectRow,
          type ProjectStatus, type ArchivedCall } from '../api';
+import { useTrashUndo, TrashUndoBar } from './TrashBox';
+import { GROUP_LABEL, GROUP_OF, type PjGroup } from './projectGroups';
 import ConfidenceBox from './ConfidenceBox';
 import VerifyBox from './VerifyBox';
 import PlanEditor from './PlanEditor';
@@ -49,9 +68,14 @@ function timeAgo(ts: number): string {
 
 /** CEO 현황판에서 프로젝트 카드를 눌렀을 때, 그 프로젝트가 열린 채로 뜬다.
  *  예전에는 어느 카드를 눌러도 탭만 열려 목록 맨 위부터 다시 찾아야 했다. */
-export default function ProjectsTab({ focusId, onFocused }:
-    { focusId?: string | null; onFocused?: () => void } = {}) {
+export default function ProjectsTab({ focusId, onFocused, group = 'all', onGroup }:
+    { focusId?: string | null; onFocused?: () => void;
+      group?: PjGroup; onGroup?: (g: PjGroup) => void } = {}) {
   const [rows, setRows]       = useState<ProjectRow[]>([]);
+  // 고르기. 켜야 체크칸이 나온다 — 늘 보이면 카드를 펼치려다 체크하게 된다.
+  const [selecting, setSelecting] = useState(false);
+  const [sel, setSel] = useState<Set<string>>(new Set());
+  const undo = useTrashUndo();
   const [openId, setOpenId]   = useState<string | null>(null);
   // 방향 전환 입력칸을 연 프로젝트. 한 번에 하나만 연다 — 여럿을 열어
   // 두면 어느 칸이 어느 프로젝트의 것인지 헷갈린다.
@@ -84,7 +108,6 @@ export default function ProjectsTab({ focusId, onFocused }:
     return () => window.removeEventListener('mt:open-project', onOpen);
   }, []);
   const [detail, setDetail]   = useState<ProjectRow | null>(null);
-  const [idea, setIdea]       = useState('');
   const [busy, setBusy]       = useState(false);
   const [err, setErr]         = useState('');
   const [loaded, setLoaded]   = useState(false);
@@ -115,15 +138,44 @@ export default function ProjectsTab({ focusId, onFocused }:
     return () => clearInterval(t);
   }, [refresh]);
 
-  async function create() {
-    const text = idea.trim();
-    if (!text || busy) return;
-    setBusy(true); setErr('');
-    const r = await api.createProject(text);
+  const shown = group === 'all' ? rows : rows.filter(r => GROUP_OF[r.status] === group);
+  const counts: Record<PjGroup, number> = {
+    all: rows.length,
+    live: rows.filter(r => GROUP_OF[r.status] === 'live').length,
+    done: rows.filter(r => GROUP_OF[r.status] === 'done').length,
+    stopped: rows.filter(r => GROUP_OF[r.status] === 'stopped').length,
+  };
+  // 걸러서 안 보이게 된 것은 고른 것에서 뺀다. 보이지 않는 것을 지우면
+  // 사장님이 무엇을 지웠는지 모르게 된다.
+  const visibleSel = shown.filter(r => sel.has(r.id));
+  const allOn = shown.length > 0 && visibleSel.length === shown.length;
+
+  function pick(id: string) {
+    setSel(prev => {
+      const n = new Set(prev);
+      if (n.has(id)) n.delete(id); else n.add(id);
+      return n;
+    });
+  }
+  function stopSelecting() { setSelecting(false); setSel(new Set()); }
+
+  async function toTrash() {
+    const ids = visibleSel.map(r => r.id);
+    if (!ids.length) return;
+    const running = visibleSel.filter(r => r.status === 'running' || r.status === 'planning').length;
+    if (!window.confirm(
+      `프로젝트 ${ids.length}건을 휴지통으로 옮길까요?`
+      + (running ? `\n\n돌고 있는 ${running}건은 멈춥니다.` : '')
+      + '\n\n딸린 결재·교훈도 함께 옮깁니다. 휴지통에서 되살릴 수 있고,'
+      + '\n맹비서가 디스코드로 알려 드립니다.')) return;
+    setBusy(true);
+    const r = await api.trashMove(ids.map(id => ({ kind: 'project' as const, id })));
     setBusy(false);
     if (!r) { setErr('백엔드에 연결하지 못했습니다'); return; }
-    if (r.error) { setErr(r.error); return; }
-    setIdea('');
+    if (!r.ok) { setErr(r.error || '옮기지 못했습니다'); return; }
+    if (openId && ids.includes(openId)) { setOpenId(null); setDetail(null); }
+    stopSelecting();
+    undo.show(r.moved);
     void refresh();
   }
 
@@ -144,33 +196,6 @@ export default function ProjectsTab({ focusId, onFocused }:
 
   return (
     <div className="pj-wrap">
-      {/* ── 아이디어 던지기 ── */}
-      <section className="pj-new">
-        <h2 className="pj-h">새 프로젝트</h2>
-        <p className="pj-sub">
-          아이디어를 한 줄로 던지면 오케스트레이터가 의도를 읽고 계획을 세웁니다.
-          착수 승인은 <strong>한 번</strong>만 받고, 그 뒤로는 결과가 나올 때까지
-          자율로 진행합니다.
-        </p>
-        <div className="pj-new-row">
-          <textarea
-            className="pj-input"
-            rows={2}
-            value={idea}
-            placeholder="예) 맹비서에 매일 아침 위키 변경사항을 요약해 보내는 기능을 붙이고 싶다"
-            onChange={e => setIdea(e.target.value)}
-            onKeyDown={e => {
-              if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); void create(); }
-            }}
-          />
-          <button className="pj-btn pj-btn-primary" disabled={busy || !idea.trim()}
-                  onClick={() => void create()}>
-            {busy ? '…' : '시작'}
-          </button>
-        </div>
-        {err && <div className="pj-err">{err}</div>}
-      </section>
-
       {/* ── 목록 ── */}
       <section className="pj-list">
         {/* 예전 제목은 "진행 중인 프로젝트" 였는데 목록에는 완료·중단·취소가
@@ -199,21 +224,68 @@ export default function ProjectsTab({ focusId, onFocused }:
           })()}
         </h2>
 
+        {/* 걸러 보기 + 고르기. KPI 숫자를 눌러도 같은 필터가 걸린다. */}
+        <div className="pj-tools">
+          <div className="pj-filters" role="group" aria-label="상태로 걸러 보기">
+            {(['all', 'live', 'done', 'stopped'] as PjGroup[]).map(g => (
+              <button key={g} aria-pressed={group === g}
+                      className={`pj-filter ${group === g ? 'on' : ''}`}
+                      onClick={() => onGroup?.(g)}>
+                {GROUP_LABEL[g]} <span>{counts[g]}</span>
+              </button>
+            ))}
+          </div>
+          {rows.length > 0 && (selecting ? (
+            <div className="pj-selbar">
+              <button className="pj-btn" onClick={() => setSel(allOn
+                ? new Set() : new Set(shown.map(r => r.id)))}>
+                {allOn ? '선택 해제' : `전체 선택 (${shown.length})`}
+              </button>
+              <button className="pj-btn pj-btn-danger" disabled={busy || !visibleSel.length}
+                      onClick={() => void toTrash()}>
+                🗑 휴지통으로{visibleSel.length ? ` (${visibleSel.length})` : ''}
+              </button>
+              <button className="pj-btn" onClick={stopSelecting}>취소</button>
+            </div>
+          ) : (
+            <button className="pj-btn pj-sel-on" onClick={() => setSelecting(true)}>선택</button>
+          ))}
+        </div>
+
+        <TrashUndoBar undo={undo} onRestored={() => void refresh()} />
+
         {err && loaded && <div className="pj-err">{err}</div>}
         {!loaded && <div className="pj-empty">불러오는 중…</div>}
         {loaded && rows.length === 0 && (
-          <div className="pj-empty">아직 없습니다. 위에 아이디어를 한 줄 적어 보세요.</div>
+          <div className="pj-empty">
+            아직 없습니다. 위의 <strong>⚡ 새 지시사항</strong> 이나 디스코드
+            {' '}<code>/맡기기</code> 로 맹비서에게 맡기면 여기에 생깁니다.
+          </div>
+        )}
+        {loaded && rows.length > 0 && shown.length === 0 && (
+          <div className="pj-empty">「{GROUP_LABEL[group]}」 인 프로젝트가 없습니다.</div>
         )}
 
-        {rows.map(p => {
+        {shown.map(p => {
           const open = openId === p.id;
           const needsMe = p.status === 'awaiting_approval' || p.status === 'paused';
           // id 는 결재 카드에서 "산출물 열기" 로 건너올 때 스크롤 목표가 된다.
           return (
             <article key={p.id} id={`pj-${p.id}`}
-                     className={`pj-card ${p.status} ${needsMe ? 'needs-me' : ''}`}>
-              <button className="pj-card-head" onClick={() => toggle(p.id)}
-                      aria-expanded={open}>
+                     className={`pj-card ${p.status} ${needsMe ? 'needs-me' : ''} ${sel.has(p.id) ? 'picked' : ''}`}>
+              <div className="pj-card-row">
+              {/* 체크칸은 머리 버튼 **바깥**이다. 버튼 안에 입력을 넣으면
+                  HTML 이 깨지고, 눌렀을 때 카드가 같이 펼쳐진다. */}
+              {selecting && (
+                <label className="pj-pick">
+                  <input type="checkbox" checked={sel.has(p.id)} onChange={() => pick(p.id)}
+                         aria-label={`${p.title} 고르기`} />
+                  <span aria-hidden="true" />
+                </label>
+              )}
+              <button className="pj-card-head"
+                      onClick={() => (selecting ? pick(p.id) : toggle(p.id))}
+                      aria-expanded={selecting ? undefined : open}>
                 <span className={`pj-dot ${p.status}`} aria-hidden="true" />
                 <span className="pj-title">{p.title}</span>
                 <span className="pj-status">{STATUS_LABEL[p.status]}</span>
@@ -222,6 +294,7 @@ export default function ProjectsTab({ focusId, onFocused }:
                 </span>
                 <span className={`pj-caret ${open ? 'open' : ''}`} aria-hidden="true">▾</span>
               </button>
+              </div>
 
               {/* 멈춘 이유는 접혀 있어도 보인다 — 이걸 숨기면 왜 안 도는지 모른다. */}
               {p.pause_reason && (
