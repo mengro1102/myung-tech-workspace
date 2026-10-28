@@ -8,6 +8,7 @@
  * 목록·링크·굵게뿐이고, 그만 처리하면 라이브러리 하나를 안 들여도 된다.
  */
 import { useEffect, useMemo, useState } from 'react';
+import { MathBlock, MathInline, takeMathBlock } from './MathText';
 
 const ANCHOR = /<a id="([^"]+)"><\/a>/;
 
@@ -33,7 +34,9 @@ function splitSections(md: string): Record<string, string> {
 /** 인라인 마크다운(굵게·코드·링크)만 처리한 조각들 */
 function inline(text: string, keyBase: string) {
   const parts: React.ReactNode[] = [];
-  const re = /(\*\*[^*]+\*\*)|(`[^`]+`)|(\[[^\]]+\]\([^)]+\))/g;
+  // 수식도 문다. 산출물에도 TeX 이 섞여 들어온다 — 논문을 근거로 쓴 글은
+  // 대개 원문 표기를 그대로 옮긴다.
+  const re = /(\*\*[^*]+\*\*)|(`[^`]+`)|(\[[^\]]+\]\([^)]+\))|(\$[^$\n]{1,160}\$)/g;
   let last = 0;
   let m: RegExpExecArray | null;
   let i = 0;
@@ -43,6 +46,7 @@ function inline(text: string, keyBase: string) {
     const k = `${keyBase}-${i++}`;
     if (tok.startsWith('**')) parts.push(<strong key={k}>{tok.slice(2, -2)}</strong>);
     else if (tok.startsWith('`')) parts.push(<code key={k} className="gd-code">{tok.slice(1, -1)}</code>);
+    else if (tok.startsWith('$')) parts.push(<MathInline key={k} tex={tok.slice(1, -1)} />);
     else {
       const mm = tok.match(/\[([^\]]+)\]\(([^)]+)\)/)!;
       parts.push(<a key={k} href={mm[2]} target="_blank" rel="noreferrer">{mm[1]}</a>);
@@ -62,6 +66,16 @@ export function Markdown({ src }: { src: string }) {
 
   while (i < lines.length) {
     const line = lines[i];
+
+    // 블록 수식 — 문단으로 묶이기 전에 가로챈다(KnowledgeTab 과 같은 이유).
+    if (line.includes('$$')) {
+      const got = takeMathBlock(lines, i);
+      if (got) {
+        blocks.push(<MathBlock key={n++} tex={got[0]} />);
+        i = got[1];
+        continue;
+      }
+    }
 
     // 코드 블록
     if (line.trim().startsWith('```')) {

@@ -34,6 +34,7 @@ import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } fro
 import { threadKey, type AskContext } from './AskHermes';
 import { useThread } from './askStore';
 import AssistantFace from './AssistantFace';
+import { MathBlock, MathInline, takeMathBlock } from './MathText';
 import {
   api,
   type KbDoc,
@@ -150,10 +151,12 @@ function inline(text: string, key: string,
                 canNav?: (slug: string) => boolean) {
   const parts: React.ReactNode[] = [];
   // `$…$` 가 끝에 있다. 위키 390건 중 54건이 LaTeX 를 그렇게 쓴다
-  // (`$\pi_\theta(a \mid s)$` 같은 것). KaTeX 를 들이지는 않는다 — 의존성
-  // 하나와 번들 270KB 를 그 14% 때문에 전부에게 물린다. 대신 **수식이라는
-  // 것이 보이게** 고정폭으로 띄운다. 달러 기호가 문장 가운데 흩어져 있는
-  // 것보다는 읽힌다. 조판은 아니다.
+  // (`$\pi_\theta(a \mid s)$` 같은 것).
+  //
+  // 전에는 고정폭으로 띄우기만 했다. 사유는 "KaTeX 의존성 하나와 번들
+  // 270KB 를 수식 쓰는 14% 때문에 전부에게 물린다" 였고, 맞는 걱정이었다.
+  // 지금은 **수식이 실제로 있는 문서를 열 때만** 동적으로 받으므로(MathText)
+  // 그 전제가 성립하지 않는다. 받는 동안에는 예전처럼 원문을 보여 준다.
   const re = /(\[\[[^\]]+\]\])|(\*\*[^*]+\*\*)|(\*[^*\n]+\*)|(`[^`]+`)|(\[[^\]]*\]\([^)]+\))|(\$[^$\n]{1,160}\$)/g;
   let last = 0;
   let m: RegExpExecArray | null;
@@ -178,7 +181,7 @@ function inline(text: string, key: string,
     } else if (tok.startsWith('`')) {
       parts.push(<code key={k} className="kb-code">{tok.slice(1, -1)}</code>);
     } else if (tok.startsWith('$')) {
-      parts.push(<span key={k} className="kb-math" title="LaTeX 수식">{tok.slice(1, -1)}</span>);
+      parts.push(<MathInline key={k} tex={tok.slice(1, -1)} />);
     } else if (tok.startsWith('*')) {
       parts.push(<em key={k}>{tok.slice(1, -1)}</em>);
     } else {
@@ -221,6 +224,20 @@ function KbMarkdown({ body, docPath, onNav, canNav }: MdProps) {
 
   while (i < lines.length) {
     const line = lines[i];
+
+    // 블록 수식 `$$ … $$`.
+    //
+    // 문단으로 묶이기 **전에** 가로챈다. 묶이고 나면 세 줄이 한 문단
+    // (`$$ lrate=… $$`)이 되고, 인라인 규칙이 바깥 달러 하나를 남긴 채
+    // 가운데만 물어서 화면에 `$ [수식] $` 로 나온다(사장님이 보신 그 모양).
+    if (line.includes('$$')) {
+      const got = takeMathBlock(lines, i);
+      if (got) {
+        blocks.push(<MathBlock key={n++} tex={got[0]} />);
+        i = got[1];
+        continue;
+      }
+    }
 
     // 코드블록
     if (line.trim().startsWith('```')) {

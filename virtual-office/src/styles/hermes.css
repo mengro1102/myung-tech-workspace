@@ -6816,3 +6816,48 @@ button.pj-deliv-item[aria-expanded="true"] { background: var(--glass-hi); border
   .tr-when { margin-left: auto; }
   .nt-danger { min-height: 40px; }
 }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   수식 (KaTeX)
+   저장된 TeX 은 멀쩡했다 — 화면이 안 그렸을 뿐이다. 자세한 사유는
+   components/MathText.tsx 주석 참고.
+══════════════════════════════════════════════════════════════════════════ */
+
+/* KaTeX 가 아직 안 왔을 때 보여 주는 원문. 예전 모양 그대로 둔다 —
+   끝내 못 받아도 이 상태로 읽을 수 있어야 한다. */
+.kb-tex {
+  font-family: 'JetBrains Mono', monospace; font-size: 0.92em;
+  padding: 1px 5px; border-radius: 4px;
+  background: var(--primary-dk); color: var(--secondary);
+  word-break: break-word;
+}
+.kb-tex-block {
+  margin: 10px 0; padding: 10px 12px; overflow-x: auto;
+  font-family: 'JetBrains Mono', monospace; font-size: 12px; line-height: 1.6;
+  background: var(--bg2); border: 1px solid var(--border); border-radius: 8px;
+  color: var(--secondary); white-space: pre-wrap; word-break: break-word;
+}
+
+/* 그려진 수식. KaTeX 는 자기 글꼴을 쓰므로 색과 여백만 맞춘다. */
+.md-math { color: var(--text); }
+.md-math-block {
+  margin: 14px 0; padding: 10px 4px;
+  /* 긴 수식은 가로로 넘친다. 페이지가 통째로 옆으로 밀리지 않게 자기 안에서
+     스크롤한다 — 행렬·cases 가 좁은 화면에서 특히 길다. */
+  overflow-x: auto; overflow-y: hidden;
+  text-align: center;
+}
+.md-math-block::-webkit-scrollbar { height: 4px; }
+.md-math-block::-webkit-scrollbar-thumb { background: var(--muted2); border-radius: 2px; }
+
+/* KaTeX 기본 글자 크기가 본문보다 커서 줄 높이가 들쭉날쭉해진다. */
+.katex { font-size: 1.04em; }
+.md-math-block .katex-display { margin: 0; }
+
+/* 깨진 수식은 KaTeX 가 빨갛게 표시한다. 그 색이 배경에 묻히지 않게. */
+.katex .katex-error { color: #FCA5A5 !important; }
+
+@media (max-width: 768px) {
+  .md-math-block { padding: 8px 2px; }
+  .katex { font-size: 0.98em; }
+}
