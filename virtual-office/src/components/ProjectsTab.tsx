@@ -87,6 +87,18 @@ export default function ProjectsTab({ focusId, onFocused, group = 'all', onGroup
     onFocused?.();
   }, [focusId, onFocused]);
 
+  /* 걸러 둔 상태에서 **안 보이는 프로젝트**를 가리켰을 때 필터를 푼다.
+   *
+   *  결재 카드의 「이 프로젝트의 산출물 열기」 는 openId 만 세운다. 목록이
+   *  「완료」 로 걸려 있는데 그 프로젝트가 멈춘 것이면, 열렸다는 표시만
+   *  남고 화면에는 아무 일도 일어나지 않는다 — 눌러도 반응이 없는 버튼이
+   *  된다. 거르기는 보조 장치이므로, 가리킨 것이 이긴다. */
+  useEffect(() => {
+    if (!openId || group === 'all') return;
+    const p = rows.find(r => r.id === openId);
+    if (p && GROUP_OF[p.status] !== group) onGroup?.('all');
+  }, [openId, group, rows, onGroup]);
+
   /* 결재 카드의 "이 프로젝트의 산출물 열기" 가 보내는 신호.
    *
    *  App → ProjectsTab 으로 prop 을 내리려면 ApprovalBox 까지 세 겹을

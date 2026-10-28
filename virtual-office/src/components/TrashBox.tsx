@@ -19,11 +19,9 @@
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, type TrashItem } from '../api';
+import { TRASH_EVENT, trashChanged } from './trashEvent';
 
-/** 휴지통이 바뀌었다는 신호. 옮긴 쪽(프로젝트·노트)과 이 상자가 서로를
- *  모르므로 창 이벤트로 잇는다. */
-export const TRASH_EVENT = 'mt:trash-changed';
-export function trashChanged() { window.dispatchEvent(new Event(TRASH_EVENT)); }
+export { TRASH_EVENT, trashChanged };
 
 function when(ts?: number): string {
   if (!ts) return '';

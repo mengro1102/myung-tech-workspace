@@ -6649,3 +6649,170 @@ button.pj-deliv-item[aria-expanded="true"] { background: var(--glass-hi); border
 @media (max-width: 768px) {
   .hs-mode-chip button { min-width: 32px; min-height: 32px; }
 }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   프로젝트 탭 재구성 — 필터 · 고르기 · 휴지통
+   (칸반을 뺐다. 같은 프로젝트를 상태별로 한 번 더 그릴 뿐이고, 그 일은
+    KPI 숫자 → 아래 필터가 한다.)
+══════════════════════════════════════════════════════════════════════════ */
+
+/* KPI 숫자가 버튼이 됐다. div 였을 때의 모양을 그대로 유지해야 한다 —
+   button 은 기본 배경·테두리·패딩·가운데 정렬을 들고 온다. */
+.ceo-kpi-item {
+  background: none; border: 0; padding: 2px 6px; margin: 0 -6px;
+  align-items: flex-start; text-align: left;
+  font: inherit; color: inherit; border-radius: 8px;
+  cursor: pointer; transition: background .15s;
+}
+.ceo-kpi-item:hover { background: var(--glass-hi); }
+/* 지금 걸린 필터를 표시한다. 숫자만 색이 바뀌면 "원래 색" 과 구별이 안 된다. */
+.ceo-kpi-item.on { background: var(--primary-dim); box-shadow: inset 0 0 0 1px var(--primary); }
+.ceo-kpi-item:focus-visible { outline: 2px solid var(--primary); outline-offset: 1px; }
+
+/* ── 걸러 보기 + 고르기 줄 ── */
+.pj-tools {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  margin: 0 0 10px;
+}
+.pj-filters { display: flex; gap: 6px; flex-wrap: wrap; }
+.pj-filter {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 5px 11px; font-size: 12px; font-weight: 600;
+  background: var(--glass-bg); border: 1px solid var(--border); border-radius: 999px;
+  color: var(--muted); cursor: pointer; transition: var(--t-ui) .15s;
+}
+.pj-filter:hover { background: var(--glass-hi); color: var(--text); }
+.pj-filter.on { background: var(--primary-dim); border-color: var(--primary); color: var(--text); }
+.pj-filter span { font-variant-numeric: tabular-nums; opacity: .75; }
+.pj-selbar { display: flex; gap: 6px; margin-left: auto; flex-wrap: wrap; }
+.pj-sel-on { margin-left: auto; }
+/* 지우기는 빨강이다. 「휴지통으로」 와 「취소」 가 같은 회색이면 손이 미끄러진다. */
+.pj-btn-danger {
+  background: rgba(239,68,68,.12); border-color: rgba(239,68,68,.45); color: #FCA5A5;
+}
+.pj-btn-danger:hover:not(:disabled) {
+  background: rgba(239,68,68,.2); border-color: #ef4444; color: #fff;
+}
+
+/* ── 고르기 체크칸 ──
+   카드 머리 버튼 **바깥**에 둔다. 버튼 안에 입력을 넣으면 HTML 이 깨지고,
+   체크하려다 카드가 같이 펼쳐진다. */
+.pj-card-row { display: flex; align-items: center; }
+.pj-card-row .pj-card-head { flex: 1; min-width: 0; }
+.pj-pick {
+  position: relative; display: grid; place-items: center;
+  width: 34px; min-height: 34px; flex: none; cursor: pointer;
+}
+.pj-pick input { position: absolute; inset: 0; opacity: 0; margin: 0; cursor: pointer; }
+.pj-pick span {
+  width: 18px; height: 18px; border-radius: 5px; border: 1.5px solid var(--muted);
+  transition: var(--t-ui) .15s;
+}
+.pj-pick input:checked + span { background: var(--primary); border-color: var(--primary); }
+.pj-pick input:checked + span::after {
+  content: '✓'; display: block; text-align: center; line-height: 15px;
+  font-size: 13px; font-weight: 700; color: #fff;
+}
+.pj-pick input:focus-visible + span { outline: 2px solid var(--primary); outline-offset: 2px; }
+.pj-card.picked { border-color: var(--primary); background: var(--primary-dk); }
+.nt-card.picked, .nt-agent-row.picked { background: var(--primary-dk); }
+
+/* ── 되돌리기 띠 ──
+   메일 앱의 그것. 손이 미끄러진 경우를 위해 휴지통까지 내려가게 하지 않는다. */
+.tr-undo {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  margin: 0 0 10px; padding: 9px 12px;
+  background: var(--primary-dk); border: 1px solid var(--primary);
+  border-radius: 9px; font-size: 12px; color: var(--text);
+}
+.tr-undo button {
+  margin-left: auto; padding: 5px 12px; font-size: 12px; font-weight: 700;
+  background: var(--primary); border: 1px solid var(--primary); border-radius: 7px;
+  color: #fff; cursor: pointer;
+}
+.tr-undo button:hover:not(:disabled) { filter: brightness(1.12); }
+
+/* ── 휴지통 상자 ──
+   네 칸(결재·배운 것·프로젝트·노트) 바깥의 보조 칸이라 접어 둔다.
+   **영구 삭제 버튼은 없다** — 맹비서(`/휴지통`)만 한다. */
+.tr-box {
+  width: 100%; max-width: 1320px; min-width: 0;
+  margin: 10px auto 70px; padding: 0 18px;
+}
+.tr-head {
+  width: 100%; display: flex; align-items: center; gap: 10px;
+  padding: 11px 14px; text-align: left;
+  background: var(--glass-bg); border: 1px solid var(--border); border-radius: 10px;
+  color: var(--text); font: inherit; cursor: pointer; transition: var(--t-ui) .15s;
+}
+.tr-head:hover { background: var(--glass-hi); }
+.tr-box.open .tr-head { border-radius: 10px 10px 0 0; border-bottom-color: transparent; }
+.tr-title { font-size: 13px; font-weight: 700; }
+.tr-count { font-size: 11.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.tr-hint { margin-left: auto; font-size: 11px; color: var(--muted2); }
+.tr-hint code { font-size: 10.5px; }
+.tr-body {
+  padding: 12px 14px 14px;
+  background: var(--glass-bg); border: 1px solid var(--border); border-top: 0;
+  border-radius: 0 0 10px 10px;
+  display: flex; flex-direction: column; gap: 10px;
+}
+.tr-note { margin: 0; font-size: 11.5px; line-height: 1.7; color: var(--muted); }
+.tr-note strong { color: var(--text); font-weight: 600; }
+.tr-tools { display: flex; gap: 6px; flex-wrap: wrap; }
+.tr-msg {
+  padding: 7px 10px; font-size: 11.5px; border-radius: 7px; cursor: pointer;
+  background: var(--secondary-dim); border: 1px solid var(--secondary); color: var(--text);
+}
+.tr-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.tr-row {
+  display: flex; align-items: center; gap: 9px;
+  padding: 6px 2px; font-size: 12.5px; border-radius: 6px;
+}
+.tr-row + .tr-row { border-top: 1px solid var(--border); }
+.tr-row.picked { background: var(--primary-dk); }
+.tr-kind {
+  flex: none; padding: 1px 7px; font-size: 10px; font-weight: 700; border-radius: 999px;
+  background: var(--glass-bg); border: 1px solid var(--border); color: var(--muted);
+}
+.tr-kind.k-project { color: var(--primary); border-color: var(--primary-dim); }
+.tr-kind.k-note, .tr-kind.k-task { color: var(--secondary); border-color: var(--secondary-dim); }
+.tr-name {
+  flex: 1; min-width: 0; color: var(--text);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.tr-extra { flex: none; font-size: 10.5px; color: var(--muted); }
+.tr-when {
+  flex: none; font-size: 10.5px; color: var(--muted2);
+  font-variant-numeric: tabular-nums;
+  max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+/* 지우기 버튼 — 노트 머리줄. nt-filter 와 같은 크기여야 줄이 들쭉날쭉하지 않다. */
+.nt-danger {
+  padding: 6px 12px; font-size: 12px; font-weight: 600; border-radius: 8px;
+  background: rgba(239,68,68,.12); border: 1px solid rgba(239,68,68,.45);
+  color: #FCA5A5; cursor: pointer; transition: var(--t-ui) .15s;
+}
+.nt-danger:hover:not(:disabled) { background: rgba(239,68,68,.22); color: #fff; }
+.nt-danger:disabled { opacity: .5; cursor: default; }
+
+@media (max-width: 768px) {
+  /* 모바일에서 KPI 는 가로 스크롤이다(이미 그렇게 돌고 있었다). 이제 그
+     숫자들이 버튼이라, 과녁이 44px 는 되어야 한다. */
+  .ceo-kpi-item { min-height: 44px; justify-content: center; }
+  /* 고르기 체크칸도 손가락 기준으로. 작은 네모를 정확히 노리는 것은
+     한 손으로 쥐었을 때 사실상 불가능하다(노트 체크칸과 같은 이유). */
+  .pj-pick { min-width: 44px; min-height: 44px; }
+  .pj-tools { gap: 6px; }
+  .pj-selbar, .pj-sel-on { margin-left: 0; width: 100%; }
+  .pj-selbar .pj-btn { flex: 1; min-height: 40px; }
+  .pj-sel-on { min-height: 40px; }
+  .tr-box { padding: 0 12px; margin-bottom: 40px; }
+  /* 좁은 화면에서 안내 문구가 제목을 밀어낸다. 접힌 머리줄은 제목·건수만. */
+  .tr-hint { display: none; }
+  .tr-row { flex-wrap: wrap; }
+  .tr-name { flex-basis: calc(100% - 100px); }
+  .tr-when { margin-left: auto; }
+  .nt-danger { min-height: 40px; }
+}

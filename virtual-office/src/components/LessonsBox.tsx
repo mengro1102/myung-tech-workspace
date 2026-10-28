@@ -17,6 +17,7 @@
  * 움직임을 이해할 수 있는 것" 이다.
  */
 import { useCallback, useEffect, useState } from 'react';
+import { TRASH_EVENT } from './trashEvent';
 import { api, type LessonRow } from '../api';
 
 interface Props {
@@ -35,7 +36,14 @@ export default function LessonsBox({ open, onToggle }: Props) {
     if (r?.stats) setStats(r.stats);
   }, []);
 
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    void load();
+    /* 휴지통으로 간 프로젝트의 교훈은 함께 빠진다. 한 번만 읽으면 그
+       교훈이 화면에 남아, 없는 프로젝트의 "배운 것" 을 읽게 된다. */
+    const on = () => { void load(); };
+    window.addEventListener(TRASH_EVENT, on);
+    return () => window.removeEventListener(TRASH_EVENT, on);
+  }, [load]);
 
   return (
     <div className="ceo-lessons">
