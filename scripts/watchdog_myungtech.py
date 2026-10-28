@@ -52,6 +52,18 @@ DISPATCH_MATCH = "dispatch daemon"
 # 쌓이면 되살리기를 멈추고 사람을 부른다 — 맹비서 supervisor 와 같은 규칙.
 GIVE_UP_AFTER = 6
 
+# **콘솔 창을 띄우지 않는다.**
+#
+# 이 스크립트는 작업 스케줄러가 `pythonw.exe` 로 부른다. pythonw 에는 콘솔이
+# 없는데, 콘솔이 없는 프로세스가 콘솔 프로그램(wmic·cmd)을 띄우면 윈도가
+# **새 콘솔을 만들고 그 창을 화면에 보여 준다.** 5분마다 cmd 창이 떴다
+# 사라지던 것이 이것이다(실측: 플래그 없이 2개, 플래그 주면 1개 — 늘어난
+# 하나가 보이는 창이었다).
+#
+# 콘솔을 가진 부모(예: START.bat 이 띄운 서버)에서는 자식이 그 콘솔을
+# 물려받아 창이 생기지 않는다. 그래서 이 문제는 pythonw 로 도는 쪽에만 있다.
+CREATE_NO_WINDOW = 0x08000000 if sys.platform == "win32" else 0
+
 
 def log(msg: str) -> None:
     LOG.parent.mkdir(parents=True, exist_ok=True)
@@ -75,7 +87,8 @@ def dispatcher_alive() -> bool:
     try:
         out = subprocess.run(
             ["wmic", "process", "where", "name='python.exe'", "get", "commandline"],
-            capture_output=True, text=True, timeout=20, errors="replace").stdout
+            capture_output=True, text=True, timeout=20, errors="replace",
+            creationflags=CREATE_NO_WINDOW).stdout
     except Exception:  # noqa: BLE001
         return True      # 확인할 수 없으면 건드리지 않는다
     return DISPATCH_MATCH in (out or "")
@@ -91,9 +104,11 @@ def start(title: str, command: str) -> None:
     """
     vbs = ROOT / "scripts" / "runbg.vbs"
     log = f'>> {ROOT}\logs\{title}.log 2>&1'
+    # shell=True 는 cmd.exe 를 하나 더 거친다 — 그 cmd 가 보이는 창이 된다.
+    # wscript 를 바로 부르고, 그래도 혹시 모르니 창 금지 플래그를 준다.
     subprocess.Popen(
-        f'wscript //nologo "{vbs}" "cmd /c {command} {log}"',
-        shell=True, cwd=str(ROOT))
+        ["wscript", "//nologo", str(vbs), f'cmd /c {command} {log}'],
+        cwd=str(ROOT), creationflags=CREATE_NO_WINDOW)
 
 
 def load_state() -> dict:
