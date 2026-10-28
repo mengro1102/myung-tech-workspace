@@ -100,8 +100,20 @@ EXPERIENCE_DIRS = ("raw/projects",)
 # (`search("Schulman")` 이 지금은 references 8건을 돌려준다).
 REFERENCE_DIRS = ("references", "glossary")
 
+# 논문 **전문**(PDF → md). 21건뿐이지만 위키에서 가장 내용이 두꺼운 문서다.
+#
+# 여기도 빠져 있었다. references 를 넣을 때 같은 사유("넣지 않으면 쌓아도
+# 아무도 못 읽는다")가 그대로 적용되는데 같이 들어가지 못했다. 실측:
+# `search("attention is all you need")` 가 **전문 문서를 0건** 돌려줬다.
+# 그래프(`retrieve`)에는 `paper` 노드로 들어 있어 근거로는 쓰였지만,
+# 이름으로 찾는 길은 없었던 것이다.
+#
+# 맨 뒤에 둔다. `search()` 는 폴더 순서대로 훑다가 limit 을 채우면 멈추므로
+# (아래 주석 참고), 긴 전문이 앞에 서면 개념 노드를 밀어낸다.
+FULLTEXT_DIRS = ("raw/papers",)
+
 # 검색·검색씨앗이 훑는 범위.
-SEARCH_DIRS = NODE_DIRS + REFERENCE_DIRS + EXPERIENCE_DIRS
+SEARCH_DIRS = NODE_DIRS + REFERENCE_DIRS + EXPERIENCE_DIRS + FULLTEXT_DIRS
 
 # 근거 자료의 '출처 종류'. 방법 절이 "위키 5건" 이라고만 적으면 그 5건 중
 # 무엇이 사람이 쓴 것이고 무엇이 **이전 AI 출력**인지 알 수 없다. 실측하면
