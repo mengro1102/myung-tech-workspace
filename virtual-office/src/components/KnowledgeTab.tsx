@@ -157,7 +157,11 @@ function inline(text: string, key: string,
   // 270KB 를 수식 쓰는 14% 때문에 전부에게 물린다" 였고, 맞는 걱정이었다.
   // 지금은 **수식이 실제로 있는 문서를 열 때만** 동적으로 받으므로(MathText)
   // 그 전제가 성립하지 않는다. 받는 동안에는 예전처럼 원문을 보여 준다.
-  const re = /(\[\[[^\]]+\]\])|(\*\*[^*]+\*\*)|(\*[^*\n]+\*)|(`[^`]+`)|(\[[^\]]*\]\([^)]+\))|(\$[^$\n]{1,160}\$)/g;
+  // 맨 끝의 `https?://…` 는 **맨 글자 그대로 쓴 주소**다. 논문 문서 328건의
+  // '링크'·'DOI' 줄이 그 꼴이라, 이게 없으면 DOI 를 눌러도 아무 일이 없고
+  // 사장님이 주소를 손으로 긁어 복사하셔야 한다. `[글자](주소)` 쪽이
+  // 앞에 있으므로 마크다운 링크를 가로채지 않는다.
+  const re = /(\[\[[^\]]+\]\])|(\*\*[^*]+\*\*)|(\*[^*\n]+\*)|(`[^`]+`)|(\[[^\]]*\]\([^)]+\))|(\$[^$\n]{1,160}\$)|(https?:\/\/[^\s<>()[\]]+)/g;
   let last = 0;
   let m: RegExpExecArray | null;
   let i = 0;
@@ -177,13 +181,23 @@ function inline(text: string, key: string,
         : <span key={k} className="kb-wl dead"
                 title={`${target} — 아직 문서가 없습니다`}>{label}</span>);
     } else if (tok.startsWith('**')) {
-      parts.push(<strong key={k}>{tok.slice(2, -2)}</strong>);
+      // 강조 안도 다시 훑는다. 전에는 글자 그대로 넣어서, 표 설명처럼
+      // 한 줄이 통째로 기울임인 자리의 `$n$` 이 수식이 안 되고 날것으로
+      // 남았다 (Attention 논문에서 3군데).
+      parts.push(<strong key={k}>{inline(tok.slice(2, -2), k, onNav, canNav)}</strong>);
     } else if (tok.startsWith('`')) {
       parts.push(<code key={k} className="kb-code">{tok.slice(1, -1)}</code>);
     } else if (tok.startsWith('$')) {
       parts.push(<MathInline key={k} tex={tok.slice(1, -1)} />);
     } else if (tok.startsWith('*')) {
-      parts.push(<em key={k}>{tok.slice(1, -1)}</em>);
+      parts.push(<em key={k}>{inline(tok.slice(1, -1), k, onNav, canNav)}</em>);
+    } else if (/^https?:\/\//.test(tok)) {
+      // 문장 끝의 마침표·쉼표까지 주소로 삼지 않는다.
+      const url = tok.replace(/[.,;:]+$/, '');
+      re.lastIndex -= tok.length - url.length;
+      parts.push(<a key={k} href={url} target="_blank" rel="noreferrer">{url}</a>);
+      last = m.index + url.length;
+      continue;
     } else {
       const mm = tok.match(/\[([^\]]*)\]\(([^)]+)\)/)!;
       const href = mm[2];

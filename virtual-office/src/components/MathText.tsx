@@ -63,6 +63,11 @@ function useKatex(): Katex | null {
     if (ready) return;
     const fn = () => setReady(mod);
     waiters.add(fn);
+    // **구독보다 적재가 먼저 끝날 수 있다.** useEffect 는 커밋 뒤에 돌므로
+    // 수식이 백 개 넘는 문서처럼 렌더가 무거우면 그 사이에 import 가 끝나고
+    // waiters 가 빈 채로 비워진다. 그러면 영영 원문만 보인다 — 실제로
+    // Attention 논문에서 수식 126개가 전부 코드로 남았다.
+    if (mod) fn();
     return () => { waiters.delete(fn); };
   }, [ready]);
   return ready;
