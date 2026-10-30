@@ -220,6 +220,13 @@ def _disk_health() -> dict:
 
 class ThreadingHTTPServer(socketserver.ThreadingMixIn, HTTPServer):
     daemon_threads = True
+    # 아직 accept 하지 못한 연결을 줄 세우는 칸 수. socketserver 기본값은
+    # **5** 인데, 사무실 탭은 열릴 때 스프라이트를 한 번에 80개 요청한다
+    # (캐릭터 6 + 바닥 9 + 벽 1 + 카펫 3 + 가구 매니페스트 24 + 그 이미지들).
+    # 다섯 칸에 여든이 몰리면 넘친 연결이 거절되고, 브라우저는 그것을
+    # "이미지를 불러오지 못했습니다" 로 본다. 어느 장이 떨어지는지는
+    # 그때그때 달라서 증상이 간헐적이었다(실측 2026-10-30).
+    request_queue_size = 128
 from pathlib import Path
 from datetime import datetime, timedelta, timezone
 from urllib.parse import urlparse, parse_qs

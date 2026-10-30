@@ -45,12 +45,34 @@ export interface OfficeAssets {
   furniture: Map<string, FurnSprite>;
 }
 
-function loadImage(url: string): Promise<HTMLImageElement> {
+function loadOnce(url: string): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
     const img = new Image();
     img.onload = () => resolve(img);
     img.onerror = () => reject(new Error(`이미지를 불러오지 못했습니다: ${url}`));
+    // 캐시를 피하려 쿼리를 붙이지 않는다 — 다시 받는 것은 드문 일이고,
+    // 붙이면 성공한 뒤에도 매번 새로 받게 된다.
     img.src = url;
+  });
+}
+
+/** 두 번 더 다시 받아 본다.
+ *
+ * 사무실은 열릴 때 스프라이트를 한 번에 80장 요청한다. 서버 줄이 넘치거나
+ * 브라우저가 동시 연결을 끊으면 그중 한 장이 떨어지고, 그 한 장 때문에
+ * `Promise.all` 이 통째로 깨져 **사무실 전체가 안 떴다**(실측: char_4.png).
+ *
+ * 서버 쪽 줄을 늘려 뿌리는 없앴지만, 브라우저·OS 사정은 우리가 못 막는다.
+ * 그래서 여기서도 한 번 더 버틴다. 간격을 조금씩 벌리는 것은 같은 순간에
+ * 재시도가 다시 몰리지 않게 하기 위해서다.
+ */
+function loadImage(url: string, tries = 3): Promise<HTMLImageElement> {
+  return loadOnce(url).catch(err => {
+    if (tries <= 1) throw err;
+    const wait = (4 - tries) * 120;
+    return new Promise<HTMLImageElement>((resolve, reject) => {
+      setTimeout(() => loadImage(url, tries - 1).then(resolve, reject), wait);
+    });
   });
 }
 
