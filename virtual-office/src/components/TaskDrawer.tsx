@@ -76,6 +76,8 @@ export default function TaskDrawer({
   onOverride?: (task: Task) => void;
 }) {
   const [task,   setTask]   = useState<Task | null>(null);
+  const [trashing, setTrashing] = useState(false);
+  const [trashErr, setTrashErr] = useState('');
   const [events, setEvents] = useState<TaskEvent[]>([]);
   const [loading, setLoading] = useState(false);
 
@@ -88,6 +90,30 @@ export default function TaskDrawer({
       .catch(() => {})
       .finally(() => setLoading(false));
   }, [taskId]);
+
+  /** 휴지통으로. 바로 지우지 않는 이유는 파일 위 주석에. */
+  const toTrash = async () => {
+    if (!task || trashing) return;
+    setTrashing(true);
+    setTrashErr('');
+    try {
+      const r = await fetch('/api/trash', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ items: [{ kind: 'agent_task', id: task.task_id }] }),
+      }).then(x => x.json());
+      if (r?.moved?.length || r?.ok) {
+        onClose();
+        window.dispatchEvent(new CustomEvent('trash:changed'));
+      } else {
+        setTrashErr(r?.error ?? '옮기지 못했습니다');
+      }
+    } catch (e: any) {
+      setTrashErr(e?.message ?? '서버에 닿지 못했습니다');
+    } finally {
+      setTrashing(false);
+    }
+  };
 
   if (!taskId) return null;
 
@@ -190,6 +216,24 @@ export default function TaskDrawer({
             {events.length === 0 && (
               <div className="td-empty-events">
                 연관 이벤트가 없습니다 — 에이전트 이벤트에 task_id가 연결되면 여기에 표시됩니다.
+              </div>
+            )}
+
+            {/* 치우기 — 끝난 것만.
+
+                돌고 있는 태스크를 지우면 부서는 계속 일하는데 기록만
+                사라진다. 그래서 완료·실패만 받는다. 바로 지우지 않고
+                휴지통으로 보낸다 — 되돌릴 수 있고, 맹비서가 디스코드로
+                알려 사장님이 본인이 한 일인지 보실 수 있다. */}
+            {(task.status === 'done' || task.status === 'failed') && (
+              <div className="td-trash-row">
+                <button className="td-trash-btn" onClick={toTrash} disabled={trashing}>
+                  {trashing ? '옮기는 중…' : '🗑 휴지통으로'}
+                </button>
+                <span className="td-trash-hint">
+                  되돌릴 수 있습니다. 디스코드로 알림이 갑니다.
+                </span>
+                {trashErr && <span className="td-trash-err">{trashErr}</span>}
               </div>
             )}
           </>

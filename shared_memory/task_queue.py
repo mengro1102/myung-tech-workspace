@@ -146,6 +146,25 @@ def get_task(task_id: str) -> dict | None:
         return None
 
 
+def insert(task: dict) -> bool:
+    """휴지통에서 되살릴 때 쓴다. 같은 id 가 이미 있으면 덮지 않는다.
+
+    되살리기는 '없던 것을 되돌리는' 일이지 '덮어쓰는' 일이 아니다. 같은
+    id 가 살아 있다면 그쪽이 더 최신이므로 건드리지 않는다.
+    """
+    tid = str(task.get("task_id") or "").strip()
+    if not tid:
+        return False
+    path = _task_path(tid)
+    if path.exists():
+        return False
+    TASKS_DIR.mkdir(parents=True, exist_ok=True)
+    with disk_guard.writing(path):
+        path.write_text(json.dumps(task, ensure_ascii=False, indent=2),
+                        encoding="utf-8")
+    return True
+
+
 def delete_task(task_id: str) -> bool:
     path = _task_path(task_id)
     if path.exists():

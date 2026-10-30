@@ -27,6 +27,8 @@ interface Props {
   cycleStatus: string;
   taskSummary: { pending: number; in_progress: number; done: number; failed: number };
   onDeptChat: (dept: string, msg: string) => void;
+  /** 프로젝트 탭으로. 사무실은 보는 곳이고, 일은 저기서 시작한다. */
+  onOpenProjects?: () => void;
 }
 
 /* 부서 칩·말풍선에 쓰는 메타.
@@ -87,7 +89,7 @@ function fmtTs(ts?: string) {
   return new Date(ts).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
 }
 
-export default function OfficeView({ agents, cycleStatus, taskSummary, onDeptChat }: Props) {
+export default function OfficeView({ agents, cycleStatus, taskSummary, onDeptChat, onOpenProjects }: Props) {
   const [feed, setFeed]             = useState<FeedEvent[]>([]);
   const [activeAgent, setActiveAgent] = useState<Agent | null>(null);
   const [agentModal,  setAgentModal] = useState(false);
@@ -97,7 +99,13 @@ export default function OfficeView({ agents, cycleStatus, taskSummary, onDeptCha
   /* 오른쪽 패널. 기본은 에이전트 대화 — 사무실에서 보고 싶은 것은 '누가 누구와
      무엇을 주고받는가' 이고, 운영 피드는 시스템 로그에 가깝다. */
   const [panel,    setPanel]    = useState<'chat' | 'feed'>('chat');
+  /** 부서 칩으로 고른 부서. null 이면 전부. */
+  const [deptFilter, setDeptFilter] = useState<string | null>(null);
   const [dialogue, setDialogue] = useState<DialogueEntry[]>([]);
+  /** 부서 칩으로 고른 부서만. 주고받은 쪽 어느 하나라도 걸리면 보인다. */
+  const shownDialogue = deptFilter
+    ? dialogue.filter(d => d.from_dept === deptFilter || d.to_dept === deptFilter)
+    : dialogue;
   const chatScrollRef = useRef<HTMLDivElement>(null);
   const feedEndRef    = useRef<HTMLDivElement>(null);
 
@@ -241,7 +249,12 @@ export default function OfficeView({ agents, cycleStatus, taskSummary, onDeptCha
             return (
               <button key={deptId} className={`ov-dept-chip ${hasActive ? 'active' : ''}`}
                 style={{ '--dept-color': meta.color } as React.CSSProperties}
-                onClick={() => onDeptChat(deptId, `${deptName(deptId)} 현재 상태 보고해줘`)}>
+                /* 전에는 "〜 현재 상태 보고해줘" 를 LLM 에 던졌다. 그 답은
+                   이미 이 화면에 있고(사이드바·칩의 점), 그 요청은 자주
+                   30분 무응답으로 정체 판정된다. 부서를 누르면 그 부서를
+                   **보여 주는** 것이 맞다. */
+                onClick={() => setDeptFilter(prev => prev === deptId ? null : deptId)}
+                aria-pressed={deptFilter === deptId}>
                 {meta.icon} {deptName(deptId)}
                 {hasActive && <span className="ov-dept-dot" style={{ background: meta.color }} />}
               </button>
@@ -273,10 +286,31 @@ export default function OfficeView({ agents, cycleStatus, taskSummary, onDeptCha
           )}
         </div>
 
+        {/* 조용하면 조용하다고 말한다.
+
+            전에는 닷새 전 대화를 띄워 놓고 그 아래에 "새 데이터 스트림
+            대기 중..." 이라고 적었다. 지난 기록이 방금 일처럼 읽힌다.
+
+            스크롤 **밖에** 둔다. 안에 넣었더니 피드가 맨 아래로 내려가면서
+            함께 밀려 올라가 안 보였다. 먼저 읽혀야 뜻이 있는 줄이다. */}
+        {panel === 'chat' && (() => {
+          const last = shownDialogue[shownDialogue.length - 1];
+          if (!last?.at) return null;
+          const ms = last.at > 1e12 ? last.at : last.at * 1000;
+          if ((Date.now() - ms) / 60000 < 60) return null;
+          const when = new Date(ms).toLocaleString('ko-KR',
+            { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+          return (
+            <div className="ov-stale-note">
+              지난 기록입니다 — 마지막 활동 {when}. 지금은 조용합니다.
+            </div>
+          );
+        })()}
+
         {/* 에이전트 대화 */}
         {panel === 'chat' && (
           <div className="ov-feed ov-chat" ref={chatScrollRef}>
-            <AgentChat entries={dialogue} showProject
+            <AgentChat entries={shownDialogue} showProject
               emptyText="프로젝트가 돌면 에이전트끼리 주고받는 말이 여기 쌓입니다 — 제출 · 검토 · 반려 · 인계." />
           </div>
         )}
@@ -346,15 +380,20 @@ export default function OfficeView({ agents, cycleStatus, taskSummary, onDeptCha
           <div ref={feedEndRef} />
         </div>
 
-        {/* 빠른 액션 버튼 */}
+        {/* 빠른 액션.
+
+            「시스템 정지」를 뺐다. 서버에 일괄 정지 수단이 없어서, 그
+            버튼은 오케스트레이터에게 "멈춰 줘" 라고 **말을 거는** 것이
+            전부였다. 급할 때 눌렀는데 안 멈추는 버튼이 제일 나쁘다.
+            프로젝트를 멈추는 길은 프로젝트 탭의 일시정지다 — 거기엔
+            실제로 멈추는 장치가 있다.
+
+            「전체 방송」도 뺐다. 던지던 말이 "전체 에이전트 상태
+            보고해줘" 였는데, 그 답은 이미 왼쪽에 있고 그 요청은 자주
+            정체로 끝났다(실측: 열흘 묵은 실패 태스크가 같은 모양). */}
         <div className="ov-quick-actions">
-          <button className="ov-quick-btn primary"
-            onClick={() => onDeptChat('orchestration_dept', '전체 에이전트 상태 보고해줘')}>
-            전체 방송
-          </button>
-          <button className="ov-quick-btn ghost"
-            onClick={() => onDeptChat('orchestration_dept', '현재 진행 중인 작업을 모두 일시 중지해줘')}>
-            시스템 정지
+          <button className="ov-quick-btn primary" onClick={() => onOpenProjects?.()}>
+            프로젝트에서 일 시키기
           </button>
         </div>
       </div>

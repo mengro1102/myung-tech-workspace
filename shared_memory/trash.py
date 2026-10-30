@@ -56,6 +56,7 @@ for _p in (str(HERE), str(ROOT)):
         sys.path.insert(0, _p)
 
 import projects                     # noqa: E402
+import task_queue                   # noqa: E402
 import workspace_store as ws        # noqa: E402
 import disk_guard                   # noqa: E402
 
@@ -69,7 +70,10 @@ WORKSPACE = ROOT / "workspace"
 
 # 노트 = 사장님이 쓴 것(notes) + 에이전트가 올린 것(tasks).
 COLL = {"note": "notes", "task": "tasks"}
-KIND_KO = {"project": "프로젝트", "note": "노트", "task": "에이전트 노트"}
+# agent_task 는 부서에 내린 지시(task_queue 의 파일 큐)다. 위의 `task`
+# (= 사장님 할 일 목록)와 다른 것이라 이름을 따로 둔다.
+KIND_KO = {"project": "프로젝트", "note": "노트", "task": "에이전트 노트",
+           "agent_task": "태스크"}
 
 _LOCK = threading.RLock()
 
@@ -154,7 +158,7 @@ def move(items: list[dict], origin: str) -> tuple[list[dict], list[str]]:
         rows = load()
         for it in items:
             kind, ref = str(it.get("kind") or ""), str(it.get("id") or "")
-            if not ref or kind not in ("project", *COLL):
+            if not ref or kind not in ("project", "agent_task", *COLL):
                 missing.append(f"{kind}:{ref}")
                 continue
             tid = "trs-" + uuid.uuid4().hex[:10]
@@ -183,6 +187,13 @@ def move(items: list[dict], origin: str) -> tuple[list[dict], list[str]]:
                     except OSError:
                         pass
                 entry["event_files"] = names
+            elif kind == "agent_task":
+                rec = task_queue.get_task(ref)
+                if not rec or not task_queue.delete_task(ref):
+                    missing.append(f"{kind}:{ref}")
+                    continue
+                entry["title"] = _clean_title(rec.get("instruction"))
+                entry["payload"] = {"record": rec}
             else:
                 coll = COLL[kind]
                 rec = next((r for r in ws.load(coll) if r.get("id") == ref), None)
@@ -241,6 +252,11 @@ def restore(ids: list[str] | None) -> tuple[list[dict], list[str]]:
                     except OSError:
                         pass
                 shutil.rmtree(DIR / e["id"], ignore_errors=True)
+            elif e["kind"] == "agent_task":
+                if not task_queue.insert(rec):
+                    fails.append(f"{e['id']}: 같은 id 의 태스크가 이미 있습니다")
+                    keep.append(e)
+                    continue
             else:
                 coll = COLL[e["kind"]]
                 if any(r.get("id") == rec.get("id") for r in ws.load(coll)):

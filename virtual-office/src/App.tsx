@@ -1432,6 +1432,7 @@ function MainScreen() {
           agents={agents}
           cycleStatus={cycleStatus}
           taskSummary={taskSummary}
+          onOpenProjects={() => setActiveTab('projects')}
           // **한 번짜리.** 입력창을 그 부서에 묶지 않는다 — 묶으면 맹비서로
           // 돌아올 길이 없다(대화 상대 피커를 없앴다).
           onDeptChat={(d, msg) => {
