@@ -972,7 +972,9 @@ def _do_plan(p: dict) -> dict:
         f"산출물 {len(plan['deliverables'])}개:\n" +
         "\n".join(f"  {i + 1}. {d['title']} ({d['dept']})"
                   for i, d in enumerate(plan["deliverables"])) +
-        "\n\n승인하면 결과가 나올 때까지 자율로 진행합니다.")
+        "\n\n승인하면 결과가 나올 때까지 자율로 진행합니다."
+        "\n\n→ 「명테크 결재 승인」 이라고 답해 주십시오."
+        " (위키 링크 제안은 「위키 링크 승인」 으로 따로 받습니다)")
     _emit(pid, ORCHESTRATOR, "착수 승인 대기")
     # '회의' 가 들어가면 사무실에서 사람들이 회의실로 모인다. 실제로 계획이
     # 나온 순간에만 모이게 한다.
@@ -1327,6 +1329,8 @@ def _finish(p: dict) -> dict:
            if queued and not finish_warnings else
            f"결재함에 {queued}건을 올렸습니다." if queued else
            "결재함에는 아무것도 올리지 못했습니다.")
+        + ("\n\n→ 산출물을 저장하시려면 「명테크 결재 승인」 이라고 답해 주십시오."
+           if queued else "")
         + (f"\n위키에 {len(archived)}건을 쌓았습니다 — 다음 질문부터 검색됩니다."
            if archived else "")
         + (("\n\n⚠️ 다만 아래가 실패했습니다:\n"
