@@ -49,6 +49,8 @@ interface TaskItem {
   status: 'pending' | 'in_progress' | 'done' | 'failed';
   target_dept: string;
   updated_at: string;
+  /** 서버가 같이 보낸다. updated_at 이 비었을 때의 대비책. */
+  created_at?: string;
   /** 실패 시 사유, 완료 시 결과. 디스패처가 `[backend/model] 오류` 형태로 남긴다. */
   result?: string | null;
 }
@@ -177,6 +179,19 @@ const QUICK_CHIPS = [
 
 function nowStr() {
   return new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' });
+}
+
+/** '3분 전' · '엿새 전'. 못 읽는 값이면 빈 문자열 — 날짜 자리에
+ *  'Invalid Date' 를 적느니 아무것도 안 적는 편이 낫다. */
+function timeAgo(iso?: string): string {
+  if (!iso) return '';
+  const ms = Date.parse(iso);
+  if (Number.isNaN(ms)) return '';
+  const s = Math.max(0, (Date.now() - ms) / 1000);
+  if (s < 60) return '방금';
+  if (s < 3600) return `${Math.floor(s / 60)}분 전`;
+  if (s < 86400) return `${Math.floor(s / 3600)}시간 전`;
+  return `${Math.floor(s / 86400)}일 전`;
 }
 
 /** 말풍선 본문. 조판 · 접기 · 복사를 맡는다.
@@ -1285,7 +1300,7 @@ function MainScreen() {
             {([['main', '💬', '메인', '맹비서와 대화'],
                ['agents', '🤖', '에이전트', '부서·팀원·사무실'],
                ['projects', '🚀', '프로젝트', '결재·진행·배운 것'],
-               ['knowledge', '🧬', '지식베이스', '위키 496건']] as const)
+               ['knowledge', '🧬', '지식베이스', '위키 문서 찾기'] /* 전에는 '위키 496건' 이라고 **박아 둔 숫자**였다. 지금 위키는    562건이다 — 화면이 거짓말을 하고 있었다. 세는 쪽(KnowledgeTab)    이 제 숫자를 들고 있으므로 여기서는 하는 일만 적는다. */] as const)
               .map(([id, ico, name, hint]) => (
                 <button key={id}
                         className={`hs-nav-item ${activeTab === id ? 'on' : ''}`}
@@ -1329,45 +1344,31 @@ function MainScreen() {
       {activeTab === 'projects' && (
         <div className="pj-page">
         <div className="ceo-room">
-          {/* KPI. 숫자를 누르면 그 칸으로 간다 — 결재 대기는 결재함으로,
-              나머지는 프로젝트 목록을 그 상태로 걸러서. 숫자만 있고 갈 데가
-              없으면 "그래서 어디?" 를 한 번 더 찾아야 한다. */}
+          {/* 이 줄의 질문은 하나다 — **내가 지금 손대야 할 것이 있나?**
+              답이 '없다' 면 짧아야 한다.
+
+              전에는 여기에 「진행 중 · 완료 · 중단 · 에이전트」 까지 늘어놓고
+              누르면 아래 목록이 걸러졌다. 그런데 **목록 바로 위에 똑같은
+              필터가 또 있다**(pj-filters). 290px 사이로 같은 숫자가 두 번
+              나오고, 둘은 같은 상태(pjGroup)를 공유하므로 사실 **같은
+              컨트롤을 두 군데 그린 것**이었다. 숫자는 그것이 바꿀 수 있는
+              것 옆에 한 번만 둔다 — 그래서 아래쪽만 남겼다.
+              에이전트 수도 뺐다. 탭 바가 거기로 가고, 에이전트 탭이 머리에
+              「12명 · 전원 대기」 라고 더 잘 말한다. */}
           <div className="ceo-kpi-bar">
-            {/* 결재가 제일 왼쪽이다 — 사장님만 할 수 있는 유일한 일이라서. */}
             <button className="ceo-kpi-item" onClick={() => {
               setApprovalOpen(true);
               document.getElementById('pj-sec-approvals')
                 ?.scrollIntoView({ behavior: 'smooth', block: 'start' });
             }} title="결재함으로">
-              <span className="ceo-kpi-label">결재 대기</span>
-              <span className={`ceo-kpi-value ${ceoCount.pending ? 'red' : 'aqua'}`}>
-                {ceoCount.pending}
-              </span>
-            </button>
-            {([
-              ['live', '진행 중', 'purple'],
-              ['done', '완료', 'aqua'],
-              ['stopped', '중단', ceoCount.stopped ? 'amber' : 'aqua'],
-            ] as const).map(([g, label, tone]) => (
-              <Fragment key={g}>
-                <div className="ceo-kpi-sep" />
-                <button className={`ceo-kpi-item ${pjGroup === g ? 'on' : ''}`}
-                        title={`프로젝트 목록을 「${label}」 으로 걸러 보기`}
-                        onClick={() => {
-                          setPjGroup(pjGroup === g ? 'all' : g);
-                          document.getElementById('pj-sec-projects')
-                            ?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-                        }}>
-                  <span className="ceo-kpi-label">{label}</span>
-                  <span className={`ceo-kpi-value ${tone}`}>{ceoCount[g]}</span>
-                </button>
-              </Fragment>
-            ))}
-            <div className="ceo-kpi-sep" />
-            <button className="ceo-kpi-item" onClick={() => setActiveTab('agents')}
-                    title="에이전트 탭으로">
-              <span className="ceo-kpi-label">에이전트</span>
-              <span className="ceo-kpi-value purple">{agents.length}</span>
+              {ceoCount.pending > 0 ? (
+                <>
+                  <span className="ceo-kpi-label">결재 대기</span>
+                  <span className="ceo-kpi-value red">{ceoCount.pending}</span>
+                </>
+              ) : (
+                <span className="ceo-kpi-quiet">지금 결정하실 것은 없습니다</span>
+              )}
             </button>
             {/* 새 프로젝트 입력칸을 뺐으므로 일을 맡기는 입구는 여기다.
                 대화창을 **맡기기 모드로** 연다 — 그냥 열면 맹비서와의 대화가
@@ -1459,24 +1460,52 @@ function MainScreen() {
         >
           <div className="hs-sidebar-title">📊 시스템 현황</div>
 
-          {/* 서비스 헬스 */}
+          {/* 서비스 헬스 — **탈 난 것만 적는다.**
+
+              전에는 네 줄이 늘 초록으로 서 있었다. 그런데 상단 바가 이미
+              ● 서버 ● AI 모델 ● 지식 베이스 를 보여 준다 — 넷 중 셋이
+              같은 화면에 두 번 있었다. 다 초록인 상태는 한 줄이면 되고,
+              그래야 하나가 빨개졌을 때 그 줄이 눈에 들어온다.
+              대신 **무엇을 확인했는지는 숨기지 않는다** — 마우스를 올리면
+              네 곳의 이름이 나오고, 탈 난 곳은 전문이 그대로 펼쳐진다. */}
           <div className="hs-status-section">
-            {([
-              ['백엔드',   backendOk,                  '연결됨', '미연결'],
-              ['AI 모델',  healthDetail?.vllm?.ok ?? false, '정상',   healthDetail?.vllm?.error ? 'Ollama 미연결' : '확인 중'],
-              ['지식 베이스', healthDetail?.knowledge_base?.ok ?? false, '동기화됨', '경로 오류'],
-              // 맹비서를 넣는다. 메인 채팅의 **기본 상대**인데 이 줄만
-              // 없었다 — 게이트웨이가 꺼져 있어도 현황판은 전부 초록이라,
-              // 사장님은 메시지를 보내고 나서야 안 된다는 걸 알았다(실측).
-              ['맹비서', assistantUp === true, '연결됨',
-               assistantUp === null ? '확인 중' : '꺼짐'],
-            ] as [string, boolean, string, string][]).map(([label, ok, okTxt, errTxt]) => (
-              <div key={label} className="hs-status-row">
-                <span className={`hs-dot ${ok ? 'green' : 'red'}`} />
-                <span className="hs-status-label">{label}</span>
-                <span className={`hs-status-badge ${ok ? 'ok' : 'err'}`}>{ok ? okTxt : errTxt}</span>
-              </div>
-            ))}
+            {(() => {
+              const checks: [string, boolean, string, string][] = [
+                ['백엔드',   backendOk,                  '연결됨', '미연결'],
+                ['AI 모델',  healthDetail?.vllm?.ok ?? false, '정상',   healthDetail?.vllm?.error ? 'Ollama 미연결' : '확인 중'],
+                ['지식 베이스', healthDetail?.knowledge_base?.ok ?? false, '동기화됨', '경로 오류'],
+                // 맹비서를 넣는다. 메인 채팅의 **기본 상대**인데 이 줄만
+                // 없었다 — 게이트웨이가 꺼져 있어도 현황판은 전부 초록이라,
+                // 사장님은 메시지를 보내고 나서야 안 된다는 걸 알았다(실측).
+                ['맹비서', assistantUp === true, '연결됨',
+                 assistantUp === null ? '확인 중' : '꺼짐'],
+              ];
+              const bad = checks.filter(c => !c[1]);
+              const good = checks.filter(c => c[1]);
+              return (
+                <>
+                  {bad.map(([label, , , errTxt]) => (
+                    <div key={label} className="hs-status-row">
+                      <span className="hs-dot red" />
+                      <span className="hs-status-label">{label}</span>
+                      <span className="hs-status-badge err">{errTxt}</span>
+                    </div>
+                  ))}
+                  {good.length > 0 && (
+                    <div className="hs-status-row"
+                         title={good.map(c => c[0]).join(' · ') + ' — 정상'}>
+                      <span className="hs-dot green" />
+                      <span className="hs-status-label">
+                        {bad.length === 0 ? '시스템' : '나머지'}
+                      </span>
+                      <span className="hs-status-badge ok">
+                        {bad.length === 0 ? '모두 정상' : `${good.length}곳 정상`}
+                      </span>
+                    </div>
+                  )}
+                </>
+              );
+            })()}
             <div className="hs-status-row">
               <span className={`hs-dot ${cycleStatus !== 'stopped' ? 'amber' : 'gray'}`} />
               <span className="hs-status-label">활동</span>
@@ -1486,11 +1515,23 @@ function MainScreen() {
                   : cycleStatus === 'waiting' ? '사장님 차례' : cycleStatus}
               </span>
             </div>
-            <div className="hs-status-row">
+            {/* 에이전트 한 줄. 아래에 부서 다섯 줄을 따로 깔던 것을 접었다 —
+                그쪽이 보여 주던 '부서별 머릿수' 는 에이전트 탭이 더 잘
+                말한다. 여기서 알아야 할 것은 **지금 누가 움직이나** 하나고,
+                움직이는 사람이 있을 때만 그 줄이 생긴다. */}
+            <button className="hs-status-row hs-status-row-btn"
+                    onClick={() => setActiveTab('agents')}
+                    title="에이전트 탭으로 — 부서 · 팀원 · 사무실">
               <span className={`hs-dot ${activeAgents > 0 ? 'amber' : 'gray'}`} />
               <span className="hs-status-label">에이전트</span>
               <span className="hs-status-badge idle">{agents.length}명 · {activeAgents > 0 ? `${activeAgents}명 활성` : '대기'}</span>
-            </div>
+            </button>
+            {agents.filter(a => a.status !== 'Idle').slice(0, 3).map(a => (
+              <div key={a.agent_id} className="hs-status-doing">
+                <span className="hs-status-doing-who">{deptLabels[a.department] ?? a.department}</span>
+                <span className="hs-status-doing-what">{a.doing || '작업 중'}</span>
+              </div>
+            ))}
           </div>
 
           {/* 태스크 현황 — 숫자 배지 */}
@@ -1541,6 +1582,10 @@ function MainScreen() {
                     <span className="hs-task-mini-dot" style={{ background: statusColor }} />
                     <span className="hs-task-mini-icon">{deptIcons[t.target_dept] ?? '📋'}</span>
                     <span className="hs-task-mini-text">{t.instruction.slice(0, 30)}{t.instruction.length > 30 ? '…' : ''}</span>
+                    {/* **언제인지 적는다.** 전에는 날짜가 한 글자도 없어서
+                        엿새 전 태스크가 방금 끝난 것처럼 읽혔다(실측
+                        2026-10-30: 맨 위 항목이 10-24). */}
+                    <span className="hs-task-mini-when">{timeAgo(t.updated_at || t.created_at)}</span>
                   </button>
                 );
               })}
@@ -1549,62 +1594,20 @@ function MainScreen() {
 
           {/* 지금 막힌 것 — 사장님이 아니면 아무도 못 푸는 일.
               자세한 현황은 프로젝트 탭의 결재함이 맡는다. 여기까지 숫자를
-              늘어놓으면 같은 것을 두 군데서 세게 되고, 어긋나면 둘 다 못 믿는다. */}
-          <div className="hs-sidebar-section-title">지금 막힌 것</div>
-          <button className={`hs-blocked ${ceoApprovals.length ? 'on' : ''}`}
-            onClick={() => setActiveTab('projects')}
-            title="프로젝트 탭의 결재함으로">
-            {ceoApprovals.length > 0 ? (
-              <>
-                <span className="hs-blocked-n">{ceoApprovals.length}</span>
-                <span className="hs-blocked-t">결재 대기<br /><b>눌러서 처리 →</b></span>
-              </>
-            ) : (
-              <span className="hs-blocked-t none">막혀 있는 일 없음</span>
-            )}
-          </button>
+              늘어놓으면 같은 것을 두 군데서 세게 되고, 어긋나면 둘 다 못 믿는다.
 
-          {/* 전에는 '상태보고' 였고, 누르면 그 부서에 **상태보고를 시켰다**
-              — 호출 하나를 쓰고 답을 기다려야 했다. 사장님이 원하신 것은
-              "지금 누가 무엇을 하고 있나" 를 보는 것이지 보고서를 받는 게
-              아니다. 이름을 사실대로 바꾸고, 누르면 사무실 탭으로 보낸다. */}
-          <div className="hs-sidebar-section-title">에이전트 활동</div>
-          <div className="hs-dept-list">
-            {/* 아이콘만 여기서 들고, **이름은 `deptLabels`(정본)** 를 읽는다.
-                전에는 접미사 없는 이름('학술연구')을 따로 적어 둬서, 같은
-                부서가 사이드바에서는 '학술연구', 사무실·에이전트 탭에서는
-                '학술연구부' 로 나왔다. */}
-            {([
-              ['orchestration_dept', '🧠'],
-              ['research_dept',      '🔬'],
-              ['finance_dept',       '📈'],
-              ['dev_dept',           '⚙️'],
-              ['content_dept',       '✍️'],
-            ] as [string, string][]).map(([d, icon]) => {
-              const label = deptLabels[d] ?? d;
-              const mine   = agents.filter(a => a.department === d);
-              const busy   = mine.find(a => a.status !== 'Idle');
-              // 숫자만 있으면 무엇의 개수인지 알 수 없었다(인원? 태스크?).
-              // 일하는 중이면 무엇을 하는지까지 쓴다.
-              return (
-                <button
-                  key={d}
-                  className={`hs-dept-card ${busy ? 'busy' : ''}`}
-                  onClick={() => setActiveTab('agents')}
-                  title={busy ? `${label}팀 — ${busy.doing || '작업 중'}` : `${label}팀 — 대기 중. 눌러서 에이전트 탭으로`}
-                >
-                  <span className="hs-dept-icon">{icon}</span>
-                  <span className="hs-dept-name">
-                    {label}
-                    {busy?.doing && <span className="hs-dept-doing">{busy.doing}</span>}
-                  </span>
-                  <span className={`hs-dept-count ${busy ? 'active' : ''}`}>
-                    {mine.length}<span className="hs-dept-unit">명</span>
-                  </span>
-                </button>
-              );
-            })}
-          </div>
+              **없을 때는 아예 나오지 않는다.** 전에는 「막혀 있는 일 없음」
+              이 늘 한 칸을 차지했는데, 바로 옆 브리핑 말풍선이 같은 문장을
+              쓰고 있었다. 아무 일 없을 때 조용해야 생겼을 때 눈에 띈다. */}
+          {ceoApprovals.length > 0 && (<>
+            <div className="hs-sidebar-section-title">지금 막힌 것</div>
+            <button className="hs-blocked on"
+              onClick={() => setActiveTab('projects')}
+              title="프로젝트 탭의 결재함으로">
+              <span className="hs-blocked-n">{ceoApprovals.length}</span>
+              <span className="hs-blocked-t">결재 대기<br /><b>눌러서 처리 →</b></span>
+            </button>
+          </>)}
 
           {/* 활동 피드는 중앙 상단으로 옮겼다. 여기 두면 같은 화면에 같은 피드가
               둘 뜨고(태블릿 폭에서 특히 눈에 띈다), 사이드바는 좁아 읽기도 어렵다.

@@ -366,49 +366,6 @@ body {
   font-size: 10px; color: var(--muted2); text-transform: uppercase; letter-spacing: 0.05em;
 }
 
-/* ── 부서 카드 ── */
-.hs-dept-list {
-  flex: 1;
-  overflow-y: auto;
-  padding: 4px 8px 8px;
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-}
-.hs-dept-card {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  padding: 7px 10px;
-  border-radius: 10px;
-  border: 1px solid transparent;
-  background: transparent;
-  color: var(--muted);
-  font-size: 11px;
-  cursor: pointer;
-  transition-property: var(--t-ui); transition-duration: 0.15s;
-  text-align: left;
-  width: 100%;
-}
-.hs-dept-card:hover {
-  background: var(--primary-dk);
-  border-color: var(--primary-dim);
-  color: var(--text);
-}
-.hs-dept-card.selected {
-  background: var(--primary-dim);
-  border-color: rgba(139,92,246,0.45);
-  color: var(--primary);
-}
-.hs-dept-icon  { font-size: 14px; flex-shrink: 0; }
-.hs-dept-name  { flex: 1; font-size: 10px; font-weight: 500; }
-.hs-dept-count {
-  font-size: 10px; font-weight: 700;
-  min-width: 16px; text-align: center;
-  color: var(--muted2);
-}
-.hs-dept-count.active { color: var(--secondary); }
-
 /* ── Center area ── */
 .hs-center {
   flex: 1;
@@ -1586,7 +1543,9 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 .hs-task-mini-item:hover { background: var(--glass-bg); border-color: var(--glass-border); color: var(--text); }
 .hs-task-mini-dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
 .hs-task-mini-icon { font-size: 11px; flex-shrink: 0; }
-.hs-task-mini-text { flex: 1; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.hs-task-mini-text { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+/* 언제. 글보다 흐리게 — 읽히되 글을 가리지 않는다. */
+.hs-task-mini-when { flex-shrink: 0; color: var(--muted2); font-size: 9.5px; }
 
 /* ══════════════════════════════════════════════
    태스크 드로어
@@ -4751,13 +4710,6 @@ button.pj-deliv-item[aria-expanded="true"] { background: var(--glass-hi); border
   .hs-tab { flex: none; white-space: nowrap; }
 }
 
-/* ③⑦ 부서 카드 — 숫자가 무엇의 개수인지, 지금 무엇을 하는지. */
-.hs-dept-unit { margin-left: 1px; font-size: 9px; font-weight: 500; opacity: .7; }
-.hs-dept-doing {
-  display: block; margin-top: 1px; font-size: 9.5px; font-weight: 500;
-  color: var(--primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-}
-.hs-dept-card.busy { border-color: rgba(139, 92, 246, .45); }
 
 /* ④ 사이드바는 "지금 내가 손대야 할 것" 만. 자세한 현황은 CEO 룸이 맡는다. */
 .hs-blocked {
@@ -5838,7 +5790,6 @@ button.pj-deliv-item[aria-expanded="true"] { background: var(--glass-hi); border
 }
 .hs-tab:focus-visible,
 .hs-chip:focus-visible,
-.hs-dept-card:focus-visible,
 .hs-send-btn:focus-visible,
 .hs-plus:focus-visible,
 .kb-file:focus-visible,
@@ -7046,3 +6997,41 @@ button.pj-deliv-item[aria-expanded="true"] { background: var(--glass-hi); border
 }
 .am-card-open .am-team-member-wrap { flex: 0 1 230px; min-width: 180px; }
 .am-card-open .am-card-say { max-width: 620px; }
+
+
+/* 사이드바 '에이전트' 줄 — 누르면 에이전트 탭으로. 다른 상태 줄과 같은
+   모양이지만 누르는 것이므로 올리면 반응한다. */
+.hs-status-row-btn {
+  width: 100%;
+  background: none;
+  border: none;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+  /* `font: inherit` 를 쓰면 안 된다 — 그 단축 속성이 font-size 까지
+     부모(14px)로 되돌려, 다른 상태 줄(10px)보다 이 줄만 커진다.
+     글꼴만 물려받고 크기는 `.hs-status-row` 의 것을 쓴다. */
+  font-family: inherit;
+}
+.hs-status-row-btn:hover { background: rgba(255,255,255,0.04); border-radius: 6px; }
+
+/* 움직이는 사람이 있을 때만 생기는 줄. 조용하면 아예 없다. */
+.hs-status-doing {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 4px 8px 4px 20px;
+  font-size: 11px;
+  line-height: 1.4;
+}
+.hs-status-doing-who { color: var(--secondary); font-weight: 600; }
+.hs-status-doing-what {
+  color: var(--muted);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+/* 결재가 없을 때의 KPI 바. 숫자 대신 사실을 적는다. */
+.ceo-kpi-quiet {
+  font-size: 13px;
+  color: var(--muted);
+}
