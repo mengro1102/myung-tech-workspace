@@ -27,6 +27,7 @@
  * 휴지통에 넣는다. 영구 삭제는 여기서 못 한다 — 맹비서(`/휴지통`)만 한다.
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { pollInterval } from '../poll';
 import { api, deptLabels, type ApprovalRow, type DialogueEntry, type ProjectRow,
          type ProjectStatus, type ArchivedCall } from '../api';
 import { useTrashUndo, TrashUndoBar } from './TrashBox';
@@ -146,7 +147,7 @@ export default function ProjectsTab({ focusId, onFocused, group = 'all', onGroup
      4초보다 자주 물어 봐야 할 이유는 없다 — 한 스텝이 그보다 오래 걸린다. */
   useEffect(() => {
     void refresh();
-    const t = setInterval(() => { void refresh(); }, 4000);
+    const t = pollInterval(() => { void refresh(); }, 4000);
     return () => clearInterval(t);
   }, [refresh]);
 
@@ -410,7 +411,7 @@ function DialogueBlock({ pid }: { pid: string }) {
     let alive = true;
     const load = () => api.dialogue(300, pid).then(r => { if (alive && r?.dialogue) setRows(r.dialogue); });
     void load();
-    const t = setInterval(load, 5000);
+    const t = pollInterval(load, 5000);
     return () => { alive = false; clearInterval(t); };
   }, [pid]);
   if (!rows || rows.length === 0) return null;

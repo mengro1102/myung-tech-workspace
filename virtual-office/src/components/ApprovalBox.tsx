@@ -13,6 +13,7 @@
  * 곳이다. 둘을 여기로 모은다.
  */
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
+import { pollInterval } from '../poll';
 import type { AskContext } from './AskHermes';
 import AssistantFace from './AssistantFace';
 import { api, type ApprovalRow, type ProjectRow } from '../api';
@@ -181,7 +182,7 @@ export default function ApprovalBox({ open: boxOpen, onToggle, focusId,
   useEffect(() => {
     void load();
     // 결재는 에이전트가 올린다 — 화면을 열어 둔 채로도 새 건이 생긴다.
-    const t = setInterval(() => { void load(); }, 15000);
+    const t = pollInterval(() => { void load(); }, 15000);
     return () => clearInterval(t);
   }, [load]);
 

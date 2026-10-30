@@ -1,4 +1,5 @@
 import { Fragment, useState, useEffect, useMemo, useRef, useCallback, lazy, Suspense } from 'react';
+import { pollInterval } from './poll';
 import { Routes, Route, useNavigate, useLocation } from 'react-router-dom';
 import OpsMap         from './components/OpsMap';
 // 2D 사무실은 Phaser(minify 후 1.5MB)를 끌고 온다. 정적으로 물리면 메인 탭만
@@ -576,11 +577,11 @@ function MainScreen() {
         }
       }).catch(() => { setBackendOk(false); setHealthDetail(null); });
     fetchAgents(); fetchHealth(); refreshTasks();
-    const t  = setInterval(() => setTime(nowStr()), 30000);
-    const ag = setInterval(fetchAgents, 15000);
-    const hc = setInterval(fetchHealth, 10000);
-    const ts = setInterval(refreshTasks, 8000);
-    const cs = setInterval(() => {
+    const t  = pollInterval(() => setTime(nowStr()), 30000);
+    const ag = pollInterval(fetchAgents, 15000);
+    const hc = pollInterval(fetchHealth, 10000);
+    const ts = pollInterval(refreshTasks, 8000);
+    const cs = pollInterval(() => {
       fetch('/api/cycle/status')
         .then(r => r.json())
         .then(d => { setCycleStatus(d.status); setActivity(d); })
@@ -606,10 +607,30 @@ function MainScreen() {
   // 이벤트 폴링 → 알림 변환
   useEffect(() => {
     const seenIds = new Set<string>();
+
+    // 첫 폴링은 **밀린 것 채우기**다. `/api/events` 는 지난 50건을 돌려주고,
+    // seenIds 는 화면을 열 때마다 비어 있으므로 그 50건이 전부 '새 것' 으로
+    // 보인다. 목록에는 넣되 눈앞에 띄우지는 않는다 — 엿새 전 일이 오늘
+    // 토스트로 튀면 사장님은 방금 무슨 일이 난 줄 아신다.
+    let firstPass = true;
+
+    /** 토스트는 **진짜 새 소식일 때만.** 벨 목록은 이미 지운 것을 거르는데
+     *  토스트는 그 보호 밖에 있었다. */
+    const toast = (n: Notification, catchUp: boolean) => {
+      if (catchUp) return;
+      if (notifSeenRef.current.read.includes(n.id)) return;
+      if (notifSeenRef.current.dismissed.includes(n.id)) return;
+      setRecentNotif(n);
+      if (recentNotifTimerRef.current) clearTimeout(recentNotifTimerRef.current);
+      recentNotifTimerRef.current = setTimeout(() => setRecentNotif(null), 5000);
+    };
+
     const poll = () => fetch('/api/events').then(r => r.json()).then((d: { events?: Array<{ event_id: string; sender: string; target: string; payload: string; timestamp?: string }> }) => {
       const events = d.events ?? [];
       const newEvents = events.filter(e => e.event_id && !seenIds.has(e.event_id));
       newEvents.forEach(e => seenIds.add(e.event_id));
+      const catchUp = firstPass;
+      firstPass = false;
       if (newEvents.length === 0) return;
       // 중요 이벤트만 알림으로 변환
       newEvents.forEach(e => {
@@ -626,20 +647,16 @@ function MainScreen() {
             const row = notifSeenRef.current.read.includes(n.id) ? { ...n, read: true } : n;
             return [row, ...prev].slice(0, 50);
           });
-          setRecentNotif(n);
-          if (recentNotifTimerRef.current) clearTimeout(recentNotifTimerRef.current);
-          recentNotifTimerRef.current = setTimeout(() => setRecentNotif(null), 5000);
+          toast(n, catchUp);
         } else if (isDone) {
-          const n: Notification = { id: `notif-${e.event_id}`, type: 'success', message: `${e.sender} 보고`, time: new Date(e.timestamp ?? Date.now()), read: false, link: () => setActiveTab('projects') };
+          const n: Notification = { id: `notif-${e.event_id}`, type: 'success', message: `${deptLabels[e.sender] ?? e.sender} 보고`, time: new Date(e.timestamp ?? Date.now()), read: false, link: () => setActiveTab('projects') };
           setNotifications(prev => {
             if (notifSeenRef.current.dismissed.includes(n.id)) return prev;   // 지운 것은 다시 만들지 않는다
             if (prev.some(x => x.id === n.id)) return prev;
             const row = notifSeenRef.current.read.includes(n.id) ? { ...n, read: true } : n;
             return [row, ...prev].slice(0, 50);
           });
-          setRecentNotif(n);
-          if (recentNotifTimerRef.current) clearTimeout(recentNotifTimerRef.current);
-          recentNotifTimerRef.current = setTimeout(() => setRecentNotif(null), 5000);
+          toast(n, catchUp);
         } else if (isWarn) {
           const n: Notification = { id: `notif-${e.event_id}`, type: 'warning', message: `[${e.sender}] ${p.slice(0, 70)}`, time: new Date(e.timestamp ?? Date.now()), read: false };
           setNotifications(prev => {
@@ -648,14 +665,12 @@ function MainScreen() {
             const row = notifSeenRef.current.read.includes(n.id) ? { ...n, read: true } : n;
             return [row, ...prev].slice(0, 50);
           });
-          setRecentNotif(n);
-          if (recentNotifTimerRef.current) clearTimeout(recentNotifTimerRef.current);
-          recentNotifTimerRef.current = setTimeout(() => setRecentNotif(null), 5000);
+          toast(n, catchUp);
         }
       });
     }).catch(() => {});
     poll();
-    const t = setInterval(poll, 5000);
+    const t = pollInterval(poll, 5000);
     return () => clearInterval(t);
   }, []);
 
@@ -713,7 +728,7 @@ function MainScreen() {
       setCeoProjectList(p?.projects ?? []);
     };
     void tick();
-    const t = setInterval(() => { void tick(); }, 15000);
+    const t = pollInterval(() => { void tick(); }, 15000);
     return () => { stop = true; clearInterval(t); };
   }, [activeTab]);
 
@@ -1671,6 +1686,27 @@ function MainScreen() {
               </button>
             ))}
           </div>
+
+          {/* 실패한 태스크로 가는 한 걸음.
+
+              브리핑은 "태스크 1건 실패" 라고 **글자로만** 말하고 끝이었다.
+              그 건을 열려면 ⠿ 메뉴 → 태스크 현황 → 빨간 '실패' 배지 →
+              목록 항목, 네 번을 눌러야 했다. 그래서 10월 20일에 멈춘
+              태스크를 열흘 동안 아무도 보지 않았다(실측 2026-10-30).
+              사유는 데이터에 멀쩡히 적혀 있었다. 길이 없었을 뿐이다. */}
+          {taskSummary.failed > 0 && (
+            <div className="hs-chips">
+              <button className="hs-chip hs-chip-alert"
+                      onClick={() => {
+                        const f = taskList
+                          .filter(t => t.status === 'failed')
+                          .sort((a, b) => String(b.updated_at || '').localeCompare(String(a.updated_at || '')))[0];
+                        if (f) setDrawerTaskId(f.task_id);
+                      }}>
+                ⚠️ 실패한 태스크 {taskSummary.failed}건 — 사유 보기
+              </button>
+            </div>
+          )}
 
 
           {/* Chat input — 쓰는 만큼 늘고, 도구는 `+` 하나로 모았다. */}

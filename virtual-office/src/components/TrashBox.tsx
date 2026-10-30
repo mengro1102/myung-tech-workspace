@@ -18,6 +18,7 @@
  *  경우를 위해 휴지통까지 내려가게 하지 않는다.
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { pollInterval } from '../poll';
 import { api, type TrashItem } from '../api';
 import { TRASH_EVENT, trashChanged } from './trashEvent';
 
@@ -94,7 +95,7 @@ export default function TrashBox() {
     const on = () => { void load(); };
     window.addEventListener(TRASH_EVENT, on);
     // 맹비서가 디스코드에서 되살리거나 영구 삭제해도 여기가 따라온다.
-    const t = window.setInterval(on, 30_000);
+    const t = pollInterval(on, 30_000);
     return () => { window.removeEventListener(TRASH_EVENT, on); window.clearInterval(t); };
   }, [load]);
 

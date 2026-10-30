@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import { pollInterval } from '../poll';
 import { AgentSummary, AgentDetail, deptLabels, api } from '../api';
 
 interface Props {
@@ -174,7 +175,7 @@ export default function AgentManageTab({ agents, onDeploy, onDeptChat }: Props) 
     const load = () => fetch('/api/events').then(r => r.json())
       .then(d => setFeed((d.events ?? []).slice(-30).reverse())).catch(() => {});
     load();
-    const t = setInterval(load, 4000);
+    const t = pollInterval(load, 4000);
     return () => clearInterval(t);
   }, []);
 
@@ -182,7 +183,7 @@ export default function AgentManageTab({ agents, onDeploy, onDeptChat }: Props) 
     const loadStats = () => fetch('/api/system/stats').then(r => r.json())
       .then(d => setStats(d)).catch(() => {});
     loadStats();
-    const t = setInterval(loadStats, 5000);
+    const t = pollInterval(loadStats, 5000);
     return () => clearInterval(t);
   }, []);
 

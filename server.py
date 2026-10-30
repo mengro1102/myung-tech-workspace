@@ -2157,6 +2157,22 @@ class Handler(BaseHTTPRequestHandler):
             all_t.sort(key=lambda t: t.get("updated_at", ""), reverse=True)
             total  = len(all_t)
             page   = all_t[offset: offset + limit]
+
+            # 목록에는 답 전문을 싣지 않는다. 18건에 97 KB 였고, 그 거의
+            # 전부가 `result` 였다. 화면은 목록의 result 를 쓰지 않는다 —
+            # 상세는 TaskDrawer 가 `/api/tasks/<id>` 로 따로 받는다.
+            # 자른 건에는 표시를 남겨, 받는 쪽이 전문인지 아닌지 알 수 있게 한다.
+            RESULT_PREVIEW = 300
+            slim = []
+            for row in page:
+                r = row.get("result")
+                if isinstance(r, str) and len(r) > RESULT_PREVIEW:
+                    row = dict(row)
+                    row["result"] = r[:RESULT_PREVIEW]
+                    row["result_truncated"] = True
+                slim.append(row)
+            page = slim
+
             _json_resp(self, 200, {"tasks": page, "total": total, "limit": limit, "offset": offset})
 
         # ── GET /api/tasks/:id
@@ -2248,8 +2264,14 @@ class Handler(BaseHTTPRequestHandler):
             rows = []
             for p in projects.load():
                 # 목록에는 본문을 싣지 않는다. 산출물이 수만 자라 화면이 굳는다.
+                #
+                # dialogue·sources_by_d·sources 도 같은 이유로 뺀다. 이 셋이
+                # 응답의 **95%** 였다(실측 826KB 중 498KB). 화면은 대화를
+                # `/api/dialogue` 로 따로 받고, 나머지 둘은 아예 쓰지 않는다.
+                # 전부 필요하면 `/api/projects/<id>` 를 부르면 된다.
                 rows.append({k: v for k, v in p.items()
-                             if k not in ("artifacts", "steps")}
+                             if k not in ("artifacts", "steps",
+                                          "dialogue", "sources_by_d", "sources")}
                             | {"progress": projects.progress(p),
                                "step_count": len(p.get("steps") or []),
                                "budget_left": projects.budget_left(p)})

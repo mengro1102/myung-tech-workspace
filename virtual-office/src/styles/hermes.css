@@ -6878,3 +6878,16 @@ button.pj-deliv-item[aria-expanded="true"] { background: var(--glass-hi); border
   .md-math-block { padding: 8px 2px; }
   .katex { font-size: 0.98em; }
 }
+
+
+/* 실패를 알리는 칩. 평소 칩과 같은 모양이되 빨간 테두리로 구분한다 —
+   색만으로 뜻을 전하지 않도록 ⚠️ 와 '사유 보기' 라는 말을 함께 둔다. */
+.hs-chip-alert {
+  border-color: rgba(239, 68, 68, 0.55);
+  color: #fca5a5;
+  background: rgba(239, 68, 68, 0.10);
+}
+.hs-chip-alert:hover {
+  border-color: rgba(239, 68, 68, 0.85);
+  background: rgba(239, 68, 68, 0.18);
+}

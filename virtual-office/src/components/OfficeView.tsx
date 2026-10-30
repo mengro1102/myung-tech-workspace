@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import { pollInterval } from '../poll';
 import { deptLabels } from '../api';
 import PixelOffice from './PixelOffice';
 import AgentChat from './AgentChat';
@@ -104,7 +105,7 @@ export default function OfficeView({ agents, cycleStatus, taskSummary, onDeptCha
     const load = () => fetch('/api/events').then(r => r.json())
       .then(d => setFeed((d.events ?? []).slice(-40).reverse())).catch(() => {});
     load();
-    const t = setInterval(load, 4000);
+    const t = pollInterval(load, 4000);
     return () => clearInterval(t);
   }, []);
 
@@ -116,7 +117,7 @@ export default function OfficeView({ agents, cycleStatus, taskSummary, onDeptCha
   useEffect(() => {
     const load = () => api.dialogue(80).then(r => { if (r?.dialogue) setDialogue(r.dialogue); });
     void load();
-    const t = setInterval(load, 4000);
+    const t = pollInterval(load, 4000);
     return () => clearInterval(t);
   }, []);
 

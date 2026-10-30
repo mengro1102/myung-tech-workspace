@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import { pollInterval } from '../poll';
 
 interface TaskItem {
   id: string;
@@ -45,7 +46,7 @@ export default function CeoOverrideModal({ task, onClose, onInject }: Props) {
     const load = () => fetch('/api/events').then(r => r.json())
       .then(d => setFeed((d.events ?? []).slice(-40).reverse())).catch(() => {});
     load();
-    const t = setInterval(load, 2000);
+    const t = pollInterval(load, 2000);
     return () => clearInterval(t);
   }, []);
 

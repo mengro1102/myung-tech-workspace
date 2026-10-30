@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { pollInterval } from '../poll';
 
 interface AgentSummary { agent_id: string; department?: string; status?: string; character_name?: string; }
 interface TaskSummary  { pending: number; in_progress: number; done: number; failed: number; }
@@ -47,13 +48,13 @@ export default function OpsMap({ agents, taskSummary, selectedDept, onSelectDept
         setRecentTasks(evts);
       }).catch(() => {});
     load();
-    const t = setInterval(load, 6000);
+    const t = pollInterval(load, 6000);
     return () => clearInterval(t);
   }, []);
 
   // Pulse animation tick
   useEffect(() => {
-    const t = setInterval(() => setTick(n => n + 1), 1200);
+    const t = pollInterval(() => setTick(n => n + 1), 1200);
     return () => clearInterval(t);
   }, []);
 
