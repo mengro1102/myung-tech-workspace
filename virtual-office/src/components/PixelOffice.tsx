@@ -787,11 +787,23 @@ export default function PixelOffice({
     if (ctx) ctx.imageSmoothingEnabled = false;
   }, [ready]);
 
+  /** 화면 좌표 → 캔버스 베이스 좌표.
+   *
+   *  **레터박스를 빼고 계산한다.** 캔버스는 `object-fit: contain` 이라
+   *  요소 안에서 비율을 지키며 가운데 놓이고, 남는 쪽에 빈 띠가 생긴다.
+   *  전에는 요소 전체를 그림 전체에 그대로 대응시켰다 — 실측으로 요소
+   *  954px 안에 그림이 678px 만 그려지고 좌우 138px 씩이 빈 띠였는데,
+   *  그 띠까지 그림인 셈 쳤으니 가로로 최대 139 베이스픽셀이 밀렸다.
+   *  사람 판정 상자가 ±10 이므로 **아무도 집히지 않았고**, 방 강조도
+   *  엉뚱한 방을 가리켰다. */
   const toBase = (e: React.MouseEvent<HTMLCanvasElement>) => {
     const rect = e.currentTarget.getBoundingClientRect();
+    const scale = Math.min(rect.width / BASE_W, rect.height / BASE_H);
+    const offX = (rect.width  - BASE_W * scale) / 2;
+    const offY = (rect.height - BASE_H * scale) / 2;
     return {
-      mx: (e.clientX - rect.left) / rect.width * BASE_W,
-      my: (e.clientY - rect.top) / rect.height * BASE_H,
+      mx: (e.clientX - rect.left - offX) / scale,
+      my: (e.clientY - rect.top  - offY) / scale,
     };
   };
 

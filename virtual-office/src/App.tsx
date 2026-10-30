@@ -4,7 +4,6 @@ import { Routes, Route, useNavigate, useLocation } from 'react-router-dom';
 import OpsMap         from './components/OpsMap';
 // 2D 사무실은 Phaser(minify 후 1.5MB)를 끌고 온다. 정적으로 물리면 메인 탭만
 // 볼 사람도 전부 내려받는다. 탭을 열 때만 가져오도록 지연 로드한다.
-const OfficeView   = lazy(() => import('./components/OfficeView'));
 import AgentTeamModal  from './components/AgentTeamModal';
 import MemoryModal     from './components/MemoryModal';
 import ModelModal      from './components/ModelModal';
@@ -66,7 +65,15 @@ const CHAT_HISTORY_KEY = 'myungtech_chat_history_v2';
  *  그대로 사라지던 것을 막는다(탭 전환에는 원래도 살아남았다). */
 const DRAFT_KEY = 'myungtech_draft_v1';
 
-type TabId = 'main' | 'office' | 'agents' | 'projects' | 'knowledge';
+type TabId = 'main' | 'agents' | 'projects' | 'knowledge';
+
+/** 없어진 탭 이름 → 지금 그 일을 하는 탭.
+ *
+ *  「사무실」은 「에이전트」 안으로 들어갔다(2026-10-30). 주소는 살려
+ *  둔다 — 북마크·브라우저 기록·예전 대화에 적어 둔 `#office` 가 조용히
+ *  메인으로 떨어지면 "탭이 사라졌다" 가 아니라 "앱이 고장났다" 로
+ *  읽힌다. */
+const TAB_MOVED: Record<string, TabId> = { office: 'agents' };
 
 /** 주소창의 `#projects` ↔ 탭.
  *
@@ -76,7 +83,7 @@ type TabId = 'main' | 'office' | 'agents' | 'projects' | 'knowledge';
  *  라우터를 들이지 않고 해시를 쓴다. `react-router-dom` 이 설치돼 있지만
  *  이 화면은 쓰지 않고, 경로 체계를 바꾸면 서버의 `_serve_ui` 폴백과
  *  터널 설정까지 같이 봐야 한다. 해시는 서버가 아예 보지 않는다. */
-const TABS: readonly TabId[] = ['main', 'office', 'agents', 'projects', 'knowledge'];
+const TABS: readonly TabId[] = ['main', 'agents', 'projects', 'knowledge'];
 
 function TAB_FROM_HASH(): TabId {
   // **첫 조각만 본다.** 지식베이스가 열어 둔 문서를
@@ -84,7 +91,8 @@ function TAB_FROM_HASH(): TabId {
   // 비교하면 못 찾아서 메인으로 떨어진다 — 문서를 읽다 새로고침하면
   // 그대로 튕기는 것이 그 때문이었다.
   const h = window.location.hash.replace(/^#\/?/, '').split('/')[0] as TabId;
-  return TABS.includes(h) ? h : 'main';
+  if (TABS.includes(h)) return h;
+  return TAB_MOVED[h] ?? 'main';
 }
 
 /** 브리핑의 발신자 이름.
@@ -393,7 +401,7 @@ function MainScreen() {
   ].filter(Boolean);
 
   useEffect(() => {
-    const where = ({ main: '메인', office: '사무실', agents: '에이전트',
+    const where = ({ main: '메인', agents: '에이전트',
                      projects: '프로젝트', knowledge: '지식베이스' } as const)[activeTab];
     document.title = `${waitTotal > 0 ? `(${waitTotal}) ` : ''}명테크 · ${where}`;
   }, [waitTotal, activeTab]);
@@ -1242,7 +1250,10 @@ function MainScreen() {
           PC 에서는 CSS 가 가로로 붙여 전과 똑같이 보인다. */}
       <div className="hs-tabs" role="tablist" aria-label="화면">
         {([['main', '💬', '메인'],
-           ['office', '🏢', '사무실'],
+           /* 「사무실」을 여기 안으로 넣었다. 둘 다 "누가 무엇을 하고
+              있나" 에 답하면서 부서 이름과 색이 서로 달랐다 — 같은
+              질문에 두 화면이 다른 답을 했다. 픽셀 사무실은 에이전트
+              탭 머리의 「🏢 사무실 보기」 로 펼친다. */
            ['agents', '🤖', '에이전트'],
            ['projects', '🚀', '프로젝트'],
            /* 전에는 '📝 노트' 였다 — 사장님 할 일 체크리스트. 그건 프로젝트
@@ -1272,8 +1283,7 @@ function MainScreen() {
                       aria-label="닫기">✕</button>
             </div>
             {([['main', '💬', '메인', '맹비서와 대화'],
-               ['office', '🏢', '사무실', '에이전트가 일하는 곳'],
-               ['agents', '🤖', '에이전트', '팀 구성과 페르소나'],
+               ['agents', '🤖', '에이전트', '부서·팀원·사무실'],
                ['projects', '🚀', '프로젝트', '결재·진행·배운 것'],
                ['knowledge', '🧬', '지식베이스', '위키 496건']] as const)
               .map(([id, ico, name, hint]) => (
@@ -1422,33 +1432,15 @@ function MainScreen() {
         </div>
       )}
 
-      {/* ── Office Tab ── */}
-      {activeTab === 'office' && (
-        <Suspense fallback={<div className="hs-lazy-fallback">
-          <span className="hs-lazy-spinner" />
-          2D 사무실을 불러오는 중…
-        </div>}>
-        <OfficeView
-          agents={agents}
-          cycleStatus={cycleStatus}
-          taskSummary={taskSummary}
-          onOpenProjects={() => setActiveTab('projects')}
-          // **한 번짜리.** 입력창을 그 부서에 묶지 않는다 — 묶으면 맹비서로
-          // 돌아올 길이 없다(대화 상대 피커를 없앴다).
-          onDeptChat={(d, msg) => {
-            setActiveTab('main');
-            setTimeout(() => send(msg, d), 100);
-          }}
-        />
-        </Suspense>
-      )}
-
-
-      {/* ── 에이전트 관리 탭 ── */}
+      {/* ── 에이전트 탭 — 부서·팀원·사무실이 한 화면에 ── */}
       {activeTab === 'agents' && (
         <AgentManageTab
           agents={agents}
+          cycleStatus={cycleStatus}
           onDeploy={() => setShowTeam(true)}
+          onOpenProjects={() => setActiveTab('projects')}
+          // **한 번짜리.** 입력창을 그 부서에 묶지 않는다 — 묶으면 맹비서로
+          // 돌아올 길이 없다(대화 상대 피커를 없앴다).
           onDeptChat={(d, msg) => { setActiveTab('main'); setTimeout(() => send(msg, d), 100); }}
         />
       )}
@@ -1598,8 +1590,8 @@ function MainScreen() {
                 <button
                   key={d}
                   className={`hs-dept-card ${busy ? 'busy' : ''}`}
-                  onClick={() => setActiveTab('office')}
-                  title={busy ? `${label}팀 — ${busy.doing || '작업 중'}` : `${label}팀 — 대기 중. 눌러서 사무실로`}
+                  onClick={() => setActiveTab('agents')}
+                  title={busy ? `${label}팀 — ${busy.doing || '작업 중'}` : `${label}팀 — 대기 중. 눌러서 에이전트 탭으로`}
                 >
                   <span className="hs-dept-icon">{icon}</span>
                   <span className="hs-dept-name">
@@ -1635,8 +1627,9 @@ function MainScreen() {
               대화)·에이전트(실시간 연산 로그). 같은 것을 세 번 보여 주면
               어느 것도 제대로 안 보게 된다. 메인의 일은 **대화**지 감시가
               아니므로 여기를 뺐다.
-              확인한 것: 사무실(OfficeView)과 에이전트(AgentManageTab)는
-              각자 `/api/events` 를 폴링한다 — AgentFeed 를 쓰지 않는다.
+              확인한 것: 그때는 사무실과 에이전트가 각자 `/api/events` 를
+              폴링했고 — AgentFeed 를 쓰지 않았다. (2026-10-30: 두 탭을
+              합쳐 폴링도 한 곳으로 모았다.)
               그래서 여기를 빼도 기능이 사라지지 않고, AgentFeed 는 고아가
               되어 함께 지웠다(git 에 남아 있다). SSE 엔드포인트
               `/api/events/stream` 은 pages/VirtualOffice.tsx 가 쓰므로 둔다. */}

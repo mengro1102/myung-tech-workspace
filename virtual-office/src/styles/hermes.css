@@ -2114,44 +2114,133 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
   display: grid;
   grid-template-columns: repeat(5, 1fr);
   gap: 14px;
+  /* 카드 높이가 서로 다르다(접힘/펼침). 늘려 맞추면 접힌 카드가 펼친
+     카드만큼 키가 커져 빈 칸이 생긴다. */
+  align-items: start;
 }
 @media (max-width: 1200px) { .am-grid { grid-template-columns: repeat(3, 1fr); } }
 @media (max-width: 800px)  { .am-grid { grid-template-columns: repeat(2, 1fr); } }
 @media (max-width: 480px)  { .am-grid { grid-template-columns: 1fr; } }
 
+/* 부서 카드 — 접힌 줄이 기본.
+ *
+ * 전에는 카드 다섯 개가 아바타 72px · 역할 · 설명 · 팀원 칩 · 푸터까지
+ * 전부 펼쳐 놓고, 각자 다른 위상으로 **둥둥 떠다녔다**(float-card 6s).
+ * 조용한 날에도 화면이 쉬지 않았고, 다섯 벌의 같은 구조가 나란히 서서
+ * 어느 것을 봐야 하는지 알 수 없었다.
+ *
+ * 지금은 한 줄만 보인다 — 이름 · 인원 · 지금 무엇을 하는가. 자세한 것은
+ * 고른 다음에 나온다. 흔들림도 뺐다: 움직임은 **실제로 뭔가 일어날 때**
+ * 만 써야 뜻이 있다(일하는 부서의 점이 그 역할을 한다). */
 .am-card {
   position: relative;
   background: var(--glass-bg);
   border: 1px solid var(--glass-border);
-  border-radius: 16px;
-  padding: 18px 16px 14px;
+  border-radius: 14px;
   display: flex;
   flex-direction: column;
-  align-items: center;
-  gap: 8px;
-  text-align: center;
+  text-align: left;
   backdrop-filter: blur(12px);
-  transition-property: var(--t-ui); transition-duration: 0.3s;
+  transition-property: var(--t-ui); transition-duration: 0.2s;
   overflow: hidden;
-  animation: float-card 6s ease-in-out infinite;
-}
-.am-card:nth-child(2) { animation-delay: 0.5s; }
-.am-card:nth-child(3) { animation-delay: 1s; }
-.am-card:nth-child(4) { animation-delay: 1.5s; }
-.am-card:nth-child(5) { animation-delay: 2s; }
-@keyframes float-card {
-  0%, 100% { transform: translateY(0); }
-  50%       { transform: translateY(-4px); }
 }
 .am-card:hover {
   border-color: var(--card-border, rgba(255,255,255,0.2));
-  transform: translateY(-6px) !important;
-  animation-play-state: paused;
-  box-shadow: 0 12px 40px rgba(0,0,0,0.3), 0 0 30px color-mix(in srgb, var(--card-color, var(--primary)) 15%, transparent);
 }
 .am-card-active {
   border-color: var(--card-border, var(--primary));
 }
+/* 펼친 카드는 그 자리에서 한 행을 다 쓴다. 다섯 칸짜리 열 안에서
+   펼치면 팀원 칩과 지시 입력칸이 들어갈 폭이 없다. */
+.am-card-open {
+  grid-column: 1 / -1;
+}
+
+/* 접힌 줄 — 카드 전체가 누르는 곳이다 */
+.am-card-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 12px 14px;
+  background: none;
+  border: none;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+}
+.am-card-head:hover { background: rgba(255,255,255,0.03); }
+.am-card-ico {
+  flex-shrink: 0;
+  width: 34px; height: 34px;
+  border-radius: 10px;
+  border: 1px solid;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 17px;
+}
+.am-card-headtext {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+  flex: 1;
+}
+.am-card-line {
+  font-size: 11px;
+  color: var(--muted);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.am-card-live {
+  flex-shrink: 0;
+  width: 7px; height: 7px; border-radius: 50%;
+  animation: pulse-live 1.5s infinite;
+}
+.am-card-caret {
+  flex-shrink: 0;
+  font-size: 11px;
+  color: var(--muted2);
+  transition: transform 0.2s;
+}
+.am-card-caret.on { transform: rotate(180deg); }
+
+/* 펼친 다음 ── */
+.am-card-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 14px 14px;
+  border-top: 1px solid var(--glass-border);
+}
+
+/* 이 부서에 지시 */
+.am-card-say {
+  display: flex;
+  gap: 6px;
+  margin-top: 2px;
+}
+.am-say-input {
+  flex: 1;
+  min-width: 0;
+  padding: 7px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--glass-border);
+  background: var(--bg2);
+  color: var(--text);
+  font-size: 12.5px;
+}
+.am-say-input:focus { outline: none; border-color: var(--card-color, var(--primary)); }
+.am-say-send {
+  flex-shrink: 0;
+  padding: 7px 14px;
+  border-radius: 8px;
+  border: none;
+  color: #04121a;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.am-say-send:disabled { opacity: 0.35; cursor: default; }
 
 .am-card-glow {
   position: absolute;
@@ -2160,26 +2249,6 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
   border-radius: 50%;
   opacity: 0.12;
   filter: blur(24px);
-}
-.am-card-avatar {
-  width: 72px; height: 72px;
-  border-radius: 50%;
-  border: 2px solid;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  position: relative;
-  flex-shrink: 0;
-}
-.am-card-status-badge {
-  position: absolute;
-  bottom: -4px;
-  font-size: 10px;
-  font-weight: 700;
-  padding: 2px 6px;
-  border-radius: 6px;
-  letter-spacing: 0.05em;
-  white-space: nowrap;
 }
 .am-card-name {
   font-size: 13px;
@@ -2200,25 +2269,6 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
   margin: 0;
 }
 
-/* 에이전트 칩 */
-.am-agent-chips {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
-  gap: 4px;
-  width: 100%;
-}
-.am-agent-chip {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  padding: 2px 8px;
-  border-radius: 12px;
-  border: 1px solid;
-  font-size: 10px;
-  font-weight: 500;
-  white-space: nowrap;
-}
 .am-chip-live {
   width: 5px; height: 5px; border-radius: 50%;
   animation: pulse-live 1.5s infinite;
@@ -2229,86 +2279,7 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
   font-style: italic;
 }
 
-/* 카드 푸터 */
-.am-card-footer {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  width: 100%;
-  margin-top: 4px;
-  padding-top: 8px;
-  border-top: 1px solid var(--glass-border);
-}
-.am-card-count {
-  font-size: 12px;
-  font-weight: 700;
-}
-.am-card-action {
-  background: none;
-  border: none;
-  font-size: 11px;
-  font-weight: 600;
-  cursor: pointer;
-  padding: 0;
-  transition: opacity 0.2s;
-}
-.am-card-action:hover { opacity: 0.7; }
 
-/* 하단 패널 */
-.am-bottom {
-  display: grid;
-  grid-template-columns: 1fr 280px;
-  gap: 14px;
-  flex: 1;
-  min-height: 0;
-}
-@media (max-width: 900px) {
-  .am-bottom {
-    grid-template-columns: 1fr;
-    /* 좁은 화면에선 로그와 성능 패널이 세로로 쌓인다. 그런데 `flex: 1` 을
-       그대로 두면 둘이 남은 높이를 나눠 갖느라 성능 패널이 패딩만 남고
-       34px 로 눌린다 — 게이지 다섯 개가 그려지는데 보이지 않았다(실측).
-       내용만큼 자라게 두고 페이지가 스크롤하게 한다. */
-    flex: none;
-    min-height: auto;
-    grid-auto-rows: min-content;
-  }
-  /* 로그는 내버려 두면 수백 줄이 그대로 늘어나 성능 패널을 화면 밖으로
-     민다. 로그에 천장을 주고 그 안에서 스크롤하게 한다.
-     바깥 규칙의 `min-height: 440px` 이 max-height 를 이기므로 둘 다 누르고,
-     이 블록이 그 규칙보다 위에 있어 같은 특정도로는 지므로 부모를 하나
-     얹어 이긴다. */
-  .am-bottom .am-log-panel { min-height: 0; max-height: 320px; }
-}
-
-/* 로그 패널 */
-.am-log-panel {
-  background: var(--glass-bg);
-  border: 1px solid var(--glass-border);
-  border-radius: 16px;
-  backdrop-filter: blur(12px);
-  overflow: hidden;
-  display: flex;
-  flex-direction: column;
-  min-height: 440px;
-}
-.am-log-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 10px 14px;
-  border-bottom: 1px solid var(--glass-border);
-  background: var(--glass-hi);
-}
-.am-log-title {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--text);
-}
-.am-log-node {
-  font-size: 10px;
-  color: var(--secondary);
-}
 .am-log-body {
   flex: 1;
   min-height: 0;
@@ -2354,39 +2325,6 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 .am-log-msg   { flex: 1 1 auto; min-width: 0; color: var(--muted);
                 overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-/* 성능 패널 */
-.am-perf-panel {
-  background: var(--glass-bg);
-  border: 1px solid var(--glass-border);
-  border-radius: 16px;
-  backdrop-filter: blur(12px);
-  padding: 16px;
-  position: relative;
-  overflow: hidden;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-.am-perf-glow {
-  position: absolute;
-  top: -20px; left: -20px;
-  width: 100px; height: 100px;
-  background: var(--primary);
-  border-radius: 50%;
-  opacity: 0.08;
-  filter: blur(30px);
-}
-.am-perf-title {
-  font-size: 13px;
-  font-weight: 700;
-  color: var(--text);
-  margin: 0;
-}
-.am-perf-sub {
-  font-size: 11px;
-  color: var(--muted);
-  margin: 0;
-}
 .am-perf-bars { display: flex; flex-direction: column; gap: 10px; }
 .am-bar-header {
   display: flex;
@@ -6930,3 +6868,181 @@ button.pj-deliv-item[aria-expanded="true"] { background: var(--glass-hi); border
   font-size: 12px;
   line-height: 1.5;
 }
+
+
+/* ═══════════════════════════════════════════════════════
+   에이전트 탭 — 사무실을 합친 뒤에 새로 쓰는 것들
+   ═══════════════════════════════════════════════════════ */
+
+/* 머리의 「사무실 보기」. 배지와 같은 모양이지만 누르는 것이라
+   테두리가 또렷하다 — 누를 수 있는 것은 누를 수 있게 보여야 한다. */
+.am-office-btn {
+  padding: 7px 14px;
+  border-radius: 20px;
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  backdrop-filter: blur(8px);
+  transition-property: var(--t-ui); transition-duration: 0.2s;
+}
+.am-office-btn:hover { color: var(--text); border-color: rgba(255,255,255,0.22); }
+.am-office-btn.on {
+  color: var(--secondary);
+  border-color: color-mix(in srgb, var(--secondary) 45%, transparent);
+  background: color-mix(in srgb, var(--secondary) 10%, transparent);
+}
+
+/* 디스크 경고 배지. 접힌 성능 섹션을 대신해 **늘 보이는** 한 줄이다. */
+.am-badge-warn {
+  cursor: pointer;
+  color: #FBBF24;
+  border-color: rgba(251,191,36,0.35);
+  background: rgba(251,191,36,0.08);
+  font-weight: 600;
+}
+
+/* 픽셀 사무실 — 접었다 펴는 칸.
+   `.am-root` 는 스크롤하는 세로 flex 다. 높이를 못 박지 않으면 안의
+   캔버스가 절대배치라 0px 로 접힌다. */
+.am-office {
+  display: flex;
+  flex-direction: column;
+  flex: none;
+  height: min(58vh, 520px);
+}
+.am-office .ov-pixel-panel { margin: 0; }
+.am-office-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: var(--muted2);
+  font-size: 12.5px;
+}
+
+/* 주고받은 말 */
+.am-talk {
+  display: flex;
+  flex-direction: column;
+  flex: none;
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  border-radius: 16px;
+  backdrop-filter: blur(12px);
+  overflow: hidden;
+}
+.am-talk-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--glass-border);
+  background: var(--glass-hi);
+  flex-wrap: wrap;
+}
+.am-talk-go {
+  background: none;
+  border: none;
+  color: var(--secondary);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 4px 2px;
+  white-space: nowrap;
+}
+.am-talk-go:hover { text-decoration: underline; }
+.am-talk-body {
+  min-height: 200px;
+  max-height: 420px;
+  overflow-y: auto;
+  padding: 10px 12px;
+}
+.am-talk-body::-webkit-scrollbar { width: 3px; }
+.am-talk-body::-webkit-scrollbar-thumb { background: var(--muted2); border-radius: 2px; }
+/* 운영 피드는 로그 규칙을 그대로 쓰지만 높이는 여기 것을 따른다
+   (클래스 둘이라 `.am-log-body` 의 520px 를 이긴다). */
+.am-talk-body.am-log-body { max-height: 420px; padding: 10px 12px; }
+
+/* 무엇을 걸러 보고 있는지 적어 두는 줄.
+   걸러 놓은 것을 잊으면 "대화가 없다" 로 읽힌다. */
+.am-filter-note {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 10px 12px 0;
+  padding: 6px 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(148,163,184,0.18);
+  background: rgba(148,163,184,0.07);
+  color: rgba(203,213,225,0.9);
+  font-size: 12px;
+}
+.am-filter-clear {
+  margin-left: auto;
+  background: none;
+  border: none;
+  color: var(--secondary);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 0;
+}
+.am-filter-clear:hover { text-decoration: underline; }
+
+/* 클러스터 성능 — 접는 섹션.
+   숫자 다섯 줄이 늘 펼쳐져 있을 이유가 없다. 접힌 머리줄에 요약을
+   적어 두고, 경고는 접혀 있어도 내보낸다. */
+.am-perf-sec {
+  display: flex;
+  flex-direction: column;
+  flex: none;
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  border-radius: 16px;
+  backdrop-filter: blur(12px);
+  overflow: hidden;
+}
+.am-perf-toggle {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 11px 14px;
+  background: none;
+  border: none;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}
+.am-perf-toggle:hover { background: rgba(255,255,255,0.03); }
+.am-perf-peek {
+  margin-left: auto;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--muted);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.am-perf-sec .am-perf-bars {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 4px 14px 14px;
+}
+.am-perf-sec .am-disk-warn { margin: 0 14px 12px; }
+
+/* 펼친 카드는 한 행을 다 쓰므로(954px 실측) 팀원을 세로로 쌓으면 이름
+   11px 옆에 빈 칸이 900px 남는다. 가로로 흘려 보낸다. */
+.am-card-open .am-team-list {
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.am-card-open .am-team-member-wrap { flex: 0 1 230px; min-width: 180px; }
+.am-card-open .am-card-say { max-width: 620px; }
