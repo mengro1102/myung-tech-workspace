@@ -130,10 +130,19 @@ export function loadOfficeAssets(): Promise<OfficeAssets> {
       Promise.all([0, 1, 2].map(i => loadImage(`${BASE}/carpets/carpet_${i}.png`))),
     ]);
 
+    // 매니페스트 25개는 빌드 때 한 파일로 묶어 둔다(scripts/bundle-furniture-manifests.mjs).
+    // 묶인 것이 없으면 — 매니페스트를 새로 넣고 아직 안 묶었을 때 — ID 별로 받는다.
+    // PNG 54장은 어느 쪽이든 그대로다. 줄이는 것은 JSON 왕복 24번이다.
+    const bundled: Record<string, ManifestNode> | null =
+      await fetch(`${BASE}/furniture/manifests.json`)
+        .then(r => (r.ok ? r.json() : null))
+        .catch(() => null);
+
     const furniture = new Map<string, FurnSprite>();
     await Promise.all(FURNITURE_IDS.map(async id => {
       const dir = `${BASE}/furniture/${id}`;
-      const manifest: ManifestNode = await fetch(`${dir}/manifest.json`).then(r => r.json());
+      const manifest: ManifestNode = bundled?.[id]
+        ?? await fetch(`${dir}/manifest.json`).then(r => r.json());
       // 단일 스프라이트는 파일명이 매니페스트에 없다 — id 와 같다.
       if (manifest.type === 'asset' && !manifest.file) manifest.file = `${manifest.id}.png`;
       const leaves: ManifestNode[] = [];

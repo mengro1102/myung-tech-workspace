@@ -12,7 +12,10 @@
     "electron": "NODE_ENV=development electron .",
     "electron:build": "npm run build && electron-builder",
     "generate-sprites": "node scripts/generate-sprites.mjs",
-    "init-v1": "node scripts/init-v1.mjs"
+    "init-v1": "node scripts/init-v1.mjs",
+    "bundle-manifests": "node scripts/bundle-furniture-manifests.mjs",
+    "predev": "npm run bundle-manifests",
+    "prebuild": "npm run bundle-manifests"
   },
   "dependencies": {
     "@fontsource/inter": "^5.3.0",

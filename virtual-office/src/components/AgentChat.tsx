@@ -35,29 +35,51 @@ function stamp(at: number): string {
        + `${p(d.getHours())}:${p(d.getMinutes())}`;
 }
 
-export default function AgentChat({ entries, showProject = false, emptyText }: {
+export default function AgentChat({ entries, showProject = false, emptyText, max = 40 }: {
   entries: DialogueEntry[];
   /** 여러 프로젝트가 섞여 있을 때 어느 프로젝트의 말인지 보인다 */
   showProject?: boolean;
   emptyText?: string;
+  /** 한 번에 그리는 최대 줄 수. 넘치면 최근 것만 그리고 버튼을 둔다. */
+  max?: number;
 }) {
   const [open, setOpen] = useState<Record<string, boolean>>({});
+  const [all, setAll] = useState(false);
 
   if (entries.length === 0) {
     return <div className="ac-empty">{emptyText ?? '아직 오간 말이 없습니다.'}</div>;
   }
 
+  /* 오래된 것이 위, 최근 것이 아래다(목록을 받는 쪽이 아래로 스크롤한다).
+   * 그래서 자를 때는 **꼬리**를 남긴다 — 활동 피드와 반대다.
+   *
+   * key 에 쓰는 i 는 **자르기 전 전체 배열에서의 자리**다. 잘린 배열의 인덱스로
+   * 만들면 새 말이 한 줄 들어올 때마다 start 가 1 밀려 모든 key 가 바뀐다.
+   * 그러면 React 가 전부 다시 그리고, 펼쳐 둔 '전문 보기'(open 이 key 로 기억한다)가
+   * 접힌다. 절대 위치는 새 말이 들어와도 그대로다. */
+  const start = all ? 0 : Math.max(0, entries.length - max);
+  const hidden = start;
+
   let lastProject = '';
   return (
     <div className="ac-list">
-      {entries.map((e, i) => {
+      {hidden > 0 && (
+        <button className="ac-more-btn" onClick={() => setAll(true)}>
+          이전 {hidden}건 보기
+        </button>
+      )}
+      {entries.slice(start).map((e, j) => {
+        const i = start + j;
         const key = `${e.at}-${e.from}-${i}`;
         const k = KIND[e.kind] ?? KIND.say;
         const color = deptColors[e.from_dept] ?? '#94a3b8';
         const self = e.from === e.to;
         const expandable = !!e.detail && e.detail.trim() !== e.text.trim();
         const isOpen = !!open[key];
-        const projHeader = showProject && e.project_id && e.project_id !== lastProject;
+        // j===0 은 잘린 뒤의 첫 줄이다. 앞이 잘려 lastProject 를 모르므로
+        // 어느 프로젝트 말인지 반드시 보여 준다.
+        const projHeader = showProject && !!e.project_id
+          && (j === 0 || e.project_id !== lastProject);
         if (showProject && e.project_id) lastProject = e.project_id;
         return (
           <div key={key}>

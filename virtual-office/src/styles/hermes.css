@@ -4241,6 +4241,16 @@ button.ac-bubble:hover { border-color: rgba(139,92,246,0.4); }
   display: block; margin-top: 4px; font-size: 10.5px; font-weight: 600;
   color: var(--primary); opacity: 0.85;
 }
+/* 오래된 말은 접어 둔다 — 대화가 길어지면 최근 40줄만 그린다(AgentChat max).
+   누르면 전부 펼친다. */
+.ac-more-btn {
+  align-self: center; background: none; border: 1px dashed var(--border);
+  border-radius: 999px; padding: 4px 12px; cursor: pointer;
+  font: inherit; font-size: 10.5px; font-weight: 600; color: var(--muted);
+  transition-property: var(--t-ui); transition-duration: 0.15s;
+}
+.ac-more-btn:hover { color: var(--primary); border-color: var(--primary); }
+
 .pj-dialogue { max-height: 460px; overflow-y: auto; padding-right: 4px; }
 
 /* ── 산출물 펼쳐 읽기 ──────────────────────────────────────────────────────
