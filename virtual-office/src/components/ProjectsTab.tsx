@@ -38,6 +38,7 @@ import PlanEditor from './PlanEditor';
 import ReviewHistory from './ReviewHistory';
 import { Markdown } from './GuideModal';
 import AgentChat from './AgentChat';
+import Section from './Section';
 
 const STATUS_LABEL: Record<ProjectStatus, string> = {
   intake:            '접수',
@@ -207,63 +208,55 @@ export default function ProjectsTab({ focusId, onFocused, group = 'all', onGroup
     void api.getProject(id).then(d => { if (d?.project) setDetail(d.project); });
   }
 
-  return (
-    <div className="pj-wrap">
-      {/* ── 목록 ── */}
-      <section className="pj-list">
-        {/* 예전 제목은 "진행 중인 프로젝트" 였는데 목록에는 완료·중단·취소가
-            다 들어 있었다. 셋 다 3건이면 "3건이 돌고 있다" 로 읽힌다. */}
-        <h2 className="pj-h">
-          프로젝트
-          {rows.length > 0 && <span className="pj-count">{rows.length}</span>}
-          {/* 두 가지 건수를 나눠 센다. "진행 중" 과 "나를 기다리는 중" 은
-              성격이 다르다 — 뒤엣것은 내가 움직이지 않으면 영원히 그대로다.
-              같은 줄에 섞으면 급한 쪽이 묻힌다. */}
-          {(() => {
-            const live = rows.filter(r => r.status === 'running'
-              || r.status === 'intake' || r.status === 'planning').length;
-            const waits = rows.filter(r => r.status === 'awaiting_approval'
-              || r.status === 'paused').length;
-            return (
-              <>
-                <span className={`pj-pill work${live ? '' : ' idle'}`}>
-                  {live ? `작업 중 ${live}` : '작업 중 없음'}
-                </span>
-                {waits > 0 && (
-                  <span className="pj-pill wait">응답 대기 {waits}</span>
-                )}
-              </>
-            );
-          })()}
-        </h2>
+  /** 돌고 있는 것과 나를 기다리는 것. 머리글에서 쓴다 — 셈을 JSX 안에서
+   *  하면 머리글이 읽히지 않는다. */
+  const live = rows.filter(r => r.status === 'running'
+    || r.status === 'intake' || r.status === 'planning').length;
+  const waits = rows.filter(r => r.status === 'awaiting_approval'
+    || r.status === 'paused').length;
 
-        {/* 걸러 보기 + 고르기. KPI 숫자를 눌러도 같은 필터가 걸린다. */}
-        <div className="pj-tools">
-          <div className="pj-filters" role="group" aria-label="상태로 걸러 보기">
-            {(['all', 'live', 'done', 'stopped'] as PjGroup[]).map(g => (
-              <button key={g} aria-pressed={group === g}
-                      className={`pj-filter ${group === g ? 'on' : ''}`}
-                      onClick={() => onGroup?.(g)}>
-                {GROUP_LABEL[g]} <span>{counts[g]}</span>
-              </button>
-            ))}
-          </div>
-          {rows.length > 0 && (selecting ? (
-            <div className="pj-selbar">
-              <button className="pj-btn" onClick={() => setSel(allOn
-                ? new Set() : new Set(shown.map(r => r.id)))}>
-                {allOn ? '선택 해제' : `전체 선택 (${shown.length})`}
-              </button>
-              <button className="pj-btn pj-btn-danger" disabled={busy || !visibleSel.length}
-                      onClick={() => void toTrash()}>
-                🗑 휴지통으로{visibleSel.length ? ` (${visibleSel.length})` : ''}
-              </button>
-              <button className="pj-btn" onClick={stopSelecting}>취소</button>
-            </div>
-          ) : (
-            <button className="pj-btn pj-sel-on" onClick={() => setSelecting(true)}>선택</button>
+  return (
+    <Section
+      className="pj-wrap"
+      icon="🚀" title="프로젝트"
+      /* 예전 제목은 "진행 중인 프로젝트" 였는데 목록에는 완료·중단·취소가
+         다 들어 있었다. 셋 다 3건이면 "3건이 돌고 있다" 로 읽힌다.
+         두 가지 건수를 나눠 센다 — "진행 중" 과 "나를 기다리는 중" 은
+         성격이 다르다. 뒤엣것은 내가 움직이지 않으면 영원히 그대로다. */
+      count={<>
+        {rows.length > 0 && <span className="u-num">{rows.length}</span>}
+        <span className={`u-pill work${live ? '' : ' idle'}`}>
+          {live ? `작업 중 ${live}` : '작업 중 없음'}
+        </span>
+        {waits > 0 && <span className="u-pill wait">응답 대기 {waits}</span>}
+      </>}
+      /* 걸러 보기 + 고르기. KPI 숫자를 눌러도 같은 필터가 걸린다. */
+      actions={<>
+        <div className="u-seg" role="group" aria-label="상태로 걸러 보기">
+          {(['all', 'live', 'done', 'stopped'] as PjGroup[]).map(g => (
+            <button key={g} aria-pressed={group === g}
+                    className={`u-chip ${group === g ? 'on' : ''}`}
+                    onClick={() => onGroup?.(g)}>
+              {GROUP_LABEL[g]} <span className="u-chip-n">{counts[g]}</span>
+            </button>
           ))}
         </div>
+        {rows.length > 0 && (selecting ? (
+          <>
+            <button className="u-btn" onClick={() => setSel(allOn
+              ? new Set() : new Set(shown.map(r => r.id)))}>
+              {allOn ? '선택 해제' : `전체 선택 (${shown.length})`}
+            </button>
+            <button className="u-btn danger" disabled={busy || !visibleSel.length}
+                    onClick={() => void toTrash()}>
+              🗑 휴지통으로{visibleSel.length ? ` (${visibleSel.length})` : ''}
+            </button>
+            <button className="u-btn" onClick={stopSelecting}>취소</button>
+          </>
+        ) : (
+          <button className="u-btn" onClick={() => setSelecting(true)}>선택</button>
+        ))}
+      </>}>
 
         <TrashUndoBar undo={undo} onRestored={() => void refresh()} />
 
@@ -279,6 +272,7 @@ export default function ProjectsTab({ focusId, onFocused, group = 'all', onGroup
           <div className="pj-empty">「{GROUP_LABEL[group]}」 인 프로젝트가 없습니다.</div>
         )}
 
+        <div className="pj-list">
         {shown.map(p => {
           const open = openId === p.id;
           const needsMe = p.status === 'awaiting_approval' || p.status === 'paused';
@@ -316,8 +310,15 @@ export default function ProjectsTab({ focusId, onFocused, group = 'all', onGroup
 
               {/* 지금 걸려 있는 지시는 접혀 있어도 보인다. 보이지 않으면
                   "왜 계획과 다르게 가지?" 를 설명할 수 없게 된다. */}
+              {/* 접혀 있을 때는 **세 줄까지만.** 지시문은 보통 서너 문장이
+                  넘는데, 1,276px 폭에 11.5px 로 깔면 한 줄이 140자가 된다 —
+                  목록이 글 벽으로 변하고 카드 제목이 안 보인다.
+                  카드를 펼치면 전문이 나온다. */}
               {p.steer && (
-                <p className="pj-steer-on">↪ 지시: {p.steer}</p>
+                <div className={`pj-steer-on ${open ? '' : 'clamp'}`}>
+                  <span className="pj-steer-tag">지시</span>
+                  <p>{p.steer}</p>
+                </div>
               )}
 
               {needsMe && (
@@ -398,8 +399,8 @@ export default function ProjectsTab({ focusId, onFocused, group = 'all', onGroup
             </article>
           );
         })}
-      </section>
-    </div>
+        </div>
+    </Section>
   );
 }
 

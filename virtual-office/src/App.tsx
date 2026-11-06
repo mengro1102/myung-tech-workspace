@@ -1387,7 +1387,6 @@ function MainScreen() {
 
           {/* 결재함 + 진행 중인 프로젝트. 칸반은 태스크 큐만 보므로
               프로젝트 탭에서 시킨 일은 여기서만 보인다. */}
-          <div id="pj-sec-approvals" />
           <Suspense fallback={<div className="ceo-appr-empty">결재함 불러오는 중…</div>}>
             <ApprovalBox
               open={approvalOpen}
@@ -1413,7 +1412,6 @@ function MainScreen() {
 
             현황판(칸반)은 뺐다. 같은 프로젝트를 상태별로 한 번 더 그렸을
             뿐이고, 그 일은 KPI 숫자 → 프로젝트 필터가 한다. */}
-        <div id="pj-sec-projects" />
         <Suspense fallback={<div className="hs-lazy-fallback">
           <div className="hs-lazy-spinner" /> 프로젝트 불러오는 중…
         </div>}>

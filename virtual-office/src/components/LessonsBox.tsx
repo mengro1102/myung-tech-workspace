@@ -18,6 +18,7 @@
  */
 import { useCallback, useEffect, useState } from 'react';
 import { TRASH_EVENT } from './trashEvent';
+import Section from './Section';
 import { api, type LessonRow } from '../api';
 
 interface Props {
@@ -46,21 +47,15 @@ export default function LessonsBox({ open, onToggle }: Props) {
   }, [load]);
 
   return (
-    <div className="ceo-lessons">
-      <div className="ceo-sec-head">
-        <button className="ceo-sec-title as-toggle" onClick={onToggle}
-          title={open ? '접기' : '펼치기'}>
-          <span className="ceo-sec-chev">{open ? '▾' : '▸'}</span>
-          🧠 배운 것
-          <span className="ceo-sec-count">
-            {rows.length
-              ? `${rows.length}건 · 반려 ${stats?.rejections ?? 0}회분`
-              : '아직 없음'}
-          </span>
-        </button>
-      </div>
+    <Section
+      className="ceo-lessons"
+      icon="🧠" title="배운 것"
+      count={rows.length
+        ? `${rows.length}건 · 반려 ${stats?.rejections ?? 0}회분`
+        : '아직 없음'}
+      open={open} onToggle={onToggle}>
 
-      {open && (rows.length === 0 ? (
+      {(rows.length === 0 ? (
         <div className="ceo-appr-empty">
           아직 없습니다. 프로젝트가 진전 없이 멈추면 그때 반려 사유를 묶어
           여기 남기고, <strong>같은 주제를 다시 시킬 때 계획에 넣습니다.</strong>
@@ -116,6 +111,6 @@ export default function LessonsBox({ open, onToggle }: Props) {
           </div>
         </>
       ))}
-    </div>
+    </Section>
   );
 }

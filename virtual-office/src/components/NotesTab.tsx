@@ -25,6 +25,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api, type StoreItem, type TrashKind } from '../api';
 import { Markdown } from './GuideModal';
 import { useTrashUndo, TrashUndoBar } from './TrashBox';
+import Section from './Section';
 
 interface Note extends StoreItem {
   title?: string;
@@ -229,48 +230,47 @@ export default function NotesTab() {
   const allOn = visibleKeys.length > 0 && picked.length === visibleKeys.length;
 
   return (
-    <div className="hs-body nt-wrap">
-      <div className="nt-head">
-        {/* '노트' 라고 부르던 것. 그 이름은 탭 이름이었고, 그 탭은 이제
-            없다(지식베이스가 그 자리에 있다). 여기 쌓이는 것은 사람만 할
-            수 있는 일이라, 바로 위 결재함과 같은 성질로 읽히게 바꾼다. */}
-        <div className="nt-title">
-          📝 노트
-          <span className="nt-count">{left ? `남은 것 ${left}` : '다 끝냈습니다'}</span>
-        </div>
-        {selecting ? (
-          <div className="nt-actions">
-            <button className="nt-filter" onClick={() => setSel(allOn
-              ? new Set() : new Set(visibleKeys))}>
-              {allOn ? '선택 해제' : `전체 선택 (${visibleKeys.length})`}
-            </button>
-            <button className="nt-danger" disabled={!picked.length}
-                    onClick={() => void toTrash(picked, picked.length > 1)}>
-              🗑 휴지통으로{picked.length ? ` (${picked.length})` : ''}
-            </button>
-            <button className="nt-filter" onClick={() => { setSelecting(false); setSel(new Set()); }}>
-              취소
-            </button>
-          </div>
-        ) : (
-          <div className="nt-actions">
+    <Section
+      className="hs-body nt-wrap"
+      /* '노트' 라고 부르던 것. 그 이름은 탭 이름이었고, 그 탭은 이제
+         없다(지식베이스가 그 자리에 있다). 여기 쌓이는 것은 사람만 할
+         수 있는 일이라, 바로 위 결재함과 같은 성질로 읽히게 둔다. */
+      icon="📝" title="노트"
+      count={left ? `남은 것 ${left}` : '다 끝냈습니다'}
+      actions={selecting ? (
+        <>
+          <button className="u-btn" onClick={() => setSel(allOn
+            ? new Set() : new Set(visibleKeys))}>
+            {allOn ? '선택 해제' : `전체 선택 (${visibleKeys.length})`}
+          </button>
+          <button className="u-btn danger" disabled={!picked.length}
+                  onClick={() => void toTrash(picked, picked.length > 1)}>
+            🗑 휴지통으로{picked.length ? ` (${picked.length})` : ''}
+          </button>
+          <button className="u-btn" onClick={() => { setSelecting(false); setSel(new Set()); }}>
+            취소
+          </button>
+        </>
+      ) : (
+        <>
+          <div className="u-seg" role="group" aria-label="노트 걸러 보기">
             {(['todo', 'done', 'all'] as Filter[]).map(f => (
-              <button key={f}
-                className={`nt-filter ${filter === f ? 'on' : ''}`}
+              <button key={f} aria-pressed={filter === f}
+                className={`u-chip ${filter === f ? 'on' : ''}`}
                 onClick={() => setFilter(f)}>
                 {f === 'todo' ? '남은 것' : f === 'done' ? '끝남' : '전체'}
               </button>
             ))}
-            {notes.some(n => n.done) && (
-              <button className="nt-clear" onClick={clearDone}>끝난 것 비우기</button>
-            )}
-            {visibleKeys.length > 0 && (
-              <button className="nt-filter" onClick={() => setSelecting(true)}>선택</button>
-            )}
-            <button className="nt-new" onClick={startNew}>+ 새 노트</button>
           </div>
-        )}
-      </div>
+          {notes.some(n => n.done) && (
+            <button className="u-btn" onClick={clearDone}>끝난 것 비우기</button>
+          )}
+          {visibleKeys.length > 0 && (
+            <button className="u-btn" onClick={() => setSelecting(true)}>선택</button>
+          )}
+          <button className="u-btn primary" onClick={startNew}>+ 새 노트</button>
+        </>
+      )}>
 
       <TrashUndoBar undo={undo} onRestored={() => void load()} />
 
@@ -387,7 +387,7 @@ export default function NotesTab() {
           ))}
         </div>
       )}
-    </div>
+    </Section>
   );
 }
 

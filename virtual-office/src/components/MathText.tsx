@@ -73,10 +73,38 @@ function useKatex(): Katex | null {
   return ready;
 }
 
-function html(k: Katex, tex: string, display: boolean): string {
+/** KaTeX 에 없는, 그러나 arXiv 논문이 **실제로 쓰는** 명령들.
+ *
+ *  전수로 재 봤다(위키 문서 1,581건 · 수식 5,651개). 빨갛게 깨지던 56개 중
+ *  **48개가 우리 글의 오타가 아니라 KaTeX 가 모르는 정상 LaTeX** 였다.
+ *  논문 원문을 고칠 수는 없다 — 남의 글이고, 고치면 원문이 아니다.
+ *  그래서 **그릴 때만** 아는 말로 바꿔 준다.
+ *
+ *  모양은 일부 포기한다(작은대문자는 KaTeX 에 없다). 글자가 보이는 쪽이
+ *  빨간 코드 덩어리보다 낫다.
+ */
+const MACROS: Record<string, string> = {
+  '\\textsc': '\\textrm{#1}',   // BERT_BASE 의 작은대문자 — 모양만 포기한다
+  '\\mbox': '\\text{#1}',
+  '\\qed': '\\blacksquare',
+};
+
+/** 매크로로는 못 고치는 것 — 선택 인자가 붙어 KaTeX 문법에 안 맞는 꼴. */
+function normalize(tex: string): string {
+  return tex
+    // `\color[rgb]{0.23,0.67,0.35}` — KaTeX 는 색 모델 인자를 모른다.
+    // 색은 장식이라 뜻을 지지 않는다. 버리고 글자를 살린다.
+    .replace(/\\color\[[a-zA-Z]+\]\{[^}]*\}/g, '')
+    // `\begin{array}[]{cc}` · `[t]` — 세로 정렬 선택 인자를 KaTeX 가 못 읽는다.
+    .replace(/(\\begin\{(?:array|tabular)\})\[[^\]]*\]/g, '$1');
+}
+
+function html(k: Katex, rawTex: string, display: boolean): string {
+  const tex = normalize(rawTex);
   try {
     return k.renderToString(tex, {
       displayMode: display,
+      macros: MACROS,
       // 수식 하나가 깨졌다고 문서 전체가 안 보이면 안 된다. KaTeX 가 그
       // 토막만 빨갛게 표시하고 넘어간다.
       throwOnError: false,

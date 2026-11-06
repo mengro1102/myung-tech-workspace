@@ -16,6 +16,7 @@ import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react'
 import { pollInterval } from '../poll';
 import type { AskContext } from './AskHermes';
 import AssistantFace from './AssistantFace';
+import Section from './Section';
 import { api, type ApprovalRow, type ProjectRow } from '../api';
 
 /* 이 결재를 승인해도 되는지 그 자리에서 맹비서에게 묻는다. 열 때까지
@@ -303,32 +304,35 @@ export default function ApprovalBox({ open: boxOpen, onToggle, focusId,
   }
 
   return (
-    <div className="ceo-approval">
-      <div className="ceo-sec-head">
-        <button className="ceo-sec-title as-toggle" onClick={onToggle}
-          title={boxOpen ? '접기' : '펼치기'}>
-          <span className="ceo-sec-chev">{boxOpen ? '▾' : '▸'}</span>
-          🗂️ 결재함
-          <span className="ceo-sec-count">{pending.length ? `${pending.length}건 대기` : '비어 있음'}</span>
-        </button>
-        <span className="ceo-sec-spacer" />
+    <Section
+      className="ceo-approval"
+      /* KPI 줄에서 「결재 N건」 을 누르면 여기로 스크롤한다. 전에는 빈
+         `<div>` 닻을 따로 뒀는데, 그 빈 칸이 flex 자식이라 구역 간격을
+         한 칸 더 먹고 있었다(실측 32px). 닻은 구역 자신이 가진다. */
+      id="pj-sec-approvals"
+      icon="🗂️" title="결재함"
+      count={pending.length ? `${pending.length}건 대기` : '비어 있음'}
+      open={boxOpen} onToggle={onToggle}
+      actions={<>
         {boxOpen && batchable.length > 1 && (
-          <button className="ceo-appr-btn batch" disabled={batching}
+          <button className="u-btn primary" disabled={batching}
             onClick={() => void approveAll()}
             title="바깥으로 나가는 안건은 제외됩니다">
             {batching ? '처리 중…' : `되돌릴 수 있는 ${batchable.length}건 일괄 승인`}
           </button>
         )}
+        {/* 접혀 있을 때도 보여야 한다 — 결재함을 닫아 둔 사장님이
+            "지금 뭔가 돌고 있나" 를 여기서 읽는다. */}
         {live.length > 0 && (
-          <button className="ceo-sec-link" onClick={onOpenProjects}>
+          <button className="u-btn" onClick={onOpenProjects}>
             프로젝트 {live.length}건 진행 중 →
           </button>
         )}
-      </div>
+      </>}>
 
-      {boxOpen && msg && <div className="ceo-appr-msg" onClick={() => setMsg('')}>{msg} — 눌러서 닫기</div>}
+      {msg && <div className="ceo-appr-msg" onClick={() => setMsg('')}>{msg} — 눌러서 닫기</div>}
 
-      {boxOpen && (pending.length === 0 ? (
+      {(pending.length === 0 ? (
         <div className="ceo-appr-empty">
           대기 중인 결재가 없습니다. 에이전트가 파일을 쓰거나 바깥으로 나가는 일을
           하려 할 때 여기로 올립니다.
@@ -460,7 +464,7 @@ export default function ApprovalBox({ open: boxOpen, onToggle, focusId,
         </Suspense>
       )}
 
-      {boxOpen && recent.length > 0 && (
+      {recent.length > 0 && (
         <div className="ceo-appr-audit">
           <b>최근 처리</b>
           {recent.map(r => (
@@ -485,6 +489,6 @@ export default function ApprovalBox({ open: boxOpen, onToggle, focusId,
       {/* 진행 중인 프로젝트 목록은 아래 현황판이 맡는다. 여기서 또 보여
           주면 같은 것을 두 번 그리게 되고, 둘이 어긋나면 어느 쪽이 맞는지
           알 수 없게 된다. */}
-    </div>
+    </Section>
   );
 }

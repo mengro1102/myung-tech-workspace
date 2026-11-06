@@ -21,6 +21,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { pollInterval } from '../poll';
 import { api, type TrashItem } from '../api';
 import { TRASH_EVENT, trashChanged } from './trashEvent';
+import Section from './Section';
 
 export { TRASH_EVENT, trashChanged };
 
@@ -121,15 +122,14 @@ export default function TrashBox() {
   }
 
   return (
-    <section className={`tr-box ${open ? 'open' : ''}`} aria-label="휴지통">
-      <button className="tr-head" onClick={() => setOpen(o => !o)} aria-expanded={open}>
-        <span className="tr-title">🗑 휴지통</span>
-        <span className="tr-count">{items.length ? `${items.length}건` : '비어 있음'}</span>
-        <span className="tr-hint">영구 삭제는 맹비서 <code>/휴지통</code></span>
-        <span className={`pj-caret ${open ? 'open' : ''}`} aria-hidden="true">▾</span>
-      </button>
+    <Section
+      className={`tr-box ${open ? 'open' : ''}`}
+      icon="🗑" title="휴지통"
+      count={items.length ? `${items.length}건` : '비어 있음'}
+      hint={<>영구 삭제는 맹비서 <code>/휴지통</code></>}
+      open={open} onToggle={() => setOpen(o => !o)}>
 
-      {open && (
+      {(
         <div className="tr-body">
           <p className="tr-note">
             여기서 지운 것은 <strong>되살릴 수 있습니다.</strong> 영구 삭제는 맹비서에게
@@ -187,6 +187,6 @@ export default function TrashBox() {
           )}
         </div>
       )}
-    </section>
+    </Section>
   );
 }
