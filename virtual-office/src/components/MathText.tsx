@@ -87,6 +87,9 @@ const MACROS: Record<string, string> = {
   '\\textsc': '\\textrm{#1}',   // BERT_BASE 의 작은대문자 — 모양만 포기한다
   '\\mbox': '\\text{#1}',
   '\\qed': '\\blacksquare',
+  // 논문이 `\newcommand` 로 직접 만든 명령. ar5iv 가 풀어 주지 않는다.
+  // 뜻은 본문에 적혀 있다 — 스키마의 어휘화(lexicalization) 함수다.
+  '\\Lex': '\\mathrm{Lex}',
 };
 
 /** 매크로로는 못 고치는 것 — 선택 인자가 붙어 KaTeX 문법에 안 맞는 꼴. */

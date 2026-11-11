@@ -31,6 +31,7 @@ const MACROS = {
   '\\textsc': '\\textrm{#1}',
   '\\mbox': '\\text{#1}',
   '\\qed': '\\blacksquare',
+  '\\Lex': '\\mathrm{Lex}',
 };
 const normalize = t => t
   .replace(/\\color\[[a-zA-Z]+\]\{[^}]*\}/g, '')
@@ -86,7 +87,9 @@ if (!existsSync(KB)) {
 
 assertInSync();
 
-const INLINE = /\$([^$\n]+)\$/g;
+// `\$` 는 글자 그대로의 달러다(논문이 금액을 적을 때 쓴다) — 닫는 울타리로
+// 보지 않는다. 화면(KnowledgeTab.tsx)과 같은 규칙이라야 검사가 의미 있다.
+const INLINE = /\$((?:[^$\n\\]|\\.)+)\$/g;
 const rows = [];
 let total = 0;
 
