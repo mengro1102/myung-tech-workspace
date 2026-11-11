@@ -464,6 +464,26 @@ def recent_relevant(query: str, *, pool: int = 40, limit: int = 4) -> dict[str, 
 
 # 임베딩 몫으로 떼어 두는 자리 수. 어휘가 잡음으로 전부를 채우는 것을 막는다.
 EMBED_SEATS = 2
+# 임베딩 씨앗의 점수 배율.
+#
+# 전에는 `0.001 * v` 였다. 자리는 떼어 줬지만 **점수를 0.0005 로 만들어**
+# 최종 정렬에서 맨 뒤로 보냈다. 자리를 주고 순위를 뺏으면 안 준 것과 같다.
+#
+# 실측(2026-11-11) "대기질 모델 배출량 어떻게 만드나":
+#   어휘  5.50 강화학습-최신-트렌드-서베이…  ← "모델" 한 글자가 맞은 것
+#         2.50 slm-vs-llm · faq-context-window · faq-self-attention
+#   임베딩 0.0006 smoke-model  ← **정답인데 꼴찌**
+# 그 결과 limit=8 에 어휘 4건과 그 1홉 이웃 4건이 차고, 정답은 잘렸다.
+# bge-m3 자체는 멀쩡했다 — smoke-model 0.551 · cleanair 0.546 · cmaq 0.475.
+#
+# 3.0 을 쓰면 유사도 0.55 → 1.65 가 된다. 이 값은 **직접 어휘 매치(2.5)보다
+# 낮고, 어휘 매치의 1홉 이웃(≈0.45×부모=1.12)보다 높다.** 순서가 이렇게 된다:
+#   직접 어휘 매치  >  임베딩 직접 매치  >  어휘 매치의 이웃
+# 저자가 "이 문서의 주제" 라고 선언한 것(슬러그·제목)이 여전히 가장 강하고,
+# 뜻으로 찾은 것이 남의 이웃보다는 앞선다.
+EMBED_WEIGHT = 3.0
+# 이번 조회에서 임베딩이 뽑은 씨앗. 근거 문구를 바르게 적기 위한 것뿐이다.
+_LAST_EMBED_SEEDS: set[str] = set()
 # 최신성 질의일 때 최신 논문에 떼어 주는 자리 수.
 RECENT_SEATS = 3
 
@@ -548,7 +568,12 @@ def _seed_scores(query: str, *, max_seeds: int = 6) -> dict[str, float]:
             got += 1
 
     take(recent, RECENT_SEATS)                               # 새로 나온 것
-    take([(sl, 0.001 * v) for sl, v in emb], EMBED_SEATS)    # 뜻이 가까운 것
+    before = set(out)
+    take([(sl, EMBED_WEIGHT * v) for sl, v in emb], EMBED_SEATS)  # 뜻이 가까운 것
+    # 어느 씨앗이 **뜻으로** 뽑힌 것인지 기록해 둔다. 근거를 "질의어 직접
+    # 매치" 라고 적으면 거짓이다 — 질의어는 그 문서에 없다.
+    _LAST_EMBED_SEEDS.clear()
+    _LAST_EMBED_SEEDS.update(set(out) - before)
     take(lex, cap)                                           # 나머지는 어휘가
     return out
 
@@ -693,7 +718,9 @@ def retrieve(
     for slug, meta in _experience_nodes().items():
         nodes.setdefault(slug, meta)
     scored: dict[str, dict] = {
-        slug: {"score": base, "hop": 0, "why": "질의어 직접 매치"}
+        slug: {"score": base, "hop": 0,
+               "why": ("뜻이 가까움 (임베딩)" if slug in _LAST_EMBED_SEEDS
+                       else "질의어 직접 매치")}
         for slug, base in seeds.items()
     }
 
