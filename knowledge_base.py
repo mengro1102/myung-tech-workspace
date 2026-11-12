@@ -286,6 +286,13 @@ def graph_available() -> bool:
     return bool(load_graph().get("nodes"))
 
 
+# 한국어 조사. 줄기를 덧붙일 때만 쓴다 — 원 토큰은 그대로 남긴다.
+_JOSA1 = "이가은는을를의에와과도로만랑야며"
+_JOSA2 = ("에서", "에게", "으로", "이란", "라는", "처럼", "부터", "까지",
+          "보다", "한테", "에는", "에도", "으론", "이라", "라고", "에선")
+_HANGUL_ONLY = __import__("re").compile(r"^[가-힣]+$")
+
+
 def _tokenize(text: str) -> list[str]:
     import re
     raw = [t for t in re.split(r"[^0-9A-Za-z가-힣_.-]+", text.lower()) if t]
@@ -300,6 +307,17 @@ def _tokenize(text: str) -> list[str]:
         for part in re.findall(r"[가-힣]{2,}", t):
             if part != t:
                 out.append(part)
+        # 한글 토큰은 **조사째로** 들어온다. 라틴 덩어리는 위에서 떼어냈지만
+        # 순한글은 통째라 'ppo와' 는 잡히고 '서튼이' 는 안 잡혔다 —
+        # 2026-11-12 "서튼이 누구야" 0건, "역전파가 뭐야" 0건. 별칭 '서튼' ·
+        # '역전파' 가 바로 옆에 있는데도다. 줄기를 **덧붙인다**(바꾸지 않는다).
+        if len(t) >= 3 and _HANGUL_ONLY.match(t):
+            for suf in _JOSA2:
+                if len(t) >= 4 and t.endswith(suf):
+                    out.append(t[:-2]); break
+            else:
+                if t[-1] in _JOSA1:
+                    out.append(t[:-1])
     return out
 
 
@@ -380,12 +398,27 @@ def _score_meta(terms: list[str], slug: str, meta: dict) -> float:
     """slug·제목·태그 매칭 점수. 그래프 노드와 축적본에 같은 자를 댄다."""
     title = str(meta.get("title") or slug).lower()
     tags = " ".join(str(t) for t in (meta.get("tags") or [])).lower()
+    # 별칭은 **저자가 선언한 또 하나의 이름**이다. 제목과 같은 자로 잰다.
+    #
+    # 2026-11-12 에 큐레이션 91건에 한국어 이름을 달았다(add_korean_aliases.py).
+    # 그 전에는 "서튼이 누구야" 가 0건, "트랜스포머 어텐션" 이 1홉 이웃으로만
+    # 걸렸다 — 코퍼스가 영어라 한국어 질의어가 닿을 자리가 없었기 때문이다.
+    # 여기서 별칭을 보지 않으면 그 작업이 카탈로그에만 남고 검색에는 안 쓰인다.
+    aliases = " ".join(str(a) for a in (meta.get("aliases") or [])).lower()
     slug_l = slug.lower()
+    # 긴 이름 안에서 두 글자가 맞은 것은 **약한 증거**다. 경험 노드의 slug 는
+    # 한글 문장 통째라 60자가 넘고(`강화학습-최신-트렌드-서베이-월드-모델-및-로봇-…`),
+    # 그 안에 '모델' 이 들어 있다는 이유로 대기질 질의에서 1등을 했다. 짧고
+    # 정확한 이름이 이겨야 한다 — 24자까지는 제값, 그보다 길면 비례해 깎는다.
+    dilute = min(1.0, 24.0 / max(len(slug_l), 1))
+    t_dilute = min(1.0, 40.0 / max(len(title), 1))
     s = 0.0
     for t in terms:
         if t in slug_l:
-            s += 3.0
+            s += 3.0 * dilute
         if t in title:
+            s += 2.5 * t_dilute
+        if t in aliases:
             s += 2.5
         if t in tags:
             s += 1.5
@@ -488,15 +521,81 @@ _LAST_EMBED_SEEDS: set[str] = set()
 RECENT_SEATS = 3
 
 
+# ── 뜻을 지지 않는 낱말 ────────────────────────────────────────────────
+#
+# 2026-11-12 실측. "대기질 모델에서 배출량 자료는 어떻게 만드나" 를 물으면
+# 1·2등이 `faq-context-window` · `faq-self-attention` 이었다(2.50점, "질의어
+# 직접 매치"). 맞은 낱말은 **"어떻게"** 하나다 — 그 두 문서의 제목이
+# "…는 어떻게 동작하나요?" 이기 때문이다. 정답인 `smoke-model` 은 임베딩이
+# 1.65 로 올려 두었는데 그 아래로 밀렸다.
+#
+# 두 가지로 막는다.
+#
+#   ① 아래 목록 — 의문사·조사·군말. 코퍼스에 드물게 나타나므로 빈도로는
+#      못 잡는다. 한국어 질의에서 이것들이 제목에 우연히 맞는 일이 잦다.
+#   ② 문서빈도(_informative) — "모델" 처럼 **흔해서** 못 가르는 낱말.
+#      목록으로 관리하면 분야가 바뀔 때마다 손봐야 하므로 재서 버린다.
+_STOPWORDS = {
+    # 의문·요청
+    "어떻게", "무엇", "뭐야", "뭔가", "뭐지", "어떤", "어느", "언제", "어디",
+    "누구", "알려줘", "알려", "설명", "정리", "요약", "말해", "보여줘", "찾아",
+    "what", "how", "why", "when", "where", "who", "which", "tell", "explain",
+    # 관계·군말
+    "차이", "비교", "관련", "대해", "대한", "이란", "라는", "하는", "되는",
+    "있는", "없는", "같은", "위해", "통해", "경우", "때문", "정도", "부분",
+    "내용", "자료", "방법", "사용", "그리고", "하지만", "그런", "이런",
+    "하나", "한다", "된다", "이다", "에서", "으로", "에게", "까지",
+    "논문", "문서", "개념", "정보",
+    "the", "and", "for", "with", "about", "into", "from", "this", "that",
+    "does", "can", "are", "was", "were", "has", "have", "its", "but",
+}
+
+# 이 비율보다 많은 노드에 나타나면 가르는 힘이 없다고 본다.
+# 920 노드 기준 15% = 138건. "모델" 이 여기 걸린다.
+_DF_MAX_RATIO = 0.15
+
+
+def _informative(terms: list[str]) -> list[str]:
+    """제목·태그·slug 에 너무 흔히 나오는 낱말을 떨군다.
+
+    전부 떨어지면 **원래 목록을 그대로 돌려준다** — 거르다가 질의를 통째로
+    없애면 "자료 0건" 이 되는데, 그것은 거름의 목적이 아니다.
+    """
+    # 경험 노드(지난 세션 보고서)도 같이 센다. 이쪽 slug 는 한글 문장이라
+    # '논문'·'개념' 같은 말이 수십 번 나온다 — 2026-11-12 "힌턴 논문" 질의에서
+    # `지식베이스-논문-노드-품질-점검…` 류 셋이 5.50 으로 1~3등을 먹고 정작
+    # `hinton-geoffrey`(2.50)가 밀렸다. 맞은 낱말은 "논문" 하나였다.
+    nodes = dict(load_graph().get("nodes") or {})
+    nodes.update(_experience_nodes())
+    if not nodes:
+        return terms
+    limit = max(8, int(len(nodes) * _DF_MAX_RATIO))
+    df: dict[str, int] = {t: 0 for t in terms}
+    for slug, meta in nodes.items():
+        # 점수를 매길 때 보는 자리(_score_meta)와 **같은 자리**를 세야 한다.
+        # 별칭을 빼고 세면 '모델' 의 빈도가 낮게 나와 걸러지지 않고, 그 결과
+        # 대기질 질의에 `slm-vs-llm`(별칭 "소형 대 대형 언어모델")이 올라왔다.
+        hay = (slug + " " + str(meta.get("title") or "") + " "
+               + " ".join(str(x) for x in (meta.get("aliases") or [])) + " "
+               + " ".join(str(x) for x in (meta.get("tags") or []))).lower()
+        for t in terms:
+            if t in hay:
+                df[t] += 1
+    kept = [t for t in terms if df[t] <= limit]
+    return kept or terms
+
+
 def _seed_scores(query: str, *, max_seeds: int = 6) -> dict[str, float]:
     """어휘 매칭으로 씨앗 노드와 점수를 뽑는다.
 
     slug·제목 매치를 태그보다 높게 본다 — 저자가 그 문서의 주제라고 선언한 것이라서다.
     제목·태그로 아무것도 못 찾을 때만 본문까지 훑는다(느리므로 폴백).
     """
-    terms = [t for t in _tokenize(query) if len(t) >= 2]
+    terms = [t for t in _tokenize(query)
+             if len(t) >= 2 and t not in _STOPWORDS]
     if not terms:
         return {}
+    terms = _informative(terms)
     scores: dict[str, float] = {}
 
     # 사람이 정리한 노드 + 우리가 쌓은 경험. 같은 자로 잰다.
