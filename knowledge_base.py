@@ -263,6 +263,31 @@ _HOP_DECAY = 0.45
 # 본문 [[wikilink]] 보다 신뢰도가 높다.
 _EDGE_WEIGHT = {"related": 1.0, "wikilink": 0.8}
 
+# ── 수렴 가점: 그래프가 **실제로 기여하게** 만드는 값 ────────────────────
+#
+# 종전에는 한 노드에 여러 씨앗에서 도달해도 `max()` 로 가장 큰 하나만
+# 남겼다. 그러면 **공통 이웃이라는 사실이 버려진다** — 그리고 그것이
+# 그래프를 쓰는 거의 유일한 이유다.
+#
+# 2026-11-13 실측, "서튼과 바르토가 같이 쓴 책":
+#
+#     씨앗   sutton-richard 6.50 · barto-andrew 1.49 · sutton-rl-book 1.37
+#     결과   1위 sutton-richard, 2~8위는 전부 sutton-richard 의 1홉 이웃(2.92 동점)
+#            정답 sutton-rl-book 은 2.34(authored-by 경로) 로 9위 → limit 밖
+#
+# 답은 그래프에 있었다. `sutton-rl-book` 은 **두 사람 모두의 1홉 이웃**이고
+# 씨앗에도 들어 있었다. 세 방향에서 증거가 모였는데, max() 가 그중 하나만
+# 보고 나머지를 버렸다. 한 씨앗에서만 온 이웃 일곱 개가 그것을 밀어냈다.
+#
+# 그래서 합산한다 — 가장 큰 기여를 그대로 두고, **나머지 기여를 가중해
+# 더한다.** 여러 곳에서 모인 것이 한 곳에서 온 것보다 앞서야 한다.
+# 전부 더하면(β=1.0) 이웃이 많은 허브가 질의와 무관하게 올라오므로 0.5다.
+#
+# 이것이 RAG 와 GraphRAG 의 실질적 차이다. 저장 구조도 홉수도 아니다 —
+# **그래프 구조가 점수에 들어가는가**다. 홉수를 1→3 으로 늘려 봐도
+# 평가 25건에서 좋아진 것 0건·나빠진 것 0건이었다(같은 날 실측).
+_CONVERGE = 0.5
+
 
 def load_graph(*, force: bool = False) -> dict:
     """graph/graph.json 로드 (mtime 기반 캐시). 없으면 빈 그래프를 돌려준다."""
@@ -926,25 +951,35 @@ def retrieve(
     # 축적본은 그래프에 없으므로 여기서 합쳐 둔다. 엣지가 없어 늘 0홉이다.
     for slug, meta in _experience_nodes().items():
         nodes.setdefault(slug, meta)
-    scored: dict[str, dict] = {
-        slug: {"score": base, "hop": 0,
-               "why": ("뜻이 가까움 (임베딩)" if slug in _LAST_EMBED_SEEDS
-                       else "질의어 직접 매치")}
-        for slug, base in seeds.items()
-    }
+    # 기여를 **모은다**. 버리지 않는다 — 여러 방향에서 모인 증거가
+    # 한 방향에서 온 증거보다 강하다(위 _CONVERGE 주석 참고).
+    # 항목: (점수, 사유, 홉)
+    contrib: dict[str, list[tuple[float, str, int]]] = {}
+    for slug, base in seeds.items():
+        why = ("뜻이 가까움 (임베딩)" if slug in _LAST_EMBED_SEEDS
+               else "질의어 직접 매치")
+        contrib.setdefault(slug, []).append((base, why, 0))
 
     if graph_available() and hops > 0:
         for slug, base in seeds.items():
             src_title = (nodes.get(slug) or {}).get("title", slug)
             for nb, (depth, kind) in neighbors(slug, hops=hops).items():
                 gain = base * (_HOP_DECAY ** depth) * _EDGE_WEIGHT.get(kind, 0.8)
-                cur = scored.get(nb)
-                if cur is None or gain > cur["score"]:
-                    scored[nb] = {
-                        "score": gain,
-                        "hop": depth,
-                        "why": f"{src_title} 에서 {depth}홉 ({kind})",
-                    }
+                contrib.setdefault(nb, []).append(
+                    (gain, f"{src_title} 에서 {depth}홉 ({kind})", depth))
+
+    scored: dict[str, dict] = {}
+    for slug, items in contrib.items():
+        items.sort(key=lambda it: -it[0])
+        top_score, top_why, top_hop = items[0]
+        extra = sum(s for s, _, _ in items[1:])
+        why = top_why
+        if len(items) > 1:
+            # 몇 곳에서 모였는지 **밝힌다.** 근거 추적이 이 시스템의 핵심이고,
+            # "왜 이것이 1위인가" 가 설명되지 않으면 사람이 믿지 못한다.
+            why = f"{top_why} + {len(items) - 1}곳에서 더 수렴"
+        scored[slug] = {"score": top_score + _CONVERGE * extra,
+                        "hop": top_hop, "why": why}
 
     out: list[dict] = []
     for slug, info in sorted(scored.items(), key=lambda kv: -kv[1]["score"])[:limit]:

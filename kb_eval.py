@@ -96,6 +96,29 @@ CASES: list[tuple[str, tuple[str, ...], str]] = [
     ("RAG 구조", ("rag", "retrieval-augmented-generation"), ""),
     ("환각 줄이는 방법", ("hallucination", "llm-evaluation"), ""),
     ("양자화", ("quantization",), ""),
+    # ── 다중 홉: 답이 **그래프 구조에만** 있는 질의 ───────────────────
+    #
+    # 위의 25건은 전부 단일 홉이다 — 한 문서 안에 답이 있고, 어휘나
+    # 임베딩으로 그 문서를 집으면 끝난다. 그래서 그 25건으로는 **그래프가
+    # 기여하는지 알 수 없다.** 실제로 2026-11-13 에 홉수를 1→3 으로
+    # 바꿔 봤더니 좋아진 것 0건·나빠진 것 0건이었다. 그래프를 들고
+    # 있으면서 그것이 아무 일도 하지 않는지조차 모르고 있었던 것이다.
+    #
+    # 아래 다섯 건은 답이 **두 노드의 관계**에 있다. 한 문서를 집어서는
+    # 답할 수 없고, 그래프를 타야 한다. GraphRAG 가 RAG 보다 나은지는
+    # 이 종류의 질의에서만 드러난다 — 그래서 측정 대상에 넣는다.
+    ("서튼과 바르토가 같이 쓴 책", ("sutton-rl-book",),
+     "multi-hop: 두 저자의 공통 이웃"),
+    ("힌턴이 쓴 논문이 다루는 개념", ("distillation", "backpropagation", "bert"),
+     "multi-hop: authored-by → related"),
+    ("트랜스포머 논문을 인용한 자율주행 연구",
+     ("bev-perception", "end-to-end-autonomous-driving", "autonomous-driving"),
+     "multi-hop: cites 역방향"),
+    ("PPO 와 대조되는 방법", ("grpo", "grpo-vs-ppo"),
+     "multi-hop: contrasts-with"),
+    ("온톨로지를 자동으로 만드는 논문과 그 상위 개념",
+     ("rag", "knowledge-graph-construction"),
+     "multi-hop: source → related"),
 ]
 
 
@@ -147,8 +170,26 @@ def main() -> int:
     hit3 = sum(1 for r in ranks if 1 <= r <= 3) / n
     mrr = sum((1.0 / r) if r else 0.0 for r in ranks) / n
     print()
-    print(f"  hit@1 {hit1*100:5.1f}%   hit@3 {hit3*100:5.1f}%   MRR {mrr:.3f}"
-          f"   질의당 {sum(times)/n*1000:.0f} ms")
+
+    # ── 집단을 나눠 찍는다 ───────────────────────────────────────────
+    #
+    # 단일 홉 25건과 다중 홉 5건을 합쳐서 한 숫자로 내면 서로를 가린다.
+    # 다중 홉이 전부 망가져도 25건이 떠받쳐 합계는 괜찮아 보이고, 그러면
+    # **그래프가 아무 일도 안 하는 것을 모른 채** 지나간다. 실제로
+    # 2026-11-13 까지 그 상태였다.
+    groups = {"단일 홉": [], "다중 홉": []}
+    for (q, gold, note), r in zip(cases, ranks):
+        groups["다중 홉" if note.startswith("multi-hop") else "단일 홉"].append(r)
+    for name, rs in groups.items():
+        if not rs:
+            continue
+        m = len(rs)
+        print(f"  {name} {m:2d}건   hit@1 {sum(1 for r in rs if r == 1)/m*100:5.1f}%"
+              f"   hit@3 {sum(1 for r in rs if 1 <= r <= 3)/m*100:5.1f}%"
+              f"   MRR {sum((1.0/r) if r else 0.0 for r in rs)/m:.3f}")
+    print("  " + "-" * 60)
+    print(f"  전체   {n:2d}건   hit@1 {hit1*100:5.1f}%   hit@3 {hit3*100:5.1f}%"
+          f"   MRR {mrr:.3f}   질의당 {sum(times)/n*1000:.0f} ms")
 
     if misses:
         print(f"\n  놓친 질의 {len(misses)}건:")
@@ -157,6 +198,17 @@ def main() -> int:
             print(f"      정답 {'/'.join(gold)}  ←  나온 것 {', '.join(top3) or '(0건)'}")
 
     score = {"hit1": round(hit1, 4), "hit3": round(hit3, 4), "mrr": round(mrr, 4), "n": n}
+    # 집단별로도 저장한다. 합계만 보면 한쪽이 망가져도 다른 쪽이 떠받쳐
+    # 통과한다 — 그것을 막는 것이 이 기준선의 존재 이유다.
+    for _nm, _rs in groups.items():
+        if not _rs:
+            continue
+        _m = len(_rs)
+        score[_nm] = {
+            "n": _m,
+            "hit3": round(sum(1 for r in _rs if 1 <= r <= 3) / _m, 4),
+            "mrr": round(sum((1.0 / r) if r else 0.0 for r in _rs) / _m, 4),
+        }
 
     if a.baseline:
         BASELINE.write_text(json.dumps(score, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -170,12 +222,30 @@ def main() -> int:
         base = json.loads(BASELINE.read_text(encoding="utf-8"))
         print(f"\n  기준선: hit@3 {base['hit3']*100:.1f}% · MRR {base['mrr']:.3f}"
               f"  (질의 {base['n']}건)")
+        for _nm in ("단일 홉", "다중 홉"):
+            _b = base.get(_nm)
+            if _b:
+                print(f"          {_nm} {_b['n']}건 hit@3 {_b['hit3']*100:.1f}%"
+                      f" · MRR {_b['mrr']:.3f}")
         # hit@3 이 주 지표. 질의를 더 넣어 n 이 달라졌으면 비율로만 본다.
         worse = []
         if hit3 < base["hit3"] - 1e-9:
             worse.append(f"hit@3 {base['hit3']*100:.1f}% → {hit3*100:.1f}%")
         if mrr < base["mrr"] - 0.005:
             worse.append(f"MRR {base['mrr']:.3f} → {mrr:.3f}")
+        # 집단별도 본다. 다중 홉 5건이 전부 망가져도 단일 홉 25건이
+        # 떠받쳐 합계는 2%p 밖에 안 움직인다 — 그러면 통과해 버린다.
+        for _nm, _rs in groups.items():
+            _b = base.get(_nm)
+            if not _b or not _rs:
+                continue
+            _m = len(_rs)
+            _h3 = sum(1 for r in _rs if 1 <= r <= 3) / _m
+            _mr = sum((1.0 / r) if r else 0.0 for r in _rs) / _m
+            if _h3 < _b["hit3"] - 1e-9:
+                worse.append(f"{_nm} hit@3 {_b['hit3']*100:.1f}% → {_h3*100:.1f}%")
+            if _mr < _b["mrr"] - 0.005:
+                worse.append(f"{_nm} MRR {_b['mrr']:.3f} → {_mr:.3f}")
         if worse:
             print("\n  🔴 나빠졌습니다: " + " · ".join(worse))
             print("  고친 것을 되돌리거나, 왜 이 손실이 받아들일 만한지 적으십시오.")
