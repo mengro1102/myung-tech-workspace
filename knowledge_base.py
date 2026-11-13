@@ -394,8 +394,12 @@ def _experience_nodes() -> dict[str, dict]:
     return out
 
 
-def _score_meta(terms: list[str], slug: str, meta: dict) -> float:
-    """slug·제목·태그 매칭 점수. 그래프 노드와 축적본에 같은 자를 댄다."""
+def _score_meta(terms: list[str], slug: str, meta: dict, query: str = "") -> float:
+    """slug·제목·태그 매칭 점수. 그래프 노드와 축적본에 같은 자를 댄다.
+
+    `query` 는 **원문 질의**다. 선언된 이름이 여러 낱말로 된 구(句)일 때
+    토큰 단위 비교로는 못 잡기 때문에 따로 받는다 — 아래 '구 일치' 참조.
+    """
     title = str(meta.get("title") or slug).lower()
     tags = " ".join(str(t) for t in (meta.get("tags") or [])).lower()
     # 별칭은 **저자가 선언한 또 하나의 이름**이다. 제목과 같은 자로 잰다.
@@ -405,6 +409,7 @@ def _score_meta(terms: list[str], slug: str, meta: dict) -> float:
     # 걸렸다 — 코퍼스가 영어라 한국어 질의어가 닿을 자리가 없었기 때문이다.
     # 여기서 별칭을 보지 않으면 그 작업이 카탈로그에만 남고 검색에는 안 쓰인다.
     aliases = " ".join(str(a) for a in (meta.get("aliases") or [])).lower()
+    alias_set = {str(a).strip().lower() for a in (meta.get("aliases") or [])}
     slug_l = slug.lower()
     # 긴 이름 안에서 두 글자가 맞은 것은 **약한 증거**다. 경험 노드의 slug 는
     # 한글 문장 통째라 60자가 넘고(`강화학습-최신-트렌드-서베이-월드-모델-및-로봇-…`),
@@ -420,8 +425,76 @@ def _score_meta(terms: list[str], slug: str, meta: dict) -> float:
             s += 2.5 * t_dilute
         if t in aliases:
             s += 2.5
+        # ── 선언된 이름과 **정확히** 같은 경우 ────────────────────────
+        #
+        # 부분 일치와 전체 일치는 증거의 세기가 다르다. "강화학습" 이
+        # `concepts/rl` 의 별칭과 **글자 그대로 같다**면, 그것은 긴 보고서
+        # 제목 안에 그 네 글자가 들어 있는 것과 비교할 수 없는 증거다.
+        #
+        # 2026-11-13 실측: "강화학습 기초" 질의에서
+        #     llm-강화학습-학습-위키-및-로드맵-단계별-학습-로드맵   3.30
+        #     rl (별칭 '강화학습')                                2.50
+        # 부분 일치가 전체 일치를 눌렀다. 희석 계수를 더 세게 주는 방법도
+        # 있으나, 그러면 긴 이름이 전부 안 걸리게 되어 반대쪽이 망가진다.
+        # 정확히 같은 것을 **올리는** 쪽이 부작용이 없다.
+        if t in alias_set:
+            s += 4.0
+        if t == slug_l:
+            s += 4.0
         if t in tags:
             s += 1.5
+
+    # ── 경험 노드는 큐레이션 노드와 **동급이 아니다** ────────────────────
+    #
+    # `type: experience` 는 지난 세션에 **AI 가 낸 산출물**이다. 사람이
+    # 검증한 개념 문서와 같은 저울에 올리면 두 가지 이유로 이긴다:
+    # ① slug 와 제목이 한글 문장 통째라서 흔한 말이 많이 들어 있고,
+    # ② 수가 많다(2026-11-13 현재 raw/projects 등 50건 이상).
+    #
+    # 이 때문에 같은 사고가 두 번 났다 — 11-12 "힌턴 논문" 질의에서
+    # `지식베이스-논문-노드-품질-점검…` 류가 1~3등을 먹었고, 같은 날
+    # 대기질 질의에서도 경험 노드가 올라왔다. 희석 계수로 두 번 막았으나
+    # 부분 일치가 쌓이면 다시 넘어온다.
+    #
+    # 지우지는 않는다 — 지난 산출물에는 쓸 내용이 있다. 다만 **둘 다
+    # 걸렸을 때는 검증된 쪽이 먼저 나와야** 한다. 0.65 는 경험 노드가
+    # 단독으로 걸릴 때는 여전히 올라오되, 개념 문서와 맞붙으면 지는 값이다.
+    # ── 구(句) 일치: 선언된 이름이 질의에 통째로 들어 있다 ──────────────
+    #
+    # 별칭은 한 낱말이 아닐 때가 많다 — `llm-agent` 의 별칭은 "LLM 에이전트",
+    # `llm-evaluation` 은 "LLM 평가" 다. 질의 "LLM 에이전트는 무엇을 하나" 의
+    # 토큰은 ['llm', '에이전트는', '에이전트'] 이고, 그중 어느 것도 "llm
+    # 에이전트" 와 **같지 않다.** 그래서 위의 정확 일치 보너스가 안 걸리고,
+    # 2026-11-13 실측에서 정답이 5위에 머물렀다(상위 3위 안에 못 들어옴).
+    #
+    # 질의에 그 이름이 **그대로 적혀 있다**면 토큰이 어떻게 쪼개졌든 강한
+    # 증거다. 세 글자 이상만 본다 — 두 글자는 우연히 들어가기 쉽다.
+    if query:
+        q = " ".join(str(query).lower().split())
+        for a in alias_set:
+            if len(a) >= 3 and a in q:
+                s += 4.0
+                break
+        if len(slug_l) >= 3 and slug_l.replace("-", " ") in q:
+            s += 2.0
+
+    # ── 경험 노드는 큐레이션 노드와 **동급이 아니다** ────────────────────
+    #
+    # `type: experience` 는 지난 세션에 **AI 가 낸 산출물**이다. 사람이
+    # 검증한 개념 문서와 같은 저울에 올리면 두 가지 이유로 이긴다:
+    # ① slug 와 제목이 한글 문장 통째라서 흔한 말이 많이 들어 있고,
+    # ② 수가 많다(2026-11-13 현재 raw/projects 등 50건 이상).
+    #
+    # 이 때문에 같은 사고가 두 번 났다 — 11-12 "힌턴 논문" 질의에서
+    # `지식베이스-논문-노드-품질-점검…` 류가 1~3등을 먹었고, 같은 날
+    # 대기질 질의에서도 경험 노드가 올라왔다. 희석 계수로 두 번 막았으나
+    # 부분 일치가 쌓이면 다시 넘어온다.
+    #
+    # 지우지는 않는다 — 지난 산출물에는 쓸 내용이 있다. 다만 **둘 다
+    # 걸렸을 때는 검증된 쪽이 먼저 나와야** 한다. 0.65 는 경험 노드가
+    # 단독으로 걸릴 때는 여전히 올라오되, 개념 문서와 맞붙으면 지는 값이다.
+    if str(meta.get("type") or "") == "experience":
+        s *= 0.65
     return s
 
 
@@ -591,8 +664,22 @@ def _seed_scores(query: str, *, max_seeds: int = 6) -> dict[str, float]:
     slug·제목 매치를 태그보다 높게 본다 — 저자가 그 문서의 주제라고 선언한 것이라서다.
     제목·태그로 아무것도 못 찾을 때만 본문까지 훑는다(느리므로 폴백).
     """
+    # ── 같은 낱말을 두 번 세지 않는다 ────────────────────────────────
+    #
+    # `_tokenize` 는 조사를 뗀 줄기를 **덧붙여** 돌려주므로 중복이 생긴다.
+    # "작은 모델과 큰 모델 비교" → ['작은', '모델과', '모델', '모델'].
+    # `_score_meta` 가 terms 를 순회하며 더하므로 '모델' 이 **두 배**로
+    # 집계된다. 2026-11-13 실측: 별칭에 '모델' 이 든 `cleanair-model`,
+    # `cmaq-model`, `cmaq-io-architecture` 가 전부 5.00 으로 1~3등을 먹고
+    # 정답 `slm-vs-llm` 이 밀렸다.
+    #
+    # 질의에서 한 낱말을 몇 번 썼는지는 **그 낱말의 중요도가 아니다.**
+    # 사장님이 "모델" 을 두 번 쓴 것은 비교 대상이 둘이기 때문이고,
+    # 그 문서가 두 배로 관련 있다는 뜻이 아니다. 순서는 유지한다.
+    seen: set[str] = set()
     terms = [t for t in _tokenize(query)
-             if len(t) >= 2 and t not in _STOPWORDS]
+             if len(t) >= 2 and t not in _STOPWORDS
+             and not (t in seen or seen.add(t))]
     if not terms:
         return {}
     terms = _informative(terms)
@@ -601,7 +688,7 @@ def _seed_scores(query: str, *, max_seeds: int = 6) -> dict[str, float]:
     # 사람이 정리한 노드 + 우리가 쌓은 경험. 같은 자로 잰다.
     for pool in (load_graph().get("nodes") or {}, _experience_nodes()):
         for slug, meta in pool.items():
-            s = _score_meta(terms, slug, meta)
+            s = _score_meta(terms, slug, meta, query)
             if s:
                 scores[slug] = max(scores.get(slug, 0.0), s)
 
@@ -655,13 +742,36 @@ def _seed_scores(query: str, *, max_seeds: int = 6) -> dict[str, float]:
     cap = max_seeds + (RECENT_SEATS if recent else 0)
     out: dict[str, float] = {}
 
-    def take(items, n: int) -> None:
+    def take(items, n: int, *, lexical: bool = False) -> None:
+        """자리를 n개까지 채운다. 이미 앉은 것은 **자리를 더 쓰지 않되
+        점수는 더 높은 쪽으로 올린다.**
+
+        예전에는 이미 앉아 있으면 `continue` 로 건너뛰었다. 그러면 두 경로가
+        **같이 찾은** 문서가 먼저 들어온 쪽의 점수로 굳는다. 임베딩이 자리를
+        먼저 잡으므로, 어휘가 같은 문서에 16.00 을 줘도 임베딩의 1.70 이
+        남는다 — 그리고 최종 정렬이 점수순이니 **가장 근거가 좋은 문서가
+        가장 아래로 내려간다.**
+
+        2026-11-13 실측, "LLM 에이전트는 무엇을 하나":
+            llm             13.00  (어휘만 — '에이전트' 는 없다)
+            llm-engineering  9.50
+            llm-evaluation   9.50
+            llm-agent        1.70  ← 어휘 16.00 을 버리고 임베딩 값을 쓴 결과
+        정답이 4등 밑으로 밀렸다. 두 경로가 모두 가리킨 것이 가장 확실한데
+        그것이 벌점을 받고 있었다.
+        """
         got = 0
         for item in items:
             if got >= n or len(out) >= cap:
                 break
             slug, val = item if isinstance(item, tuple) else (item, 0.002)
             if slug in out:
+                if val > out[slug]:
+                    out[slug] = val
+                    if lexical:
+                        # 어휘가 이겼다면 질의어가 그 문서에 **실제로 있다**.
+                        # 근거를 "뜻이 가까움" 이라고 적으면 거짓이 된다.
+                        _LAST_EMBED_SEEDS.discard(slug)
                 continue
             out[slug] = val
             got += 1
@@ -673,7 +783,7 @@ def _seed_scores(query: str, *, max_seeds: int = 6) -> dict[str, float]:
     # 매치" 라고 적으면 거짓이다 — 질의어는 그 문서에 없다.
     _LAST_EMBED_SEEDS.clear()
     _LAST_EMBED_SEEDS.update(set(out) - before)
-    take(lex, cap)                                           # 나머지는 어휘가
+    take(lex, cap, lexical=True)                             # 나머지는 어휘가
     return out
 
 
@@ -917,9 +1027,24 @@ def inject(title: str, content: str, *, source_url: str = "", subdir: str = "art
     body = (content or "").strip() + "\n"
     sha = hashlib.sha256(body.encode("utf-8")).hexdigest()
     today = datetime.date.today().isoformat()
+    # 제목을 **따옴표로 감싼다.** 제목에 콜론이 들어가면(사람이 쓰는 제목에는
+    # 자주 들어간다 — "RL Survey: Policy, Imitation, …") YAML 이 그 줄을
+    # 중첩 매핑으로 읽으려다 실패하고, **frontmatter 전체가 파싱되지 않는다.**
+    # 그러면 title·type·tags 가 소비자 쪽에서 통째로 사라진다. 2026-11-13 에
+    # raw/projects/ 5건이 이 상태로 발견되었다. type 도 함께 적는다 —
+    # 없으면 그래프에 타입 미정으로 올라간다(같은 날 raw/articles 5건).
+    def _q(v: str) -> str:
+        return '"%s"' % str(v).replace("\\", "\\\\").replace('"', '\\"')
+
     front = (
-        f"---\ntitle: {title}\nsource_url: {source_url}\n"
-        f"ingested: {today}\nsha256: {sha}\n---\n\n"
+        "---\n"
+        f"title: {_q(title)}\n"
+        "type: article\n"
+        f"source_url: {_q(source_url)}\n"
+        f"created: {today}\n"
+        f"ingested: {today}\n"
+        f"sha256: {sha}\n"
+        "---\n\n"
     )
     path.write_text(front + body, encoding="utf-8")
     return str(path.relative_to(KB_PATH)).replace("\\", "/")
