@@ -492,6 +492,81 @@ def _fmt_time(ts: float | None = None) -> str:
     return time.strftime("%m/%d %H:%M", time.localtime(ts or time.time()))
 
 
+# ── 못 보낸 알림은 **버리지 않는다** ────────────────────────────────────
+#
+# `notify.send` 는 DM → 서버 채널 → 텔레그램 3단으로 떨어진다. 그래도
+# 전부 실패할 수 있다 — 네트워크가 끊겼거나 디스코드가 죽었을 때.
+#
+# 그때 종전 동작은 stderr 에 한 줄 찍고 끝이었다. 그런데 **삭제는 이미
+# 일어났다.** 알림이 사라지면 사장님은 무엇이 휴지통으로 갔는지 영구히
+# 모른다 — 그리고 그것이 남이 지운 것이었다면, 알아챌 유일한 수단이
+# 그 알림이었다.
+#
+# 사장님 규약은 "맹비서가 디스코드로 삭제되었단 이슈 알림을 **반드시**
+# 발송" 이다. '반드시' 를 지키려면 실패를 저장해 다시 보내야 한다.
+#
+# 보관하는 것은 **보낼 문구 그 자체**다. 원본 제목이 거기 들어 있지만,
+# 그것은 이미 사장님께 보내려던 내용이고 받는 사람도 사장님뿐이다.
+# 보내는 데 성공하면 즉시 지운다 — 묘비를 남기지 않는다는 원칙은 그대로다.
+OUTBOX = STORE_DIR / ".trash_outbox.json"
+_OUTBOX_MAX = 50
+
+
+def _outbox_read() -> list:
+    try:
+        v = json.loads(OUTBOX.read_text(encoding="utf-8"))
+        return v if isinstance(v, list) else []
+    except Exception:  # noqa: BLE001
+        return []
+
+
+def _outbox_write(rows: list) -> None:
+    try:
+        OUTBOX.parent.mkdir(parents=True, exist_ok=True)
+        tmp = OUTBOX.with_suffix(".tmp")
+        tmp.write_text(json.dumps(rows[-_OUTBOX_MAX:], ensure_ascii=False),
+                       encoding="utf-8")
+        tmp.replace(OUTBOX)
+    except OSError:
+        pass
+
+
+def _outbox_add(text: str) -> None:
+    rows = _outbox_read()
+    rows.append({"at": time.time(), "text": text})
+    _outbox_write(rows)
+
+
+def flush_outbox() -> tuple[int, int]:
+    """보관해 둔 알림을 다시 보낸다. (보낸 수, 남은 수).
+
+    휴지통 작업이 일어날 때마다 먼저 부르고, `mt_trash.py outbox` 로
+    손으로도 부를 수 있다. 성공한 것만 지우므로 여러 번 불러도 안전하다.
+    """
+    rows = _outbox_read()
+    if not rows:
+        return 0, 0
+    try:
+        import notify
+    except Exception:  # noqa: BLE001
+        return 0, len(rows)
+    left, sent = [], 0
+    for r in rows:
+        txt = str(r.get("text") or "")
+        hours = int((time.time() - float(r.get("at") or 0)) // 3600)
+        head = ("⏳ (늦게 도착한 알림 — %d시간 전 일입니다)\n\n" % hours) if hours >= 1 else ""
+        try:
+            ok = bool(notify.send(head + txt))
+        except Exception:  # noqa: BLE001
+            ok = False
+        if ok:
+            sent += 1
+        else:
+            left.append(r)
+    _outbox_write(left)
+    return sent, len(left)
+
+
 def _flush() -> None:
     global _timer
     with _nlock:
@@ -499,15 +574,27 @@ def _flush() -> None:
         for v in _pending.values():
             v.clear()
         _timer = None
+    # 밀린 것을 먼저 보낸다 — 순서가 뒤집히면 읽는 사람이 헷갈린다.
+    try:
+        flush_outbox()
+    except Exception:  # noqa: BLE001
+        pass
     for kind, rows in batch.items():
         if not rows:
             continue
+        text = notice_text(kind, rows)
+        ok = False
         try:
             import notify
-            notify.send(notice_text(kind, rows))
+            ok = bool(notify.send(text))
         except Exception as exc:  # noqa: BLE001
             # 제목은 로그에 남기지 않는다 — 지운 것의 흔적이 된다.
             print(f"[trash] 알림 실패: {type(exc).__name__}", file=sys.stderr, flush=True)
+        if not ok:
+            _outbox_add(text)
+            print("[trash] 알림을 보내지 못해 보관했습니다 — 다음 기회에 다시 "
+                  "보냅니다 (`python scripts/mt_trash.py outbox` 로 즉시 재시도)",
+                  file=sys.stderr, flush=True)
 
 
 def notice_text(kind: str, rows: list[tuple[str, dict]]) -> str:

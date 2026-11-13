@@ -194,10 +194,36 @@ def cmd_purge(ids: list[str], all_: bool, code: str) -> int:
     return 0
 
 
+def cmd_outbox() -> int:
+    """보내지 못해 보관된 삭제 알림을 다시 보낸다.
+
+    삭제는 이미 일어났으므로 알림이 사라지면 사장님은 무엇이 없어졌는지
+    모른다 — 남이 지운 것이었다면 알아챌 유일한 수단이 그 알림이다.
+    그래서 전 채널이 실패하면 보관하고, 이 명령이 다시 보낸다.
+    """
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "shared_memory"))
+    try:
+        import trash as _trash
+    except Exception as exc:                        # noqa: BLE001
+        print(f"휴지통 모듈을 읽지 못했습니다: {type(exc).__name__}: {exc}")
+        return 1
+    sent, left = _trash.flush_outbox()
+    if not sent and not left:
+        print("보관된 알림이 없습니다. (전부 전달되었습니다)")
+        return 0
+    print(f"다시 보낸 알림 {sent}건 · 아직 남은 것 {left}건")
+    if left:
+        print("디스코드·텔레그램이 모두 닿지 않습니다. 연결을 확인하신 뒤 "
+              "이 명령을 다시 돌리십시오 — 보관본은 지워지지 않습니다.")
+        return 1
+    return 0
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="명테크 휴지통")
     sub = ap.add_subparsers(dest="cmd", required=True)
     sub.add_parser("list", help="휴지통 목록")
+    sub.add_parser("outbox", help="못 보낸 삭제 알림을 다시 보낸다")
     for name in ("restore", "purge"):
         sp = sub.add_parser(name)
         sp.add_argument("ids", nargs="*", help="trs-… 또는 prj-…")
@@ -209,6 +235,8 @@ def main() -> int:
     try:
         if a.cmd == "list":
             return cmd_list()
+        if a.cmd == "outbox":
+            return cmd_outbox()
         if not a.ids and not a.all:
             print("무엇을 할지 id 를 주거나 --all 을 붙이세요.")
             return 2
