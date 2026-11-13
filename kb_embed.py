@@ -183,13 +183,52 @@ def _cache_path(kb_path: Path) -> Path:
     return kb_path / CACHE_NAME
 
 
-def _load_cache(kb_path: Path) -> dict:
+# ── 프로세스 내 캐시 ─────────────────────────────────────────────────
+#
+# JSON 은 **질의마다 다시 파싱된다.** 실측(2026-11-13, 955 × 1024):
+#
+#     파일 크기        21.8 MB
+#     읽기             0.03 초
+#     JSON 파싱        0.60 초      ← 질의당 이것이 매번 붙는다
+#     질의 전체        0.82 초
+#     그중 임베딩 호출 0.07 초
+#     그중 내적        0.00036 초
+#
+# 즉 조회 시간의 **4분의 3이 같은 파일을 다시 파싱하는 데** 쓰인다.
+# 검색이 느린 것이 아니다. 그리고 이 값만 문서 수에 선형으로 자란다 —
+# 1.6만 건이면 10.5 초다(365MB). 벡터DB 가 푼다고 하는 문제가 실은
+# 이것이고, 데몬 없이도 풀린다.
+#
+# 파일이 그대로면 결과도 그대로이므로 프로세스 안에서 한 번만 읽는다.
+# 판정은 (크기, 수정시각) — 내용 해시는 그 자체로 파일을 읽어야 한다.
+_MEM: dict[str, tuple[tuple, dict]] = {}
+
+
+def _stamp(p: Path) -> tuple:
     try:
-        d = json.loads(_cache_path(kb_path).read_text(encoding="utf-8"))
-        return d if isinstance(d, dict) and d.get("model") == MODEL else {"model": MODEL, "docs": {}}
+        st = p.stat()
+        return (st.st_size, st.st_mtime_ns)
+    except OSError:
+        return ()
+
+
+def _load_cache(kb_path: Path) -> dict:
+    p = _cache_path(kb_path)
+    key = str(p)
+    now = _stamp(p)
+    hit = _MEM.get(key)
+    if hit and now and hit[0] == now:
+        return hit[1]
+    try:
+        d = json.loads(p.read_text(encoding="utf-8"))
+        out = d if isinstance(d, dict) and d.get("model") == MODEL \
+            else {"model": MODEL, "docs": {}}
     except Exception:  # noqa: BLE001
         # 모델이 바뀌면 벡터 공간이 달라져 예전 값과 비교할 수 없다.
-        return {"model": MODEL, "docs": {}}
+        out = {"model": MODEL, "docs": {}}
+    if now:
+        _MEM[key] = (now, out)
+    return out
 
 
 def _save_cache(kb_path: Path, cache: dict) -> None:
@@ -198,7 +237,91 @@ def _save_cache(kb_path: Path, cache: dict) -> None:
         tmp.write_text(json.dumps(cache, ensure_ascii=False), encoding="utf-8")
         tmp.replace(_cache_path(kb_path))
     except OSError:
-        pass
+        return
+    _build_matrix(kb_path, cache)
+
+
+# ── 이진 행렬 ────────────────────────────────────────────────────────
+#
+# 프로세스 내 캐시는 **두 번째 질의부터** 듣는다. 크론처럼 한 번 돌고
+# 끝나는 프로세스에는 매번 첫 질의만 있어서 0.6 초가 그대로 붙는다.
+#
+# 실수 하나를 `0.0234375` 같은 **글자열**로 적으면 저장도 크고 읽을 때
+# 파싱이 필요하다. 같은 값을 float32 로 적으면:
+#
+#     JSON       21.8 MB   파싱 0.60 초
+#     float32     3.9 MB   적재 0.0004 초     ← 5.6배 작고 1,500배 빠르다
+#
+# 그래서 JSON 과 **나란히** 행렬 파일을 둔다. JSON 은 그대로 진실의
+# 출처다 — 해시(`d`)가 거기 있고 `sync` 가 그것으로 재생성을 판정한다.
+# 행렬은 조회 전용 파생물이고, 어긋나면 그냥 버리고 JSON 으로 간다.
+# 진실의 출처를 둘로 만들지 않는 것이 요점이다.
+MATRIX_NAME = ".embed_matrix.npy"
+MATRIX_META = ".embed_matrix.json"
+_MAT: dict[str, tuple[tuple, list, object]] = {}
+
+
+def _matrix_paths(kb_path: Path):
+    return kb_path / MATRIX_NAME, kb_path / MATRIX_META
+
+
+def _build_matrix(kb_path: Path, cache: dict) -> bool:
+    """캐시에서 float32 행렬을 뽑아 둔다. numpy 가 없으면 아무것도 안 한다."""
+    try:
+        import numpy as np
+    except ImportError:
+        return False
+    docs = cache.get("docs") or {}
+    slugs = [s for s in sorted(docs) if docs[s].get("v")]
+    if not slugs:
+        return False
+    dim = len(docs[slugs[0]]["v"])
+    slugs = [s for s in slugs if len(docs[s]["v"]) == dim]
+    npy, meta = _matrix_paths(kb_path)
+    try:
+        m = np.asarray([docs[s]["v"] for s in slugs], dtype=np.float32)
+        tmp = npy.with_suffix(".npy.tmp")
+        with open(tmp, "wb") as fh:
+            np.save(fh, m)
+        tmp.replace(npy)
+        meta.write_text(json.dumps(
+            {"model": MODEL, "dim": dim, "slugs": slugs,
+             "source": _stamp(_cache_path(kb_path))},
+            ensure_ascii=False), encoding="utf-8")
+        return True
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _load_matrix(kb_path: Path):
+    """(slugs, 행렬) 또는 (None, None). JSON 과 어긋나면 버린다."""
+    try:
+        import numpy as np
+    except ImportError:
+        return None, None
+    npy, meta = _matrix_paths(kb_path)
+    key = str(npy)
+    src = _stamp(_cache_path(kb_path))
+    hit = _MAT.get(key)
+    if hit and hit[0] == src and src:
+        return hit[1], hit[2]
+    try:
+        info = json.loads(meta.read_text(encoding="utf-8"))
+        if info.get("model") != MODEL:
+            return None, None
+        # 원본 JSON 이 바뀌었으면 이 행렬은 **낡은 것**이다. 조용히 쓰면
+        # 지운 문서가 계속 검색되고 새 문서는 안 걸린다.
+        if tuple(info.get("source") or ()) != tuple(src):
+            return None, None
+        m = np.load(npy, mmap_mode=None)
+        slugs = list(info.get("slugs") or [])
+        if m.ndim != 2 or m.shape[0] != len(slugs):
+            return None, None
+    except Exception:  # noqa: BLE001
+        return None, None
+    if src:
+        _MAT[key] = (src, slugs, m)
+    return slugs, m
 
 
 def sync(kb_path: Path, nodes: dict[str, dict], *, batch: int = 32,
@@ -259,10 +382,37 @@ def rank(kb_path: Path, query: str, *, limit: int = 6,
     모양이다. 부르는 쪽은 어느 쪽이든 어휘 매칭으로 돌아가면 되므로
     구분할 필요가 없다 — 구분하게 만들면 양쪽에서 처리가 갈린다.
     """
+    # ── 빠른 길: 이진 행렬 ───────────────────────────────────────────
+    #
+    # 행렬이 최신이면 JSON 을 **열지 않는다.** 질의 벡터와의 내적은
+    # 행렬 곱 한 번이고, 955 × 1024 에서 0.36 밀리초다. 5만 건이어도
+    # 19 밀리초다 — 이 구간에서 근사 색인(HNSW)은 보탤 것이 없다.
+    slugs, mat = _load_matrix(kb_path)
+    if slugs is not None:
+        qv = embed([query])
+        if not qv:
+            return {}
+        import numpy as np
+        q = np.asarray(_norm(qv[0]), dtype=np.float32)
+        if q.shape[0] != mat.shape[1]:
+            slugs = None            # 모델이 바뀌었다 — 느린 길로 간다
+        else:
+            sims = mat @ q
+            idx = np.nonzero(sims >= min_sim)[0]
+            if idx.size == 0:
+                return {}
+            order = idx[np.argsort(-sims[idx])][:limit]
+            return {slugs[i]: round(float(sims[i]), 4) for i in order}
+
+    # ── 느린 길: JSON (numpy 없음 · 행렬이 낡음 · 모델 교체 직후) ─────
     cache = _load_cache(kb_path)
     docs = {s: d for s, d in (cache.get("docs") or {}).items() if d.get("v")}
     if not docs:
         return {}
+    # 느린 길로 왔다는 것은 행렬이 없거나 낡았다는 뜻이다. 이미 JSON 을
+    # 파싱해 손에 들고 있으니 **여기서 만들어 둔다** — 다음 질의는 빠른
+    # 길로 간다. 따로 명령을 돌려야 빨라진다면 아무도 돌리지 않는다.
+    _build_matrix(kb_path, cache)
     qv = embed([query])
     if not qv:
         return {}
@@ -290,7 +440,23 @@ def stats(kb_path: Path) -> dict:
         "dim": len(docs[withv[0]]["v"]) if withv else 0,
         "min_sim": MIN_SIM,
         "path": str(_cache_path(kb_path)),
+        "matrix": _matrix_state(kb_path),
     }
+
+
+def _matrix_state(kb_path: Path) -> str:
+    """조회가 빠른 길로 가고 있는지 한눈에. 진단용이다."""
+    npy, _ = _matrix_paths(kb_path)
+    try:
+        import numpy  # noqa: F401
+    except ImportError:
+        return "numpy 없음 — 느린 길(JSON 파싱)"
+    slugs, m = _load_matrix(kb_path)
+    if slugs is None:
+        return ("낡음/없음 — 느린 길. 다음 조회나 sync 때 자동 생성"
+                if npy.exists() else "없음 — 다음 조회 때 자동 생성")
+    return "최신 %d×%d float32 · %.1f MB" % (
+        m.shape[0], m.shape[1], npy.stat().st_size / 1e6)
 
 
 if __name__ == "__main__":
